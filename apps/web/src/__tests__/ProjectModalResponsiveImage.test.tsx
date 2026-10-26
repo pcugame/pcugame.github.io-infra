@@ -77,20 +77,48 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-function renderModal() {
+function renderModal(onClose = vi.fn()) {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
 	return render(
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter>
-				<ProjectModal slug={project.slug} year={project.year} onClose={vi.fn()} />
+				<ProjectModal slug={project.slug} year={project.year} onClose={onClose} />
 			</MemoryRouter>
 		</QueryClientProvider>,
 	);
 }
 
 describe('ProjectModal responsive images', () => {
+	it.each([false, true])('only closes on an unhandled Escape (video visible: %s)', async (videoVisible) => {
+		mocks.getProjectDetail.mockResolvedValue(videoVisible ? {
+			...project,
+			poster: undefined,
+			videos: [{ assetId: 21, sortOrder: 0, role: 'MAIN', url: 'https://videos.test/main.mp4', mimeType: 'video/mp4' }],
+		} : project);
+		const onClose = vi.fn();
+		renderModal(onClose);
+		await screen.findByText(project.title);
+		for (const key of [' ', 'ArrowLeft', 'ArrowRight', 'Enter', 'm']) fireEvent.keyDown(document, { key });
+		const handledEscape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+		handledEscape.preventDefault();
+		fireEvent(document, handledEscape);
+		expect(onClose).not.toHaveBeenCalled();
+		fireEvent.keyDown(document, { key: 'Escape' });
+		expect(onClose).toHaveBeenCalledOnce();
+	});
+
+	it('passes playback renditions into the modal player', async () => {
+		mocks.getProjectDetail.mockResolvedValue({ ...project, poster: undefined, videos: [{
+			assetId: 21, sortOrder: 0, role: 'MAIN', url: 'https://videos.test/fallback.mp4', mimeType: 'video/mp4',
+			playbacks: [{ profile: 'native', quality: 'max', status: 'READY', mimeType: 'video/mp4',
+				url: 'https://videos.test/native.mp4', frameRate: 60, width: 1920, height: 1080 }],
+		}] });
+		const { container } = renderModal();
+		await waitFor(() => expect(container.querySelector('source')?.src).toBe('https://videos.test/native.mp4'));
+	});
+
 	it('uses shared candidates for media and tabs, then the original in lightbox', async () => {
 		mocks.getProjectDetail.mockResolvedValue(project);
 		const { container } = renderModal();
@@ -137,7 +165,7 @@ describe('ProjectModal responsive images', () => {
 		expect(screen.getByRole('button', { name: '추가 영상 1' })).toBeTruthy();
 
 		fireEvent.error(container.querySelector('video')!);
-		expect(screen.getByText('영상을 불러올 수 없습니다.')).toBeTruthy();
+		expect(screen.getByText(/영상을 불러올 수 없습니다\./)).toBeTruthy();
 		fireEvent.click(screen.getByRole('button', { name: '추가 영상 1' }));
 		expect(screen.getByText('추가 영상 1')).toBeTruthy();
 		expect(container.querySelector('video')).not.toBeNull();

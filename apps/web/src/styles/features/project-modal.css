@@ -65,6 +65,26 @@
   background: #fff;
 }
 
+/* Keep project dismissal outside the player's fullscreen and settings controls. */
+.modal-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  flex: none;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.modal-toolbar .modal-close {
+  position: static;
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.modal-panel--project .modal-visual {
+  border-radius: 0;
+}
+
 .modal-loading {
   display: flex;
   align-items: center;
@@ -533,9 +553,13 @@
 
 .modal-video-label { margin: .5rem 0; font-size: .8rem; color: var(--color-text-muted); text-align: center; }
 
-/* The library skin owns controls; reserve the remaining frame for the media surface. */
-.modal-visual__frame .project-video__surface {
-  flex: 1;
-  aspect-ratio: auto;
-  min-height: 0;
+/* Notes and downloads must not consume the video's 16:9 playback area. */
+.modal-visual__frame--video {
+  height: auto;
+  padding-bottom: 0;
+}
+
+.modal-visual__frame--video .project-video {
+  position: relative;
+  height: auto;
 }

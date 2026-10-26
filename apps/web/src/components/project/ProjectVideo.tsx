@@ -84,7 +84,11 @@ function ProjectVideoPlayer({ video, poster, title }: Props) {
 		element.volume = state.volume;
 		element.muted = state.muted;
 		element.playbackRate = state.playbackRate;
-		if (!state.paused) void element.play().catch(() => setHasError(true));
+		if (!state.paused) void element.play().catch(() => {
+			// Mobile browsers may require another tap after a source change.
+			// A rejected play request alone does not mean the media failed to load.
+			if (element.error) setHasError(true);
+		});
 	}
 
 	if (!video && !videoPosterSrc) return null;
