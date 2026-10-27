@@ -146,12 +146,12 @@ export function createNasExportStaging(deps: {
 			await pipeline(
 				input.body,
 				counter,
-				handle.createWriteStream({ autoClose: false }),
+				// Flush and close through the stream: FileHandle.close() waits forever
+				// while an autoClose:false stream still owns the handle.
+				handle.createWriteStream({ autoClose: true, flush: true }),
 				...(input.signal ? [{ signal: input.signal }] : []),
 			);
 			if (written !== input.expectedBytes) throw new Error('Export object size changed from its snapshot');
-			await handle.sync();
-			await handle.close();
 			handle = undefined;
 			await rename(temporary, destination);
 			await syncDirectory(dirname(destination));
