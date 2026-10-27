@@ -14,11 +14,16 @@ import { requireLogin, requireRole } from '../../../plugins/auth.js';
 import type { Actor } from '../../../application/http-input.js';
 import type { createProjectService } from './service.js';
 import type { bulkUpdateStatus } from './project-status.service.js';
+import { auditProjectDeletion } from './deletion-audit.js';
 
 type ProjectService = ReturnType<typeof createProjectService>;
 
 export interface ProjectControllerDependencies {
 	service: ProjectService;
+	logger?: {
+		info(context: Record<string, unknown>, message: string): void;
+		warn(context: Record<string, unknown>, message: string): void;
+	};
 	access: {
 		loadProjectWithAccess(actor: Actor, projectId: number): Promise<{ status: string }>;
 	};
@@ -72,8 +77,10 @@ export function createProjectController(deps: ProjectControllerDependencies): Fa
 			{ preHandler: requireLogin },
 			async (request, reply) => {
 				const projectId = parseIntParam(request.params.id);
-				await deps.access.loadProjectWithAccess(request.currentUser!, projectId);
-				await deps.service.deleteProject(projectId, request.currentUser!);
+				await auditProjectDeletion(deps.logger ?? app.log, request, [projectId], async () => {
+					await deps.access.loadProjectWithAccess(request.currentUser!, projectId);
+					await deps.service.deleteProject(projectId, request.currentUser!);
+				});
 				reply.status(204).send();
 			},
 		);
@@ -92,7 +99,9 @@ export function createProjectController(deps: ProjectControllerDependencies): Fa
 			{ preHandler: requireRole('ADMIN') },
 			async (request, reply) => {
 				const { ids } = parseBody(BulkDeleteBody, request.body);
-				sendOk(reply, await deps.service.bulkDeleteProjects(ids));
+				const result = await auditProjectDeletion(deps.logger ?? app.log, request, ids,
+					() => deps.service.bulkDeleteProjects(ids));
+				sendOk(reply, result);
 			},
 		);
 

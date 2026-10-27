@@ -94,6 +94,7 @@ export function createProjectMemberSettingsProductionGraph(
 		projectRepository: deps.projectRepository,
 		projectController: createProjectController({
 			service: projectService,
+			logger: deps.logger,
 			access: deps.projectAccess,
 			status: {
 				assertTransition: assertStatusTransition,
