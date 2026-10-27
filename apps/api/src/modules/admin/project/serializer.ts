@@ -1,3 +1,4 @@
+import { imageSources } from '../../../shared/image-delivery.js';
 import { publicationReadiness } from '@pcu/contracts';
 import { videoPlaybackFields, type PlaybackJobView } from '../../../shared/video-playbacks.js';
 import { projectRequiredAssets, type RequiredAssetsSource } from '../../../shared/project-required-assets.js';
@@ -112,7 +113,7 @@ export type SerializableProject = {
 
 export function createProjectSerializer(
 	baseUrl: string,
-	publicDelivery?: { publicAssetOrigin: string; publicBucket: string },
+	publicDelivery?: { publicAssetOrigin: string; publicBucket: string; imageDeliveryMode?: 'legacy' | 'imgproxy' },
 ) {
 	const base = baseUrl.replace(/\/$/, '');
 	function serializeImage(asset: Parameters<typeof imageSourceFor>[0]) {
@@ -124,6 +125,7 @@ export function createProjectSerializer(
 			throw new Error(`Asset ${asset.id ?? 'unknown'} has no READY public ORIGINAL representation`);
 		}
 		return {
+      ...(publicDelivery.imageDeliveryMode === 'imgproxy' ? { sources: imageSources(publicDelivery.publicAssetOrigin, original.objectKey, original.width, original.height) } : {}),
 			original: {
 				url: publicObjectUrl(publicDelivery.publicAssetOrigin, original.objectKey),
 				...(original.width != null ? { width: original.width } : {}),

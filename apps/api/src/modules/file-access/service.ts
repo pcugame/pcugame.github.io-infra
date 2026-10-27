@@ -1,3 +1,4 @@
+import { parseImageDeliveryPath, signedImagePath } from '../../shared/image-delivery.js';
 import { VIDEO_PLAYBACK_QUALITIES, type VideoPlaybackQuality } from '@pcu/contracts';
 import { resolveDownloadRepresentation } from '../assets/download-resolver.js';
 import { attachmentContentDisposition, buildGameDownloadFilename } from '@pcu/contracts';
@@ -31,10 +32,18 @@ export function createFileAccessService(repository: FileAccessRepository, config
   if (url.username || url.password || url.hash) throw notFound();
   const bucket = url.origin === publicOrigin ? config.S3_BUCKET_PUBLIC : url.origin === protectedOrigin ? config.S3_BUCKET_PROTECTED : null;
   if (!bucket) throw notFound();
-  const key = safeObjectPath(url.pathname);
+  const image = url.pathname.startsWith('/img/') ? parseImageDeliveryPath(url.pathname) : null;
+  if (url.pathname.startsWith('/img/') && (!image || bucket !== config.S3_BUCKET_PUBLIC || config.IMAGE_DELIVERY_MODE !== 'imgproxy')) throw notFound();
+  const key = image?.key ?? safeObjectPath(url.pathname);
   const objectKey = bucket === config.S3_BUCKET_PROTECTED ? (key.startsWith('file/') || key.startsWith('play/')) ? key : key.startsWith(bucket + '/') ? key.slice(bucket.length+1) : '' : key;
   if (!objectKey) throw notFound();
-  return {url, bucket, objectKey};
+  return {url, bucket, objectKey, image};
+ }
+ async function assertImageSource(bucket: string, key: string) {
+  if (await repository.votePoster?.(bucket, key)) return;
+  const representation = await repository.findRepresentation(bucket, key);
+  if (!representation || representation.role !== 'ORIGINAL' || representation.state !== 'READY'
+   || !['IMAGE', 'POSTER'].includes(representation.asset.kind) || !representation.mimeType.startsWith('image/')) throw notFound();
  }
  async function actorForSession(id: string): Promise<VisibilityActor> {
   const session = await repository.session(id);
@@ -80,6 +89,7 @@ export function createFileAccessService(repository: FileAccessRepository, config
    input=representation.bucket===config.S3_BUCKET_PUBLIC ? publicOrigin+'/'+representation.objectKey.split('/').map(encodeURIComponent).join('/') : await presign(representation.bucket,representation.objectKey);
   }
   const target = parseUrl(input);
+  if (target.image) await assertImageSource(target.bucket, target.objectKey);
   const sid=request.currentUser?request.cookies[config.SESSION_COOKIE_NAME]:undefined;
   const actor = sid ? await actorForSession(sid) : null;
   const deployment = await authorize(target.bucket,target.objectKey,actor);
@@ -150,6 +160,11 @@ export function createFileAccessService(repository: FileAccessRepository, config
     await authorize(target.bucket,key,actor,token.deploymentId);
    } else await authorize(target.bucket,key,null);
 
+ if (target.image) {
+    await assertImageSource(target.bucket, key);
+    if (!config.IMGPROXY_KEY || !config.IMGPROXY_SALT) throw forbidden();
+    return { path: signedImagePath(target.bucket, key, target.image.width, config.IMGPROXY_KEY, config.IMGPROXY_SALT), host: '', image: true };
+ }
  if(kind==='protected'){
     if(!presign) throw forbidden();
     const representation=await repository.findRepresentation(target.bucket,key);

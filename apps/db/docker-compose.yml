@@ -148,6 +148,7 @@ services:
       garage-init:
         condition: service_completed_successfully
     environment:
+      IMAGE_CACHE_UPSTREAM: ${IMAGE_CACHE_UPSTREAM:-http://image-cache:8081}
       NGINX_LISTEN_PORT: 8080
       FILE_GATEWAY_API_UPSTREAM: ${FILE_GATEWAY_API_UPSTREAM:-http://host.docker.internal:4000}
       FILE_GATEWAY_TLS_SERVER_NAME: ${FILE_GATEWAY_TLS_SERVER_NAME:-}

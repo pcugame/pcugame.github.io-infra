@@ -25,6 +25,7 @@ export async function runImageWorker(): Promise<void> {
 	process.once('SIGINT', stop);
 	try {
 		const graph = createImageWorkerComposition({
+      outputMode: config.IMAGE_OUTPUT_MODE,
 			repository: createPrismaImageWorkerRepository(prisma, {
 				publicBucket: config.S3_BUCKET_PUBLIC,
 				protectedBucket: config.S3_BUCKET_PROTECTED,

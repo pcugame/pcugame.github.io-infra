@@ -36,7 +36,7 @@ export interface ProjectMemberSettingsProductionDependencies {
 		| 'S3_BUCKET_PUBLIC'
 		| 'S3_BUCKET_PROTECTED'
 		| 'UPLOAD_CHUNK_SIZE_MB'
-	>;
+	> & Partial<Pick<Env, 'IMAGE_DELIVERY_MODE'>>;
 	projectAccess: ReturnType<typeof createProjectAccessService>;
 	projectExists(projectId: number): Promise<boolean>;
 	projectRepository: ProjectApplicationRepository;
@@ -58,6 +58,7 @@ export function createProjectMemberSettingsProductionGraph(
 			? {
 				publicAssetOrigin: deps.config.PUBLIC_ASSET_ORIGIN,
 				publicBucket: deps.config.S3_BUCKET_PUBLIC,
+				imageDeliveryMode: deps.config.IMAGE_DELIVERY_MODE,
 			}
 			: undefined,
 	);

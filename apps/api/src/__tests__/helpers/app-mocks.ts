@@ -73,6 +73,8 @@ export const defaultTestEnv = {
 	EXPORT_WORKER_POLL_MS: 2_000,
 	EXPORT_WORKER_MAX_OBJECT_BYTES: 5 * 1024 * 1024 * 1024,
 	EXPORT_WORKER_MAX_JOB_BYTES: 32 * 1024 * 1024 * 1024,
+	IMAGE_DELIVERY_MODE: 'legacy' as const,
+	IMAGE_OUTPUT_MODE: 'legacy' as const,
 	EXPORT_WORKER_RETRY_BASE_MS: 5_000,
 } as const;
 

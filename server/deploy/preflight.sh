@@ -259,6 +259,7 @@ do_release_artifact_preflight() {
   validate_production_boundaries
   validate_capacity_boundaries "${NAS_EXPORT_HOST_PATH:-/mnt/nas/pcu_storage/GraduationGame}"
   assert_quadlet_adopted
+  validate_image_delivery
   validate_release_artifacts "$release_schema_phase"
   echo "$release_schema_phase release artifacts passed preflight without stopping the current deployment."
 }
@@ -288,6 +289,24 @@ do_activation_preflight() {
   validate_production_boundaries
   validate_capacity_boundaries "${NAS_EXPORT_HOST_PATH:-/mnt/nas/pcu_storage/GraduationGame}"
   assert_quadlet_adopted
+  validate_image_delivery
   validate_release_artifacts "$release_schema_phase"
 }
 
+
+# Image infrastructure is adopted independently; releases never expose its ports.
+validate_image_delivery() {
+  [[ "${IMAGE_DELIVERY_MODE:-legacy}" == imgproxy ]] || return 0
+  [[ -n "${IMAGE_SMOKE_URL:-}" ]] || { echo 'ERROR: imgproxy releases require IMAGE_SMOKE_URL'; return 1; }
+  local name mount available expected actual
+  for name in gp-imgproxy gp-image-cache; do
+    expected="$(sed -n 's/^Image=//p' "$QUADLET_HELPERS/image-templates/$name.container.in")"
+    actual="$(podman inspect "$name" --format '{{.Config.Image}}')"
+    [[ "$actual" == "$expected" ]] || { echo 'ERROR: image infrastructure digest differs from reviewed topology'; return 1; }
+    systemctl --user is-active --quiet "$name.service" || { echo 'ERROR: image infrastructure is not active'; return 1; }
+    podman healthcheck run "$name" >/dev/null || { echo 'ERROR: image infrastructure health failed'; return 1; }
+  done
+  mount="$(podman volume inspect gp_image_cache --format '{{.Mountpoint}}')"
+  available="$(df -Pk "$mount" | awk 'NR==2 {print $4}')"
+  [[ "$available" =~ ^[0-9]+$ && "$available" -ge 1048576 ]] || { echo 'ERROR: image cache needs at least 1 GiB free disk headroom'; return 1; }
+}

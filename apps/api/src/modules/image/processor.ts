@@ -5,7 +5,6 @@ import { materializeImageSource } from './materialize.js';
 import { assertPdfPagePolicy, assertRasterPolicy, type ImageWorkerLimits } from './policy.js';
 import type { ImageOperations, ImageRepresentationRole, ImageWorkerRepository, ImageWorkerStorage, VerifyingImageSession } from './ports.js';
 
-const REQUIRED_ROLES = new Set<ImageRepresentationRole>(['ORIGINAL', 'CARD_480', 'DISPLAY_960']);
 
 export interface ImageProcessorDependencies {
 	repository: ImageWorkerRepository;
@@ -15,11 +14,13 @@ export interface ImageProcessorDependencies {
 	protectedBucket: string;
 	publicBucket: string;
 	limits: ImageWorkerLimits;
+	outputMode?: 'legacy' | 'original';
 	clock: { now(): Date };
 	logger: { info(value: Record<string, unknown>, message: string): void; warn(value: Record<string, unknown>, message: string): void };
 }
 
 export function createImageProcessor(deps: ImageProcessorDependencies) {
+ const REQUIRED_ROLES = new Set<ImageRepresentationRole>(deps.outputMode === 'original' ? ['ORIGINAL'] : ['ORIGINAL', 'CARD_480', 'DISPLAY_960']);
 	return {
 		async process(session: VerifyingImageSession, token: string, signal?: AbortSignal,
 			assertOwned: () => Promise<void> = async () => undefined): Promise<{ assetId: string }> {

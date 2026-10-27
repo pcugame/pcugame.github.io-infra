@@ -1,0 +1,27 @@
+[Unit]
+Description=Internal transformed image cache
+Requires=gp-imgproxy.service
+After=gp-imgproxy.service
+
+[Container]
+Image=docker.io/nginx@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
+ContainerName=gp-image-cache
+Network=host
+Volume=@CACHE_CONFIG@:/etc/nginx/conf.d/default.conf:ro,Z
+Volume=gp-image-cache.volume:/var/cache/images
+NoNewPrivileges=true
+ReadOnly=true
+Tmpfs=/var/cache/nginx:rw,noexec,nosuid,size=16m
+Tmpfs=/var/run:rw,noexec,nosuid,size=16m
+Entrypoint=nginx
+Exec=-g "daemon off;"
+HealthCmd=wget -q -O /dev/null http://127.0.0.1:8091/health
+HealthInterval=10s
+HealthRetries=3
+
+[Service]
+Restart=always
+MemoryMax=128M
+
+[Install]
+WantedBy=default.target

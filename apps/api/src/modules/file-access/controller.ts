@@ -15,6 +15,7 @@ export function createFileAccessController(repository: FileAccessRepository, con
   app.post<{Params:{token:string}}>('/file-access/:token/renew',request=>service.renew(request.params.token,request));
   app.get('/internal/file-access',{config:{rateLimit:false}},async(request,reply)=>{
    const path=await service.check(request.headers);
+   if ('image' in path && path.image) reply.header('X-PCU-Image-Path', path.path);
    if ('csp' in path && typeof path.csp === 'string') reply.header('X-PCU-Runtime-CSP',path.csp);
    reply.header('X-PCU-Object-Path',path.path).header('X-PCU-Upstream-Host',path.host).status(204).send();
   });

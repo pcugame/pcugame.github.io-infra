@@ -16,7 +16,8 @@
     "scripts/correct-canonical-assets.ts",
     "scripts/correct-canonical-poster.ts",
     "scripts/revoke-webgl-play-sessions.ts",
-    "scripts/video-playbacks.ts"
+    "scripts/video-playbacks.ts",
+    "scripts/image-delivery.ts"
   ],
   "exclude": [
     "node_modules",

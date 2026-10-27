@@ -72,6 +72,7 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 }
 
 export interface PublicServiceDependencies {
+	imageDeliveryMode?: 'legacy' | 'imgproxy';
 	apiPublicUrl: string;
 	webglPlayEnabled?: boolean;
 	publicAssetOrigin?: string;
@@ -111,6 +112,7 @@ function imageOptions(deps: PublicServiceDependencies) {
 	return {
 		publicAssetOrigin: deps.publicAssetOrigin ?? deps.apiPublicUrl,
 		publicBucket: deps.publicBucket ?? 'pcu-public',
+		imageDeliveryMode: deps.imageDeliveryMode,
 	};
 }
 

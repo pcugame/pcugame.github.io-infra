@@ -31,6 +31,11 @@ const image: ResponsiveImage = {
 };
 
 describe('responsive image helpers', () => {
+ it('prefers on-demand sources and de-duplicates actual widths', () => {
+  const upgraded = { ...image, sources: [{ url: 'https://images.test/new', width: 480, height: 270 }, { url: 'https://images.test/duplicate', width: 480, height: 270 }] };
+  expect(buildSrcSet(upgraded)).toBe('https://images.test/new 480w, https://images.test/original.webp 1600w');
+  expect(pickRendition(upgraded, 400).url).toBe('https://images.test/new');
+ });
 	it('sorts renditions by profile without mutating the response', () => {
 		const originalOrder = image.renditions.map((rendition) => rendition.profile);
 		const sorted = sortImageRenditions(image.renditions);

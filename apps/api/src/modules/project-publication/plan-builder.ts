@@ -42,7 +42,7 @@ export async function rebuildProjectPublicationPlan(
 		if (item.kind === 'IMAGE' || item.kind === 'POSTER') {
 			const publicationRoles = new Set(['ORIGINAL', 'CARD_480', 'DISPLAY_960']);
 			const imageRepresentations = asset.representations.filter((representation) => publicationRoles.has(representation.role));
-			if (imageRepresentations.length !== 3 || new Set(imageRepresentations.map(({ role }) => role)).size !== 3) {
+			if (!imageRepresentations.some(r => r.role === 'ORIGINAL') || new Set(imageRepresentations.map(({ role }) => role)).size !== imageRepresentations.length) {
 				throw new Error(`submission item ${item.id} lost an image publication role`);
 			}
 			for (const representation of imageRepresentations) {

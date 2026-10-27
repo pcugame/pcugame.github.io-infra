@@ -32,6 +32,7 @@ export function ResponsiveImage({
 }: ResponsiveImageProps) {
 	const identity = [
 		image.original.url,
+		...(image.sources ?? []).map(source => `${source.width}:${source.url}`),
 		...image.renditions.map((rendition) => `${rendition.profile}:${rendition.url}`),
 	].join('|');
 	const [originalFallbackFor, setOriginalFallbackFor] = useState<string | null>(null);

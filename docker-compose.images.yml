@@ -1,0 +1,57 @@
+# Optional integration overlay: docker compose -f docker-compose.integration.yml -f docker-compose.images.yml up --build -d
+services:
+  api:
+    environment:
+      IMAGE_DELIVERY_MODE: imgproxy
+      IMAGE_OUTPUT_MODE: original
+      IMGPROXY_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
+      IMGPROXY_SALT: "2222222222222222222222222222222222222222222222222222222222222222"
+  image-worker:
+    environment:
+      IMAGE_OUTPUT_MODE: original
+  imgproxy:
+    image: darthsim/imgproxy@sha256:74c1bee92e04248ce7fda5a98bc7e1149ef39a8dc530f842063694eea4e956c2
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      IMGPROXY_BIND: :8080
+      IMGPROXY_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
+      IMGPROXY_SALT: "2222222222222222222222222222222222222222222222222222222222222222"
+      IMGPROXY_USE_S3: "true"
+      IMGPROXY_SOURCE_URL_QUERY_SEPARATOR: ""
+      IMGPROXY_S3_ENDPOINT: http://garage:3900
+      IMGPROXY_S3_REGION: garage
+      IMGPROXY_S3_ENDPOINT_USE_PATH_STYLE: "true"
+      IMGPROXY_ALLOWED_SOURCES: s3://pcu-public/
+      AWS_ACCESS_KEY_ID: GK000000000000000000000001
+      AWS_SECRET_ACCESS_KEY: "0000000000000000000000000000000000000000000000000000000000000001"
+      IMGPROXY_CONCURRENCY: "2"
+      IMGPROXY_MAX_SRC_RESOLUTION: "24"
+      IMGPROXY_MAX_SRC_FILE_SIZE: "33554432"
+      IMGPROXY_MAX_ANIMATION_FRAMES: "1"
+      IMGPROXY_TIMEOUT: "15"
+      IMGPROXY_TTL: "604800"
+      IMGPROXY_LOG_LEVEL: error
+    healthcheck:
+      test: [CMD, imgproxy, health]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+  image-cache:
+    image: nginx@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
+    restart: unless-stopped
+    environment:
+      IMGPROXY_UPSTREAM: http://imgproxy:8080
+    depends_on:
+      imgproxy:
+        condition: service_healthy
+    volumes:
+      - ./apps/db/image-cache.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - integration_image_cache:/var/cache/images
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1:8081/health']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+volumes:
+  integration_image_cache:

@@ -3,6 +3,7 @@ import { publicationReadiness, type PublicationSource } from './publication.js';
 const rep = (role: string, state = 'READY') => ({ role, state });
 const complete = (): PublicationSource => ({ title: 'Game', summary: 'Summary', platforms: ['PC'], members: [{ name: 'Student', studentId: '1' }], poster: { status: 'READY', representations: ['ORIGINAL', 'CARD_480', 'DISPLAY_960'].map(r => rep(r)) }, assets: [{ kind: 'GAME', status: 'READY', representations: [rep('ORIGINAL')] }, { kind: 'VIDEO', status: 'READY', representations: [rep('ORIGINAL'), rep('PLAYBACK')] }] });
 describe('publication readiness', () => {
+ it('allows an original-only poster', () => { const source = complete(); source.poster!.representations = [rep('ORIGINAL')]; expect(publicationReadiness(source).ready).toBe(true); });
  it('does not require WebGL or screenshots', () => expect(publicationReadiness(complete()).ready).toBe(true));
  it.each(['title', 'summary', 'platforms', 'members', 'poster', 'nativeBuild', 'video'] as const)('requires %s', key => {
   const source = complete();

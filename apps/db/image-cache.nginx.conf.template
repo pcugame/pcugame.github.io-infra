@@ -1,0 +1,29 @@
+map $upstream_status $image_no_cache { 200 0; default 1; }
+proxy_cache_path /var/cache/images levels=1:2 keys_zone=images:16m max_size=10g inactive=7d use_temp_path=off;
+log_format image_cache 'status=$status cache=$upstream_cache_status duration=$request_time bytes=$bytes_sent';
+server {
+  listen 8081;
+  access_log /var/log/nginx/access.log image_cache;
+  error_log /dev/null crit;
+  location = /health { access_log off; return 204; }
+  location / {
+    if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+    proxy_pass ${IMGPROXY_UPSTREAM};
+    proxy_cache images;
+    proxy_cache_key "v1:$uri";
+    proxy_cache_valid 200 7d;
+    proxy_no_cache $image_no_cache;
+    proxy_cache_lock on;
+    proxy_cache_lock_timeout 20s;
+    proxy_cache_lock_age 20s;
+    proxy_cache_use_stale error timeout http_502 http_503 http_504;
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_set_header Accept "image/webp";
+    proxy_set_header Range "";
+    proxy_hide_header Set-Cookie;
+    proxy_connect_timeout 3s;
+    proxy_read_timeout 18s;
+    add_header X-Image-Cache $upstream_cache_status always;
+  }
+}

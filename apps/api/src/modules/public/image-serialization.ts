@@ -1,3 +1,4 @@
+import { imageSources, type ImageDeliveryMode } from '../../shared/image-delivery.js';
 import type { ResponsiveImage } from '@pcu/contracts';
 import { publicObjectUrl } from '../../shared/public-origin.js';
 import { IMAGE_RENDITION_PROFILES } from '../../shared/responsive-image.js';
@@ -19,6 +20,7 @@ export interface PublicImageSourceRecord {
 }
 
 export interface PublicImageSerializationOptions {
+	imageDeliveryMode?: ImageDeliveryMode;
 	publicAssetOrigin: string;
 	publicBucket: string;
 }
@@ -38,6 +40,7 @@ export async function serializePublicImage(
 		return undefined;
 	}
 	return {
+      ...(options.imageDeliveryMode === 'imgproxy' ? { sources: imageSources(options.publicAssetOrigin, original.objectKey, original.width, original.height) } : {}),
 			original: {
 				url: publicObjectUrl(options.publicAssetOrigin, original.objectKey),
 				...(original.width != null ? { width: original.width } : {}),

@@ -1,5 +1,8 @@
 # Quadlet runtime definitions and release integration
 
+Optional imgproxy and image-cache units have a separate renderer and adoption
+procedure; see [image delivery](../../docs/operations/image-delivery.md).
+
 Quadlet owns the runtime topology and systemd owns process lifecycle and
 restart. `../deploy.sh` updates the immutable application digest and requests
 systemd operations on an already adopted host. It does not install Quadlet for

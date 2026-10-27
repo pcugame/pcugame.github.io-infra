@@ -93,6 +93,7 @@ const StoredProjectLinkSchema = z.string().min(1).max(500);
 const AssetPlaybackStatusSchema = z.enum(['PENDING', 'READY', 'FAILED']);
 
 export const ResponsiveImageSchema: z.ZodType<ResponsiveImage> = z.object({
+	sources: z.array(z.object({ url: UrlSchema, width: PositiveIntegerSchema, height: PositiveIntegerSchema }).strict()).optional(),
 	original: z.object({
 		url: UrlSchema,
 		width: PositiveIntegerSchema.optional(),

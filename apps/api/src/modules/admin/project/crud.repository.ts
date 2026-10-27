@@ -734,8 +734,8 @@ export function createProjectCrudRepository(
 				const representations = imageAssetIds.length === 0 ? [] : await tx.assetRepresentation.findMany({
 					where: { assetId: { in: imageAssetIds }, role: { in: ['ORIGINAL', 'CARD_480', 'DISPLAY_960'] }, state: 'READY' },
 				});
-				if (representations.length !== imageAssetIds.length * 3) {
-					throw conflict('Every DRAFT image representation must be staged before publication');
+				if (imageAssetIds.some(id => !representations.some(r => r.assetId === id && r.role === 'ORIGINAL'))) {
+					throw conflict('Every DRAFT image original must be staged before publication');
 				}
 				const imageFences = new Map(submission.items
 					.filter((item) => (item.kind === 'IMAGE' || item.kind === 'POSTER')

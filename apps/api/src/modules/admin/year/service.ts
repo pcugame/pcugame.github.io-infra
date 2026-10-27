@@ -5,6 +5,7 @@ import { serializePublicImage } from '../../public/image-serialization.js';
 import type { ExhibitionRepository, ExhibitionRecord } from './ports.js';
 
 export interface ExhibitionServiceDependencies {
+	imageDeliveryMode?: 'legacy' | 'imgproxy';
 	publicAssetOrigin?: string;
 	posterBucket: string;
 	protectedBucket?: string;
@@ -23,6 +24,7 @@ async function serializeExhibition(
 	const canonicalPoster = e.poster?.status === 'READY' && deps.publicAssetOrigin
 		? await serializePublicImage(e.poster, {
 			publicAssetOrigin: deps.publicAssetOrigin,
+			imageDeliveryMode: deps.imageDeliveryMode,
 			publicBucket: deps.posterBucket,
 		})
 		: undefined;

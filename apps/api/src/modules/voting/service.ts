@@ -1,3 +1,4 @@
+import { imageDeliveryUrl } from '../../shared/image-delivery.js';
 import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
 import {
 	VoteSettingsSchema,
@@ -71,13 +72,14 @@ export function createVotingService(
 	repository: VotingRepository,
 	config: {
 		publicOrigin: string;
+		imageDeliveryMode?: 'legacy' | 'imgproxy';
 		publicBucket: string;
 		investigationSecret?: string;
 		privacyNotice?: string;
 	},
 ) {
 	const url = (p: { bucket: string; objectKey: string }) =>
-		config.publicOrigin + '/' + p.objectKey.split('/').map(encodeURIComponent).join('/');
+		config.imageDeliveryMode === 'imgproxy' ? imageDeliveryUrl(config.publicOrigin, p.objectKey, 960) : config.publicOrigin + '/' + p.objectKey.split('/').map(encodeURIComponent).join('/');
 	const candidate = (c: Candidate) => ({
 		id: c.id,
 		title: c.title,
@@ -169,7 +171,7 @@ export function createVotingService(
 					const r =
 						p.poster?.status === 'READY'
 							? p.poster.representations.find(
-									(r) => r.state === 'READY' && r.role === 'DISPLAY_960' && r.bucket === config.publicBucket,
+									(r) => r.state === 'READY' && r.role === 'ORIGINAL' && r.bucket === config.publicBucket,
 								)
 							: undefined;
 					return r ? [{ projectId: p.id, title: p.title, representationId: r.id, posterUrl: url(r) }] : [];
@@ -232,7 +234,7 @@ export function createVotingService(
 						!a ||
 						r.state !== 'READY' ||
 						a.status !== 'READY' ||
-						r.role !== 'DISPLAY_960' ||
+						!['ORIGINAL', 'DISPLAY_960'].includes(r.role) ||
 						r.bucket !== config.publicBucket ||
 						!r.mimeType.startsWith('image/')
 					)

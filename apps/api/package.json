@@ -37,6 +37,8 @@
     "correction:canonical-assets": "tsx scripts/correct-canonical-assets.ts",
     "release:correction": "node dist-release/scripts/correct-canonical-assets.js",
     "worker:project-publication": "tsx src/project-publication-worker.ts",
+    "image:delivery": "tsx scripts/image-delivery.ts",
+    "release:image-delivery": "node dist-release/scripts/image-delivery.js",
     "video:playbacks": "tsx scripts/video-playbacks.ts",
     "release:video-playbacks": "node dist-release/scripts/video-playbacks.js"
   },

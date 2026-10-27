@@ -23,6 +23,17 @@ const image: ResponsiveImageData = {
 };
 
 describe('ResponsiveImage', () => {
+ it('falls back once when an on-demand source fails', () => {
+  const source = 'https://images.test/img/v1/480/source';
+  render(<ResponsiveImage image={{ ...image, renditions: [], sources: [{ url: source, width: 480, height: 270 }] }} alt="dynamic" />);
+  const element = screen.getByRole('img');
+  Object.defineProperty(element, 'currentSrc', { configurable: true, value: source });
+  fireEvent.error(element);
+  expect(element.getAttribute('srcset')).toBeNull();
+  expect(element.getAttribute('src')).toBe(image.original.url);
+  fireEvent.error(element);
+  expect(element.getAttribute('srcset')).toBeNull();
+ });
 	it('renders browser candidates while preserving caller img semantics', () => {
 		render(
 			<ResponsiveImage

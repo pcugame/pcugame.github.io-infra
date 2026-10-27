@@ -25,7 +25,8 @@ function session(): VerifyingImageSession {
 	};
 }
 
-async function harness(commitFailsOnce = false) {
+async function harness(commitFailsOnce = false, outputMode: 'legacy' | 'original' = 'legacy') {
+ const roles = outputMode === 'original' ? ['ORIGINAL'] as const : ['ORIGINAL', 'CARD_480', 'DISPLAY_960'] as const;
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'image-worker-test-'));
 	const uploaded = new Map<string, { size: number; checksumSha256: string }>();
 	const upload = vi.fn(async (input: { key: string; body: Readable; contentLength: number; checksumSha256: string }) => {
@@ -37,7 +38,7 @@ async function harness(commitFailsOnce = false) {
 		claimVerifying: vi.fn(), renewLease: vi.fn(), markOutputUploaded: vi.fn(async () => {}), reject: vi.fn(),
 		prepareOutputPlan: vi.fn(async () => ({
 			assetId: 'asset-20',
-			outputs: ['ORIGINAL', 'CARD_480', 'DISPLAY_960'].map((role) => ({
+			outputs: roles.map((role) => ({
 				role, bucket: 'public', objectKey: `public/images/asset-20/${role.toLowerCase()}/g1.webp`,
 				intentId: `intent-${role}`, intentState: 'PREPARED',
 			})),
@@ -50,7 +51,7 @@ async function harness(commitFailsOnce = false) {
 		inspectRaster: vi.fn(async () => ({ width: 1000, height: 500, pages: 1, channels: 4 })),
 		renderPdfFirstPage: vi.fn(async () => ({ pages: 1 })),
 		createOutputs: vi.fn(async ({ outputDirectory }: { outputDirectory: string }) => {
-			const roles = ['ORIGINAL', 'CARD_480', 'DISPLAY_960'] as const;
+
 			const outputs: LocalImageOutput[] = [];
 			for (const [index, role] of roles.entries()) {
 				const body = Buffer.from(`output-${role}`);
@@ -70,13 +71,21 @@ async function harness(commitFailsOnce = false) {
 	};
 	const logger = { info: vi.fn(), warn: vi.fn() };
 	return { root, repository, operations, storage, logger, processor: createImageProcessor({
-		repository: repository as never, operations, storage, tempRoot: root, protectedBucket: 'protected', publicBucket: 'public',
+		repository: repository as never, operations, storage, outputMode, tempRoot: root, protectedBucket: 'protected', publicBucket: 'public',
 		limits: { ...DEFAULT_IMAGE_WORKER_LIMITS, maxSourceBytes: 1024, maxOutputBytes: 1024, maxTempBytes: 4096 },
 		clock: { now: () => new Date(0) }, logger,
 	}) };
 }
 
 describe('direct IMAGE/POSTER processor', () => {
+ it('uploads and commits only the validated original in original mode', async () => {
+  const test = await harness(false, 'original');
+  try {
+   await expect(test.processor.process(session(), 'token')).resolves.toEqual({ assetId: 'asset-20' });
+   expect(test.storage.upload).toHaveBeenCalledTimes(1);
+   expect(test.repository.commitReady).toHaveBeenCalledWith(expect.objectContaining({ outputs: [expect.objectContaining({ role: 'ORIGINAL' })] }));
+  } finally { await fs.rm(test.root, { recursive: true, force: true }); }
+ });
 	it('distrusts MIME and commits public immutable ORIGINAL/CARD_480/DISPLAY_960 metadata', async () => {
 		const test = await harness();
 		try {

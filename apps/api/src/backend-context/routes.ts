@@ -197,6 +197,7 @@ export function composeBackendRoutes({
 		routes.voting = createVotingController(createVotingService(votingRepository, {
 			publicBucket: config.S3_BUCKET_PUBLIC,
 			publicOrigin: config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL,
+			imageDeliveryMode: config.IMAGE_DELIVERY_MODE,
 			investigationSecret: config.VOTE_INVESTIGATION_SECRET,
 			privacyNotice: config.VOTE_PRIVACY_NOTICE,
 		}));

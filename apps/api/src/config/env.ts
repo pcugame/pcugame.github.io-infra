@@ -23,6 +23,10 @@ const envSchema = z
     VOTE_PRIVACY_NOTICE: z.string().trim().min(1).max(4000).optional(),
     WEBGL_PLAY_ENABLED: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
     WEBGL_EXTERNAL_CONNECTIONS_ENABLED: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
+    IMAGE_DELIVERY_MODE: z.enum(['legacy', 'imgproxy']).default('legacy'),
+    IMAGE_OUTPUT_MODE: z.enum(['legacy', 'original']).default('legacy'),
+    IMGPROXY_KEY: z.string().regex(/^[a-fA-F0-9]{64,}$/).refine(v => v.length % 2 === 0).optional(),
+    IMGPROXY_SALT: z.string().regex(/^[a-fA-F0-9]{64,}$/).refine(v => v.length % 2 === 0).optional(),
     FILE_GATEWAY_SECRET: z.string().min(32).optional(),
     SESSION_COOKIE_NAME: z.string().default('sid'),
     // Sliding session: kick idle users after SESSION_IDLE_MS (default 2h),
@@ -146,6 +150,9 @@ const envSchema = z
     EXPORT_WORKER_RETRY_BASE_MS: z.coerce.number().int().positive().default(5_000),
   })
   .superRefine((value, context) => {
+    if (value.IMAGE_DELIVERY_MODE === 'imgproxy' && (!value.IMGPROXY_KEY || !value.IMGPROXY_SALT || !value.FILE_GATEWAY_SECRET || !value.PUBLIC_ASSET_ORIGIN)) {
+      context.addIssue({ code: 'custom', path: ['IMAGE_DELIVERY_MODE'], message: 'imgproxy requires signing keys, file gateway secret and public asset origin' });
+    }
     if (value.VOTE_INVESTIGATION_SECRET && !value.VOTE_PRIVACY_NOTICE) context.addIssue({ code: 'custom', path: ['VOTE_PRIVACY_NOTICE'], message: 'An approved privacy notice is required before voting investigation collection is enabled' });
     if (value.NODE_ENV !== 'production') return;
     if (!value.PUBLIC_ASSET_ORIGIN) {

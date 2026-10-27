@@ -1,0 +1,33 @@
+[Unit]
+Description=Image transformation (internal only)
+After=network-online.target
+
+[Container]
+Image=docker.io/darthsim/imgproxy@sha256:74c1bee92e04248ce7fda5a98bc7e1149ef39a8dc530f842063694eea4e956c2
+ContainerName=gp-imgproxy
+Network=host
+EnvironmentFile=@IMAGE_ENV@
+Environment=IMGPROXY_BIND=127.0.0.1:8090
+Environment=IMGPROXY_SOURCE_URL_QUERY_SEPARATOR=
+Environment=IMGPROXY_CONCURRENCY=2
+Environment=IMGPROXY_MAX_SRC_RESOLUTION=24
+Environment=IMGPROXY_MAX_SRC_FILE_SIZE=33554432
+Environment=IMGPROXY_MAX_ANIMATION_FRAMES=1
+Environment=IMGPROXY_TIMEOUT=15
+Environment=IMGPROXY_TTL=604800
+Environment=IMGPROXY_LOG_LEVEL=error
+@CA_VOLUME@
+@CA_ENV@
+HealthCmd=imgproxy health
+HealthInterval=10s
+HealthRetries=3
+NoNewPrivileges=true
+ReadOnly=true
+Tmpfs=/tmp:rw,noexec,nosuid,size=128m
+
+[Service]
+Restart=always
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target

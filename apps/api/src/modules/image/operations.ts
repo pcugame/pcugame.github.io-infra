@@ -76,6 +76,7 @@ function parsePdfPages(stdout: string): number {
 export function createImageOperations(
 	runner: BoundedImageCommandRunner,
 	limits: ImageWorkerLimits,
+	outputMode: 'legacy' | 'original' = 'legacy',
 ): ImageOperations {
 	return {
 		async inspectRaster(path, signal): Promise<RasterInfo> {
@@ -154,7 +155,7 @@ export function createImageOperations(
 					: input.sourceMimeType === 'image/png' ? 'png' : 'webp';
 			const originalMime = input.sourceMimeType === 'application/pdf' ? 'image/webp' : input.sourceMimeType;
 			const originalPath = assertWorkspaceFile(root, join(root, `original.${originalExtension}`));
-			const renditionSpecs = [
+			const renditionSpecs = outputMode === 'original' ? [] : [
 				{ role: 'CARD_480' as const, width: 480, path: assertWorkspaceFile(root, join(root, 'card-480.webp')) },
 				{ role: 'DISPLAY_960' as const, width: 960, path: assertWorkspaceFile(root, join(root, 'display-960.webp')) },
 			];

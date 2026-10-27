@@ -11,6 +11,18 @@ import { AggregateOutputBudget, writeBoundedOutput } from '../modules/image/outp
 import { assertRasterPolicy, DEFAULT_IMAGE_WORKER_LIMITS } from '../modules/image/policy.js';
 
 describe('bounded image operations', () => {
+ it('original mode writes no derivative objects', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'image-original-'));
+  try {
+   const source = path.join(root, 'source.png');
+   await sharp({ create: { width: 1000, height: 500, channels: 4, background: '#336699' } }).png().toFile(source);
+   const outputs = await createImageOperations({ run: vi.fn() }, DEFAULT_IMAGE_WORKER_LIMITS, 'original').createOutputs({ sourcePath: source, sourceMimeType: 'image/png', outputDirectory: root });
+   expect(outputs.map(o => o.role)).toEqual(['ORIGINAL']);
+   expect(await readdir(root)).toEqual(['original.png', 'source.png']);
+   expect(await readFile(outputs[0]!.path)).toEqual(await readFile(source));
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+ });
+
 	it('fully decodes a raster, preserves validated original bytes, and emits every responsive role', async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), 'image-ops-'));
 		const source = path.join(root, 'source.png');

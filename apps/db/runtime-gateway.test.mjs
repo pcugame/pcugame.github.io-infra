@@ -28,6 +28,7 @@ try {
  const values = {
   FILE_GATEWAY_TLS_SERVER_NAME: '', FILE_GATEWAY_API_UPSTREAM: 'http://127.0.0.1:8443',
   FILE_GATEWAY_SECRET: 'fixture-secret-at-least-32-characters',
+  IMAGE_CACHE_UPSTREAM: 'http://127.0.0.1:8446',
   PUBLIC_CORS_ORIGIN_PRIMARY: 'https://web.fixture.invalid', PUBLIC_CORS_ORIGIN_SECONDARY: 'https://other.fixture.invalid',
   WEB_PUBLIC_ORIGIN: 'https://web.fixture.invalid', GARAGE_PUBLIC_WEB_UPSTREAM: 'http://127.0.0.1:8444',
   GARAGE_PUBLIC_BUCKET_HOST: 'fixture.test', GARAGE_PUBLIC_WEB_TLS_SERVER_NAME: 'fixture.test',
@@ -58,6 +59,9 @@ try {
    if ($http_x_pcu_file_uri ~ denied\\.bin$) { return 403; }
    if ($fixture_dest_ok = 0) { return 403; }
    if ($fixture_method_ok = 0) { return 403; }
+   if ($http_x_pcu_file_uri ~ deny=1) { return 403; }
+   if ($http_x_pcu_file_uri ~ auth-down=1) { return 503; }
+   add_header X-PCU-Image-Path /fixture.bin always;
    add_header X-PCU-Object-Path $fixture_path always;
    add_header X-PCU-Upstream-Host fixture.test always;
    add_header X-PCU-Runtime-CSP $fixture_csp always;
@@ -85,6 +89,8 @@ try {
   if (index) template = template.replace(/\$pcu_/g, '$protected_pcu_');
   config += template.replaceAll('error_log /dev/null crit;', 'error_log stderr notice;') + '\n';
  }
+ const cacheTemplate = readFileSync(new URL('./image-cache.nginx.conf.template', import.meta.url), 'utf8');
+ config += cacheTemplate.replace('${IMGPROXY_UPSTREAM}', 'http://127.0.0.1:8444').replace('listen 8081;', 'listen 8446;').replace('/var/cache/images', '/tmp/image-cache');
  config += '}';
  writeFileSync(join(work, 'nginx.conf'), config);
  docker('run', '-d', '--name', name, '-p', '127.0.0.1::8080', '-p', '127.0.0.1::8081',
@@ -96,6 +102,14 @@ try {
  }
  for (const port of [8080, 8081]) {
   const origin = 'http://' + docker('port', name, `${port}/tcp`);
+  if (port === 8080) {
+   const imageUrl = origin + '/img/v1/480/Zml4dHVyZS5iaW4';
+   const first = await fetch(imageUrl); assert.equal(first.status, 200); await first.arrayBuffer();
+   const warm = await fetch(imageUrl); assert.equal(warm.headers.get('x-image-cache'), 'HIT');
+   assert.equal(warm.headers.get('cache-control'), 'private, no-store'); await warm.arrayBuffer();
+   assert.equal((await fetch(imageUrl + '?deny=1')).status, 403, 'warm cache must not bypass revocation');
+   assert.equal((await fetch(imageUrl + '?auth-down=1')).status, 500, 'auth outage must fail closed');
+  }
   const reportUrl = `${origin}/api/webgl-play/reports/${token}`;
   const report = await fetch(reportUrl, { method: 'POST', headers: { 'Content-Type': 'application/csp-report', Cookie: 'sid=private', Authorization: 'Bearer private' }, body: '{"csp-report":{}}' });
   assert.equal(report.status, 204, 'report reaches the dedicated API path without cookies');

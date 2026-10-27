@@ -1,3 +1,4 @@
+import { PosterImage } from '../components/common/PosterImage';
 import { ConfirmVoteDialog } from '../features/voting/ConfirmVoteDialog';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
@@ -223,7 +224,7 @@ function VoteScreen() {
 				<ul className="vote-completed">
 					{view.ballot.selections.map((c) => (
 						<li key={c.id}>
-							<img src={c.posterUrl} alt="" />
+							<PosterImage src={c.posterUrl} alt="" />
 							<p>{c.title}</p>
 						</li>
 					))}
@@ -273,7 +274,7 @@ function VoteScreen() {
 							setSelected((ids) => (ids.includes(c.id) ? ids.filter((id) => id !== c.id) : [...ids, c.id]))
 						}
 					>
-						<img src={c.posterUrl} alt="" />
+						<PosterImage src={c.posterUrl} alt="" />
 						{selected.includes(c.id) && (
 							<span aria-hidden="true" className="vote-check">
 								✓

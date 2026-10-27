@@ -40,6 +40,9 @@ do_activate() {
   systemctl --user start "${API_CONTAINER}.service"
   verify_running "$API_CONTAINER" "API"
   do_api_smoke
+  if [[ "${IMAGE_DELIVERY_MODE:-legacy}" == imgproxy ]]; then
+    node "$DEPLOY_SCRIPT_DIR/../scripts/smoke-images.mjs" "$IMAGE_SMOKE_URL"
+  fi
   for ctr in "${RUNTIME_CONTAINERS[@]:1}"; do
     assert_foundation_active
     systemctl --user start "${ctr}.service"

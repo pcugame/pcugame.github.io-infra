@@ -41,7 +41,12 @@ export function buildImageCandidates(image: ResponsiveImage): ResponsiveImageCan
 	const seenWidths = new Set<number>();
 	const seenUrls = new Set<string>();
 
-	for (const rendition of sortImageRenditions(image.renditions)) {
+	for (const source of [...(image.sources ?? [])].sort((a, b) => a.width - b.width)) {
+		if (seenWidths.has(source.width) || seenUrls.has(source.url)) continue;
+		seenWidths.add(source.width); seenUrls.add(source.url);
+		candidates.push({ kind: 'rendition', ...source });
+	}
+	for (const rendition of sortImageRenditions(image.sources?.length ? [] : image.renditions)) {
 		if (
 			seenProfiles.has(rendition.profile) ||
 			seenWidths.has(rendition.width) ||
@@ -108,7 +113,7 @@ export function pickRendition(
 	};
 	const safeTargetWidth = Math.max(1, targetWidth);
 
-	if (image.original.width != null && image.original.width <= safeTargetWidth) {
+	if (!image.sources?.length && image.original.width != null && image.original.width <= safeTargetWidth) {
 		return original;
 	}
 

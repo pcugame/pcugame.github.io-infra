@@ -86,6 +86,40 @@ server {
     proxy_next_upstream off;
   }
 
+  # Every request, including a warm image-cache hit, passes the live file gate.
+  location ^~ /img/ {
+    if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+    set $pcu_file_method $request_method;
+    auth_request /__pcu_file_auth;
+    auth_request_set $pcu_image_path $upstream_http_x_pcu_image_path;
+    resolver 127.0.0.11 valid=30s;
+    set $pcu_image_cache "${IMAGE_CACHE_UPSTREAM}";
+    proxy_pass $pcu_image_cache$pcu_image_path;
+    proxy_ssl_server_name on;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 4;
+    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_set_header X-PCU-Gateway-Secret "";
+    proxy_set_header Connection "";
+    proxy_set_header Range "";
+    proxy_set_header If-None-Match "";
+    proxy_set_header If-Modified-Since "";
+    proxy_hide_header Cache-Control;
+    proxy_hide_header Expires;
+    proxy_hide_header Set-Cookie;
+    proxy_connect_timeout 3s;
+    proxy_read_timeout 20s;
+    add_header Cache-Control "private, no-store" always;
+    add_header Access-Control-Allow-Origin $pcu_public_cors_origin always;
+    add_header Vary "Origin" always;
+    add_header Cross-Origin-Resource-Policy "cross-origin" always;
+    add_header X-Content-Type-Options "nosniff" always;
+  }
+
   location = /__pcu_public_health {
     access_log off;
     return 204;

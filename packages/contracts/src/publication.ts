@@ -44,7 +44,7 @@ export function publicationReadiness(source: PublicationSource, role?: string): 
   { key: 'members', state: source.members.length > 0 && source.members.every(m => m.name.trim() && m.studentId.trim()) ? 'READY' : 'MISSING' },
   { key: 'summary', state: source.summary?.trim() ? 'READY' : 'MISSING' },
   { key: 'platforms', state: source.platforms.length ? 'READY' : 'MISSING' },
-  { key: 'poster', state: media('POSTER', !!source.poster && ['ORIGINAL', 'CARD_480', 'DISPLAY_960'].every(r => ready({ kind: 'POSTER', ...source.poster! }, r))) },
+  { key: 'poster', state: media('POSTER', !!source.poster && !!ready({ kind: 'POSTER', ...source.poster! }, 'ORIGINAL')) },
   { key: 'nativeBuild', state: media('GAME', source.assets.some(a => a.kind === 'GAME' && ready(a, 'ORIGINAL'))) },
   { key: 'video', state: media('VIDEO', source.assets.some(a => a.kind === 'VIDEO' && ready(a, 'ORIGINAL') && ready(a, 'PLAYBACK'))) },
  ];

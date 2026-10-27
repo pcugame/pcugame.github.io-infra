@@ -1,3 +1,4 @@
+import { PosterImage } from '../../components/common/PosterImage';
 import { SelectControl } from '../../components/ui/SelectControl';
 import { VotePosterUpload } from '../../features/voting/VotePosterUpload';
 import { useCallback, useEffect, useState } from 'react';
@@ -291,7 +292,7 @@ export default function AdminVotesPage() {
 					</button>
 					{sources.map((s) => (
 						<div className="vote-source" key={s.projectId}>
-							<img src={s.posterUrl} alt="" />
+							<PosterImage src={s.posterUrl} alt="" />
 							{s.title}
 							<button
 								className="btn btn--secondary"
@@ -342,7 +343,7 @@ export default function AdminVotesPage() {
 						</SelectControl>
 					</label>
 					{posters.find((p) => p.id === posterId) && (
-						<img
+						<PosterImage
 							className="vote-qr"
 							src={posters.find((p) => p.id === posterId)!.posterUrl}
 							alt="선택한 투표 포스터"
@@ -369,7 +370,7 @@ export default function AdminVotesPage() {
 					</button>
 					{vote.candidates.map((c) => (
 						<div className="vote-source" key={c.id}>
-							<img src={c.posterUrl} alt="" />
+							<PosterImage src={c.posterUrl} alt="" />
 							<span>
 								{c.title} · {c.active ? '활성' : '제외'}
 							</span>

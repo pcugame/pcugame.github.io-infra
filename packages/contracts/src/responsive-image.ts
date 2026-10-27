@@ -9,7 +9,10 @@ export const RESPONSIVE_IMAGE_PROFILES = [
 
 export type ResponsiveImageProfile = (typeof RESPONSIVE_IMAGE_PROFILES)[number]['profile'];
 
+export const IMAGE_SOURCE_WIDTHS = [320, 480, 768, 960, 1440, 1920] as const;
+
 export type ResponsiveImage = {
+	sources?: Array<{ url: string; width: number; height: number }>;
 	original: {
 		url: string;
 		width?: number;

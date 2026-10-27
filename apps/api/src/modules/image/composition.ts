@@ -21,9 +21,10 @@ export function createImageWorkerComposition(input: {
 		error(value: Record<string, unknown>, message: string): void;
 	};
 	limits?: Partial<ImageWorkerLimits>;
+	outputMode?: 'legacy' | 'original';
 }) {
 	const limits = { ...DEFAULT_IMAGE_WORKER_LIMITS, ...input.limits };
-	const operations = createImageOperations(createBoundedImageCommandRunner(), limits);
+	const operations = createImageOperations(createBoundedImageCommandRunner(), limits, input.outputMode);
 	const processor = createImageProcessor({ ...input, operations, limits });
 	const worker = createImageWorker({ repository: input.repository, processor, ids: input.ids, logger: input.logger });
 	return {

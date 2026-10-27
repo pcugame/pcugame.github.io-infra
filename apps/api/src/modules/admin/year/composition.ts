@@ -10,7 +10,7 @@ type YearConfig = Pick<
 	| 'PUBLIC_ASSET_ORIGIN'
 	| 'S3_BUCKET_PUBLIC'
 	| 'S3_BUCKET_PROTECTED'
->;
+> & Partial<Pick<Env, 'IMAGE_DELIVERY_MODE'>>;
 
 export interface YearProductionGraph {
 	exhibitionController: FastifyPluginAsync;
@@ -29,6 +29,7 @@ export function createYearProductionGraph(
 	const service = createExhibitionService({
 		publicAssetOrigin: deps.config.PUBLIC_ASSET_ORIGIN,
 		posterBucket: deps.config.S3_BUCKET_PUBLIC,
+		imageDeliveryMode: deps.config.IMAGE_DELIVERY_MODE,
 		protectedBucket: deps.config.S3_BUCKET_PROTECTED,
 		repository: deps.repository,
 		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,

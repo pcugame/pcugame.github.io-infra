@@ -19,6 +19,7 @@ export interface PublicProductionDependencies {
 		WEB_PUBLIC_URL: string;
 		PUBLIC_ASSET_ORIGIN?: string;
 		S3_BUCKET_PUBLIC: string;
+		IMAGE_DELIVERY_MODE?: 'legacy' | 'imgproxy';
 	};
 	repository: PublicProductionRepository;
 	/** Accepted by the root composition for uniform logging ownership; canonical public reads emit no fallback logs. */
@@ -42,6 +43,7 @@ export function createPublicProductionGraph(
 		webglPlayEnabled: deps.config.WEBGL_PLAY_ENABLED,
 		publicAssetOrigin,
 		publicBucket: deps.config.S3_BUCKET_PUBLIC,
+		imageDeliveryMode: deps.config.IMAGE_DELIVERY_MODE,
 		repository,
 	});
 	return {

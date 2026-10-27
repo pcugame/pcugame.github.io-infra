@@ -294,7 +294,7 @@ export function createPrismaImageWorkerRepository(
 					}
 				}
 				if (session.voteId) {
-					const display = outputs.find(o => o.role === 'DISPLAY_960');
+					const display = outputs.find(o => o.role === 'ORIGINAL');
 					if (!display || display.bucket !== input.publicBucket) {
 						throw new Error('Voting poster has no public display');
 					}
