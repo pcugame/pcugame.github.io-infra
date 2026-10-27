@@ -1,5 +1,6 @@
 import { Readable } from 'node:stream';
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { ExportSnapshot } from '../modules/admin/export/ports.js';
 import { exportWorkerConfig } from '../export-worker.js';
@@ -31,11 +32,12 @@ function snapshot(): ExportSnapshot {
 	};
 }
 
-function harness(overrides: { missingKey?: string; current?: boolean; complete?: boolean } = {}) {
+function harness(overrides: { missingKey?: string; current?: boolean; complete?: boolean; version?: 1 | 2; dryRun?: boolean } = {}) {
 	const value = snapshot();
+	value.version = overrides.version ?? 1;
 	const written: string[] = [];
 	const repository = {
-		claimNext: vi.fn().mockResolvedValue({ id: 'job-1', year: 2026, dryRun: false,
+		claimNext: vi.fn().mockResolvedValue({ id: 'job-1', year: 2026, dryRun: overrides.dryRun ?? false,
 			claimToken: 'claim', attemptCount: 1, maxAttempts: 3,
 			createdAt: value.createdAt, snapshot: null, snapshotHash: null }),
 		heartbeat: vi.fn().mockResolvedValue(true),
@@ -71,12 +73,73 @@ function harness(overrides: { missingKey?: string; current?: boolean; complete?:
 }
 
 describe('canonical export worker', () => {
+	it('exports only originals with matching preview paths, progress names and counts for v2', async () => {
+		const actual = harness({ version: 2 });
+		const preview = harness({ version: 2, dryRun: true });
+		await actual.worker.runPass();
+		await preview.worker.runPass();
+		expect(actual.written).toHaveLength(5);
+		expect(actual.written.every((path) => !/card_480|display_960|webgl\//.test(path))).toBe(true);
+		expect(actual.written.some((path) => path.endsWith('/20260001_Student_.._Game_webgl.zip'))).toBe(true);
+		const result = actual.repository.complete.mock.calls[0]![0].result;
+		expect(result).toMatchObject({ totalFiles: 5, downloaded: 5 });
+		expect(preview.repository.complete.mock.calls[0]![0].result.paths.sort()).toEqual([...result.paths].sort());
+		expect(preview.staging.writeObject).not.toHaveBeenCalled();
+		const progress = actual.repository.heartbeat.mock.calls.at(-1)![0].progress;
+		expect(progress.totalFiles).toBe(5);
+		expect(progress.currentProjectFiles.map((file: { fileName: string }) => file.fileName).sort())
+			.toEqual(actual.written.map((path) => path.split('/').at(-1)).sort());
+	});
+
+	it('names all team members in order and numbers repeated originals', () => {
+		const value = snapshot();
+		value.version = 2;
+		const project = value.projects[0]!;
+		project.title = '별빛여행';
+		project.members = [
+			{ studentId: '20260002', name: '김철수', sortOrder: 1 },
+			{ studentId: '20260001', name: '홍길동', sortOrder: 0 },
+		];
+		project.objects.push({ ...project.objects[0]!, id: 'game-2' });
+		const names = planExport(value).map((item) => item.fileName);
+		expect(names).toContain('20260001_홍길동_20260002_김철수_별빛여행_game.zip');
+		expect(names).toContain('20260001_홍길동_20260002_김철수_별빛여행_game_2.zip');
+		expect(names).toContain('20260001_홍길동_20260002_김철수_별빛여행_webgl.zip');
+	});
+
+	it('handles missing member data, extension fallback, uploaded thumbnails and unsafe names', () => {
+		const value = snapshot();
+		value.version = 2;
+		const project = value.projects[0]!;
+		project.members = [];
+		project.title = '게임/제목:*';
+		project.objects = [{ ...project.objects[0]!, kind: 'THUMBNAIL', originalName: 'no-extension', mimeType: 'image/png' }];
+		expect(planExport(value)[0]!.fileName).toBe('학번없음_이름없음_게임_제목___thumbnail.png');
+		project.members = [{ studentId: '', name: '', sortOrder: 0 }];
+		expect(planExport(value)[0]!.fileName).toBe('학번없음_이름없음_게임_제목___thumbnail.png');
+	});
+
+	it('bounds UTF-8 path components without splitting characters and rejects path collisions', () => {
+		const value = snapshot();
+		value.version = 2;
+		const project = value.projects[0]!;
+		project.title = '별'.repeat(100);
+		project.members = [{ studentId: '20260001', name: '홍'.repeat(100), sortOrder: 0 }];
+		for (const item of planExport(value)) {
+			expect(item.relativePath.split('/').every((part) => Buffer.byteLength(part) <= 255)).toBe(true);
+			expect(item.fileName).not.toContain('\uFFFD');
+		}
+		expect(planExport(value)[0]!.fileName).toMatch(/_game\.zip$/);
+		value.projects.push({ ...project, id: 8 });
+		expect(() => planExport(value)).toThrow('same portable filename');
+	});
+
 	it('requires a bounded private absolute NAS export root before opening worker resources', () => {
 		const config = {
 			...defaultTestEnv,
 			NAS_EXPORT_ROOT: '/mnt/nas/private-exports',
 	} as unknown as Parameters<typeof exportWorkerConfig>[0];
-		expect(exportWorkerConfig(config).outDir).toBe('/mnt/nas/private-exports');
+		expect(exportWorkerConfig(config).outDir).toBe(resolve('/mnt/nas/private-exports'));
 		expect(() => exportWorkerConfig({ ...config, NAS_EXPORT_ROOT: 'relative' }))
 			.toThrow('absolute private path');
 		expect(() => exportWorkerConfig({ ...config, NAS_EXPORT_ROOT: '/' }))

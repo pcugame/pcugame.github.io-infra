@@ -217,7 +217,7 @@ export function createExportRepository(
 					assets: {
 						where: { status: 'READY', kind: { in: ['GAME', 'VIDEO', 'IMAGE', 'POSTER', 'THUMBNAIL'] } },
 						orderBy: [{ kind: 'asc' }, { id: 'asc' }],
-						include: { representations: true },
+						include: { representations: { where: { role: 'ORIGINAL' } } },
 					},
 					currentWebglDeployment: { include: { sourceRepresentation: { include: { asset: true } } } },
 				},
@@ -232,14 +232,6 @@ export function createExportRepository(
 						throw new ExportSnapshotInvariantError('MISSING', `Asset ${asset.id} has no READY ORIGINAL representation`);
 					}
 					objects.push(canonicalObject({ assetId: asset.id, kind: asset.kind, originalName: asset.originalName, role: 'ORIGINAL', representation: original }));
-					if (asset.kind === 'IMAGE' || asset.kind === 'POSTER' || asset.kind === 'THUMBNAIL') {
-						for (const role of ['CARD_480', 'DISPLAY_960'] as const) {
-							const rendition = asset.representations.find((representation) => representation.role === role);
-							if (rendition?.state === 'READY') {
-								objects.push(canonicalObject({ assetId: asset.id, kind: asset.kind, originalName: `${role.toLowerCase()}.webp`, role, representation: rendition }));
-							}
-						}
-					}
 				}
 
 				if (project.currentWebglDeploymentId !== null) {
@@ -269,7 +261,7 @@ export function createExportRepository(
 			}
 			assertUniqueOwnership(projects);
 			const snapshot: ExportSnapshot = {
-				version: 1,
+				version: 2,
 				jobId: job.id,
 				year: job.year,
 				createdAt: job.createdAt,

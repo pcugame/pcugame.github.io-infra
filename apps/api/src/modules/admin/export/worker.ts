@@ -66,14 +66,14 @@ interface PlannedObject {
 	fileName: string;
 }
 
-function safeComponent(value: string, fallback: string): string {
+function safeComponent(value: string, fallback: string, maxLength = 100): string {
 	const cleaned = value
 		.normalize('NFKC')
 		.replace(/[<>:"/\\|?*\x00-\x1f\x7f]/g, '_')
 		.replace(/[. ]+$/g, '')
 		.replace(/\s+/g, ' ')
 		.trim()
-		.slice(0, 100);
+		.slice(0, maxLength);
 	if (!cleaned || cleaned === '.' || cleaned === '..') return fallback;
 	return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(cleaned) ? `_${cleaned}` : cleaned;
 }
@@ -102,6 +102,26 @@ function projectDirectory(project: ExportProjectSnapshot): string {
 	return `${exhibition}/${safeComponent(members ? `${project.title}_${members}` : project.title, `project_${project.id}`)}`;
 }
 
+function truncateUtf8(value: string, maxBytes: number): string {
+	let result = '';
+	let bytes = 0;
+	for (const character of value) {
+		bytes += Buffer.byteLength(character);
+		if (bytes > maxBytes) break;
+		result += character;
+	}
+	return result;
+}
+
+function originalFileName(project: ExportProjectSnapshot, object: ExportSnapshotObject, index: number): string {
+	const members = [...project.members].sort((a, b) => a.sortOrder - b.sortOrder)
+		.map((member) => `${safeComponent(member.studentId, '학번없음', Infinity)}_${safeComponent(member.name, '이름없음', Infinity)}`)
+		.join('_') || '학번없음_이름없음';
+	const prefix = `${members}_${safeComponent(project.title, `project_${project.id}`, Infinity)}`;
+	const suffix = `_${object.kind.toLowerCase()}${index === 0 ? '' : `_${index + 1}`}.${extension(object)}`;
+	return `${truncateUtf8(prefix, 255 - Buffer.byteLength(suffix))}${suffix}`;
+}
+
 export function planExport(snapshot: ExportSnapshot): PlannedObject[] {
 	const planned: PlannedObject[] = [];
 	const occupied = new Set<string>();
@@ -109,7 +129,12 @@ export function planExport(snapshot: ExportSnapshot): PlannedObject[] {
 		const count = new Map<string, number>();
 		for (const object of project.objects) {
 			let fileName: string;
-			if (object.role === 'WEBGL_SOURCE') {
+			if (snapshot.version === 2) {
+				if (object.role !== 'ORIGINAL' && object.role !== 'WEBGL_SOURCE') continue;
+				const index = count.get(object.kind) ?? 0;
+				count.set(object.kind, index + 1);
+				fileName = originalFileName(project, object, index);
+			} else if (object.role === 'WEBGL_SOURCE') {
 				fileName = 'webgl/webgl.zip';
 			} else {
 				const base = object.role === 'ORIGINAL'
@@ -119,7 +144,11 @@ export function planExport(snapshot: ExportSnapshot): PlannedObject[] {
 				count.set(base, index + 1);
 				fileName = `${base}${index === 0 ? '' : `_${index + 1}`}.${extension(object)}`;
 			}
-			const relativePath = `${projectDirectory(project)}/${fileName}`;
+			const directory = projectDirectory(project);
+			const portableDirectory = snapshot.version === 2
+				? directory.split('/').map((part) => truncateUtf8(part, 255).replace(/[. ]+$/g, '')).join('/')
+				: directory;
+			const relativePath = `${portableDirectory}/${fileName}`;
 			const collisionKey = relativePath.normalize('NFC').toLocaleLowerCase('en-US');
 			if (occupied.has(collisionKey)) {
 				throw new ExportSnapshotInvariantError('DUPLICATE', 'Two export objects resolve to the same portable filename');

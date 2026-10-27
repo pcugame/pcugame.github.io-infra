@@ -98,10 +98,15 @@ describe('Phase 2 canonical export repository', () => {
 			{ id: 'game-original', source: 'canonical' },
 			{ id: 'video-original', source: 'canonical' },
 			{ id: 'image-original', source: 'canonical' },
-			{ id: 'image-card', source: 'canonical' },
 			{ id: 'webgl-source', source: 'canonical' },
 		]);
 		expect(client.project.findMany).toHaveBeenCalledOnce();
+		expect(result.snapshot.version).toBe(2);
+		expect(client.project.findMany).toHaveBeenCalledWith(expect.objectContaining({
+			include: expect.objectContaining({ assets: expect.objectContaining({
+				include: { representations: { where: { role: 'ORIGINAL' } } },
+			}) }),
+		}));
 	});
 
 	it('rejects a persisted Phase 1 snapshot containing a legacy object', async () => {

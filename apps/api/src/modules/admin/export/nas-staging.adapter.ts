@@ -127,7 +127,8 @@ export function createNasExportStaging(deps: {
 		const destination = resolve(input.stage.stagingPath, relativePath);
 		if (!inside(input.stage.stagingPath, destination)) throw new Error('Export object escaped staging root');
 		await ensureDirectoryTree(input.stage.stagingPath, dirname(destination));
-		const temporary = `${destination}.${safeComponent(deps.ids.next())}.tmp`;
+		// Keep temporary names bounded even when the final filename uses 255 bytes.
+		const temporary = join(dirname(destination), `.${safeComponent(deps.ids.next())}.tmp`);
 		let handle: Awaited<ReturnType<typeof open>> | undefined;
 		let written = 0;
 		try {

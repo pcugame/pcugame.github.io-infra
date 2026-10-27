@@ -283,6 +283,8 @@ export default function AdminYearsPage() {
 					<details className="exhibition-export admin-card">
 						<summary>연도별 NAS 내보내기</summary>
 						<p className="field-hint">
+							업로드한 원본만 학번_이름_게임제목_에셋종류 형식으로 저장합니다.
+							팀원은 전원 표기하며 WebGL은 원본 ZIP을 포함합니다.{' '}
 							선택한 연도의 모든 전시회를 포함합니다. 실제 대상 작품·파일 수는
 							서버에서 계산하며 목록의 작품 수와 다를 수 있습니다.
 						</p>

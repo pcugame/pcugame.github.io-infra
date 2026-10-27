@@ -27,7 +27,8 @@ export interface ExportProjectSnapshot {
 }
 
 export interface ExportSnapshot {
-	version: 1;
+	/** v1 preserves legacy paths for retries; v2 exports named originals only. */
+	version: 1 | 2;
 	jobId: string;
 	year: number | null;
 	createdAt: string;
