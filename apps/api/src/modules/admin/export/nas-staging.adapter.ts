@@ -10,6 +10,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { ExportResultSchema, type ExportResult } from '@pcu/contracts';
 
 const MANIFEST = '.pcu-export-manifest.json';
 
@@ -52,13 +53,14 @@ async function syncDirectory(path: string): Promise<void> {
 	try { await handle.sync(); } finally { await handle.close(); }
 }
 
-async function readManifest(path: string): Promise<{ jobId: string; snapshotHash: string } | null> {
+async function readManifest(path: string): Promise<{ jobId: string; snapshotHash: string; result?: ExportResult } | null> {
 	try {
 		const parsed = JSON.parse(await readFile(join(path, MANIFEST), 'utf8')) as unknown;
 		if (!parsed || typeof parsed !== 'object') return null;
-		const value = parsed as { jobId?: unknown; snapshotHash?: unknown };
+		const value = parsed as { jobId?: unknown; snapshotHash?: unknown; result?: unknown };
+		const result = value.result === undefined ? undefined : ExportResultSchema.parse(value.result);
 		return typeof value.jobId === 'string' && typeof value.snapshotHash === 'string'
-			? { jobId: value.jobId, snapshotHash: value.snapshotHash }
+			? { jobId: value.jobId, snapshotHash: value.snapshotHash, result }
 			: null;
 	} catch {
 		return null;
@@ -69,6 +71,7 @@ export interface NasExportStage {
 	state: 'STAGING' | 'READY';
 	stagingPath: string;
 	finalPath: string;
+	result?: ExportResult;
 }
 
 /** Worker-only NAS adapter. The configured root must never be an HTTP origin. */
@@ -97,7 +100,7 @@ export function createNasExportStaging(deps: {
 			if (published.jobId !== jobId || published.snapshotHash !== snapshotHash) {
 				throw new Error('Existing export directory has a different snapshot manifest');
 			}
-			return { state: 'READY', stagingPath, finalPath };
+			return { state: 'READY', stagingPath, finalPath, result: published.result };
 		}
 		try {
 			const stat = await lstat(finalPath);
@@ -165,8 +168,15 @@ export function createNasExportStaging(deps: {
 		}
 	}
 
-	async function publish(stage: NasExportStage, jobId: string, snapshotHash: string): Promise<string> {
+	async function publish(stage: NasExportStage, jobId: string, snapshotHash: string, result?: ExportResult): Promise<string> {
 		if (stage.state === 'READY') return stage.finalPath;
+		if (result) {
+			const report = await open(join(stage.stagingPath, 'export-report.json'), 'wx', 0o600);
+			try {
+				await report.writeFile(`${JSON.stringify(result, null, 2)}\n`);
+				await report.sync();
+			} finally { await report.close(); }
+		}
 		const manifestPath = join(stage.stagingPath, MANIFEST);
 		const handle = await open(
 			manifestPath,
@@ -174,7 +184,7 @@ export function createNasExportStaging(deps: {
 			0o600,
 		);
 		try {
-			await handle.writeFile(`${JSON.stringify({ jobId, snapshotHash })}\n`, 'utf8');
+			await handle.writeFile(`${JSON.stringify({ jobId, snapshotHash, result })}\n`, 'utf8');
 			await handle.sync();
 		} finally {
 			await handle.close();

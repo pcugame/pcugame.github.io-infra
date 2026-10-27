@@ -215,7 +215,7 @@ export function ExportProgressModal({
 
 							<p className="export-progress__notice">
 								내보내기 중에는 이 창을 닫을 수 없습니다. 작업이 끝날 때까지 잠시만
-								기다려주세요. (탭을 닫거나 새로고침하면 진행 중인 작업이 중단됩니다.)
+								기다려주세요. 탭을 닫거나 새로고침해도 서버 작업은 계속됩니다.
 							</p>
 						</div>
 					)}
@@ -238,7 +238,7 @@ export function ExportProgressModal({
 						<div
 							style={{
 								background:
-									result.failed > 0
+									result.failed > 0 || (result.missingFiles?.length ?? 0) > 0
 										? 'var(--color-warning-bg, #fff3e0)'
 										: 'var(--color-success-bg, #e8f5e9)',
 								padding: '1rem',
@@ -246,7 +246,7 @@ export function ExportProgressModal({
 								marginBottom: '1rem',
 							}}
 						>
-							<strong>{year}년도 내보내기 완료</strong>
+							<strong>{year}년도 내보내기 완료{result.missingFiles?.length ? ' (일부 파일 누락)' : ''}</strong>
 							<p style={{ margin: '0.35rem 0 0' }}>
 								다운로드 {result.downloaded}개 · 스킵 {result.skipped}개
 								{result.failed > 0 && (
@@ -258,6 +258,20 @@ export function ExportProgressModal({
 									</>
 								)}
 							</p>
+							{!!result.missingFiles?.length && (
+								<div>
+									<p>원본을 찾을 수 없어 다음 {result.missingFiles.length}개 파일을 건너뛰었습니다. 나머지 파일은 저장했습니다.</p>
+									<p>삭제·교체 여부는 별도 확인이 필요합니다. NAS의 export-report.json에도 목록이 저장됩니다.</p>
+									<ul>
+										{result.missingFiles.map((file) => (
+											<li key={file.path}>
+												<strong>{file.projectTitle}</strong> (작품 #{file.projectId}) · {file.originalName}
+												<div style={{ overflowWrap: 'anywhere' }}>{file.path} — 원본 파일 없음</div>
+											</li>
+										))}
+									</ul>
+								</div>
+							)}
 							{result.aborted && (
 								<p
 									style={{

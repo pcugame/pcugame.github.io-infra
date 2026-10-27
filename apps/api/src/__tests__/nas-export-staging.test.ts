@@ -37,6 +37,16 @@ describe.skipIf(process.platform === 'win32')('NAS export staging', () => {
 		expect(await readdir(stage.stagingPath)).toEqual([]);
 	}, 5_000);
 
+	it('persists the exact partial result in the report and recovery manifest', async () => {
+		const { adapter, stage } = await fixture();
+		const result = { projects: 1, totalFiles: 1, downloaded: 0, skipped: 1, failed: 0, aborted: false,
+			paths: [], missingFiles: [{ projectId: 7, projectTitle: 'Game', assetId: 9, originalName: 'video.mp4',
+				path: 'ExportedAssets/job/project/video.mp4', reason: 'SOURCE_MISSING' as const }] };
+		const destination = await adapter.publish(stage, 'job', 'hash', result);
+		expect(JSON.parse(await readFile(join(destination, 'export-report.json'), 'utf8'))).toEqual(result);
+		expect((await adapter.prepare('job', 'hash')).result).toEqual(result);
+	}, 5_000);
+
 	it('closes and removes the partial file when a transfer is aborted', async () => {
 		const { adapter, stage } = await fixture();
 		const controller = new AbortController();

@@ -27,11 +27,19 @@ export async function resolveCiEvidence(source, api, unzip) {
       || !['pull_request', 'workflow_dispatch'].includes(run.event)
       || run.path !== '.github/workflows/pr-checks.yml') continue;
     const { artifacts } = await api(`/repos/${repository}/actions/runs/${run.id}/artifacts?per_page=100`);
-    const artifact = artifacts.find(item => item.name === `ci-evidence-${run.id}-${run.run_attempt}` && !item.expired);
-    if (!artifact) continue;
+    // A failed integration job can be rerun without rerunning successful verify.
+    // Its evidence then belongs to an earlier attempt of this same immutable run.
+    const candidates = artifacts.flatMap(item => {
+      const match = item.name.match(new RegExp(`^ci-evidence-${run.id}-(\\d+)$`));
+      const attempt = Number(match?.[1]);
+      return !item.expired && Number.isSafeInteger(attempt) && attempt >= 1 && attempt <= run.run_attempt
+        ? [{ artifact: item, attempt }] : [];
+    }).sort((a, b) => b.attempt - a.attempt);
+    if (!candidates.length) continue;
+    const { artifact, attempt } = candidates[0];
     const evidence = JSON.parse(await unzip(await api(`/repos/${repository}/actions/artifacts/${artifact.id}/zip`, true)));
     if (evidence.version !== 1 || evidence.repository !== repository || evidence.runId !== run.id
-      || evidence.attempt !== run.run_attempt || !shaPattern.test(evidence.source ?? '')
+      || evidence.attempt !== attempt || !shaPattern.test(evidence.source ?? '')
       || evidence.tree !== target.tree.sha || typeof evidence.api !== 'boolean' || typeof evidence.web !== 'boolean') continue;
     const tested = await api(`/repos/${repository}/git/commits/${evidence.source}`);
     if (tested.tree?.sha !== evidence.tree) continue;

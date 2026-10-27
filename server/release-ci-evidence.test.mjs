@@ -38,6 +38,10 @@ test('rejects mismatched source trees, stale attempts and expired or missing rec
 test('API-only CI does not suppress Web checks', async () => {
   assert.deepEqual(await resolve({ receiptOverride: { web: false } }), { api: true, web: false, runs: [12] });
 });
+test('reuses successful verify evidence when only integration was rerun', async () => {
+  assert.deepEqual(await resolve({ runOverride: { run_attempt: 3 } }), { api: true, web: true, runs: [12] });
+  assert.deepEqual(await resolve({ runOverride: { run_attempt: 1 } }), { api: false, web: false, runs: [] });
+});
 test('records actual checkout tree and explicitly selected checks', () => {
   assert.deepEqual(recordEvidence({ GITHUB_REPOSITORY: repository, GITHUB_RUN_ID: '12', GITHUB_RUN_ATTEMPT: '2', CI_API: 'true', CI_WEB: 'false' }, ref => ref === 'HEAD' ? tested : tree), { ...receipt, web: false });
 });

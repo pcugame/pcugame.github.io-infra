@@ -287,7 +287,7 @@ export function createExportRepository(
 			return { snapshot, hash };
 		},
 
-		async snapshotStillCurrent(snapshot: ExportSnapshot): Promise<boolean> {
+		async snapshotStillCurrent(snapshot: ExportSnapshot, options: { allowDeleted?: boolean } = {}): Promise<boolean> {
 			const projectPointers = await client.project.findMany({
 				where: { id: { in: snapshot.projects.map((project) => project.id) }, changeRequestDraft: null },
 				select: { id: true, currentWebglDeploymentId: true },
@@ -295,6 +295,7 @@ export function createExportRepository(
 			const pointerByProject = new Map(projectPointers.map((project) => [project.id, project]));
 			for (const project of snapshot.projects) {
 				const current = pointerByProject.get(project.id);
+				if (options.allowDeleted && (!current || current.currentWebglDeploymentId === null)) continue;
 				if (!current || current.currentWebglDeploymentId !== project.currentWebglDeploymentId) return false;
 			}
 			const canonical = snapshot.projects.flatMap((project) => project.objects);
@@ -305,6 +306,7 @@ export function createExportRepository(
 				const byId = new Map(rows.map((row) => [row.id, row]));
 				for (const object of canonical) {
 					const current = byId.get(object.id);
+					if (options.allowDeleted && (!current || current.state === 'DELETING' || current.state === 'DELETED')) continue;
 					if (!current || current.state !== 'READY' || current.bucket !== object.bucket
 						|| current.objectKey !== object.objectKey
 						|| current.updatedAt.toISOString() !== object.representationUpdatedAt

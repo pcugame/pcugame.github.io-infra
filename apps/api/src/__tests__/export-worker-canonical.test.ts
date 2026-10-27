@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ExportSnapshot } from '../modules/admin/export/ports.js';
 import { exportWorkerConfig } from '../export-worker.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
-import { createExportWorker, ExportSourceMissingError, planExport } from '../modules/admin/export/worker.js';
+import { createExportWorker, planExport } from '../modules/admin/export/worker.js';
 
 function snapshot(): ExportSnapshot {
 	return {
@@ -104,15 +104,45 @@ describe('canonical export worker', () => {
 		}));
 	});
 
-	it('fails a missing Garage source as a terminal invariant and removes staging', async () => {
-		const { worker, repository, staging } = harness({ missingKey: 'v' });
+	it('skips a missing Garage source, publishes remaining files and reports the missing original', async () => {
+		const { worker, repository, staging, written } = harness({ missingKey: 'v' });
 		await worker.runPass();
-		expect(repository.failInvariant).toHaveBeenCalledWith(expect.objectContaining({
-			error: new ExportSourceMissingError().message,
-		}));
+		expect(repository.failInvariant).not.toHaveBeenCalled();
 		expect(repository.retryOrFail).not.toHaveBeenCalled();
-		expect(staging.cleanup).toHaveBeenCalledOnce();
+		expect(staging.cleanup).not.toHaveBeenCalled();
+		expect(written).toHaveLength(6);
+		const result = repository.complete.mock.calls[0]![0].result;
+		expect(result).toMatchObject({ downloaded: 6, skipped: 1, failed: 0, missingFiles: [{
+			projectId: 7, projectTitle: '../Game', assetId: 2, originalName: 'video.mp4', reason: 'SOURCE_MISSING',
+		}] });
+		expect(result.paths).toHaveLength(6);
+		expect(result.paths.some((path: string) => path.endsWith('/video.mp4'))).toBe(false);
+		expect(staging.publish.mock.calls[0]![3]).toEqual(result);
+		expect(repository.snapshotStillCurrent).toHaveBeenCalledWith(expect.anything(), { allowDeleted: true });
+	});
+
+	it('restores a published partial outcome after losing the DB completion acknowledgement', async () => {
+		const { worker, repository, staging } = harness({ missingKey: 'v', complete: false });
+		await worker.runPass();
+		const result = repository.complete.mock.calls[0]![0].result;
+		staging.prepare.mockResolvedValue({ state: 'READY', stagingPath: '/staging', finalPath: '/final', result } as never);
+		repository.complete.mockResolvedValue(true);
+		repository.snapshotStillCurrent.mockResolvedValue(false);
+		staging.writeObject.mockClear();
+		await worker.runPass();
+		expect(staging.writeObject).not.toHaveBeenCalled();
+		expect(repository.complete.mock.calls[1]![0].result).toEqual(result);
+		expect(result.missingFiles).toHaveLength(1);
+	});
+
+	it('still retries storage errors instead of claiming they were missing files', async () => {
+		const { worker, repository, staging } = harness();
+		staging.writeObject.mockRejectedValue(new Error('NAS unavailable'));
+		await worker.runPass();
+		expect(repository.retryOrFail).toHaveBeenCalledOnce();
+		expect(repository.complete).not.toHaveBeenCalled();
 		expect(staging.publish).not.toHaveBeenCalled();
+		expect(staging.cleanup).toHaveBeenCalledOnce();
 	});
 
 	it('does not publish when the immutable snapshot fence changes', async () => {
