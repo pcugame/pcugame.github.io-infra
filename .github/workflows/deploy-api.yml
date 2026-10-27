@@ -46,10 +46,18 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Reuse successful CI for the exact source tree
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node server/release-ci-evidence.mjs
+
       - name: Install dependencies
+        if: steps.ci.outputs.api != 'true'
         run: npm ci --include-workspace-root
 
       - name: Verify API build
+        if: steps.ci.outputs.api != 'true'
         run: npm run verify:api-release
 
       - uses: docker/setup-buildx-action@v3

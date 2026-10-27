@@ -166,18 +166,25 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Reuse successful CI for the exact source tree
+        if: ${{ inputs.operation == 'release' }}
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node server/release-ci-evidence.mjs
+
       - name: Install final web dependencies
         if: ${{ inputs.operation == 'release' }}
         # The HTTP parity suite imports real API controllers and their dependencies.
         run: npm ci --workspace=apps/web --workspace=apps/api --include-workspace-root
 
       - name: Test final web
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ inputs.operation == 'release' && steps.ci.outputs.web != 'true' }}
         working-directory: apps/web
         run: npm test
 
       - name: Lint final web
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ inputs.operation == 'release' && steps.ci.outputs.web != 'true' }}
         working-directory: apps/web
         run: npm run lint
 

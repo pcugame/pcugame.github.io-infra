@@ -122,6 +122,18 @@ jobs:
         if: steps.changes.outputs.web == 'true' && steps.changes.outputs.full != 'true'
         run: npm run build --workspace=apps/web
 
+      - name: Record verified source and check coverage
+        env:
+          CI_API: ${{ steps.changes.outputs.api }}
+          CI_WEB: ${{ steps.changes.outputs.web }}
+        run: node server/release-ci-evidence.mjs record
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-evidence.json
+          retention-days: 30
+
   integration:
     needs: verify
     if: always()

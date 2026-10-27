@@ -51,6 +51,14 @@ GitHub Actions에서 **Deploy Release**를 선택하고 다음과 같이 실행�
 
 일반 release 순서는 preflight → backup/drain → migration → API·worker activation → complete runtime health → Web publication → final smoke이다. Source 검증·이미지 선택과 `production` environment gate를 거친 뒤 Web test·lint·build, SHA 기록과 Pages recovery capture를 준비한다. 서버 단계는 [release-orchestrate.sh](../../server/release-orchestrate.sh), 단계 순서는 [Deploy Release](../../.github/workflows/release-api-cutover.yml)를 기준으로 한다.
 
+### 성공한 CI 재사용
+
+`PR Checks`는 실제 checkout의 commit·Git tree와 API/Web 검사 범위를 `ci-evidence-<run>-<attempt>` artifact로 30일간 보관한다. 배포와 이미지 빌드는 같은 저장소의 성공한 `PR Checks` 실행에서 이 기록을 찾고, 배포 소스와 검증 소스의 Git tree가 정확히 같은지 확인한다. PR merge와 squash merge의 commit SHA가 달라도 전체 파일 내용이 같으면 재사용할 수 있다.
+
+API 검증 기록이 있으면 이미지 빌드 전의 중복 `verify:api-release`와 해당 의존성 설치를 생략한다. Web 검증 기록이 있으면 배포 전 Web test·lint를 생략한다. 검사하지 않은 영역, 실패·진행 중인 실행, 만료된 artifact, 다른 소스의 결과는 재사용하지 않고 기존 검사를 수행한다. 조회 오류는 배포를 중단한다. 기존 CI 실행에 기록이 없으면 최초 한 번은 기존 검사 경로를 사용한다.
+
+배포용 이미지·Web 산출물 생성, 불변 이미지 검증, DB 백업, 운영 health·smoke 검사는 계속 수행한다. 재사용한 CI run ID와 검사 범위는 workflow summary에 기록한다.
+
 ### 이미지 선택과 사전 검증
 
 [resolve-release-image.mjs](../../server/resolve-release-image.mjs)는 같은 SHA의 성공한 master build에서 `verified-api-release-<SHA>` artifact를 찾는다. manifest 보관 기간은 30일이다. 사용 가능한 결과가 없으면 기존 build workflow를 호출하여 같은 소스를 빌드한다.
