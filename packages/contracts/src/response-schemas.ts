@@ -566,6 +566,14 @@ export const ExportResultSchema = z.object({
 	failed: NonNegativeIntegerSchema,
 	aborted: z.boolean(),
 	paths: z.array(z.string()),
+	missingFiles: z.array(z.object({
+		projectId: PositiveIntegerSchema,
+		projectTitle: z.string(),
+		assetId: PositiveIntegerSchema,
+		originalName: z.string(),
+		path: z.string(),
+		reason: z.literal('SOURCE_MISSING'),
+	}).strict()).optional(),
 }).strict();
 
 export const ExportStartResponseSchema = z.object({

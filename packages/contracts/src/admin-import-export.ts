@@ -65,6 +65,15 @@ export type ExportStatusResponse = {
 	error?: string | null;
 };
 
+export type ExportMissingFile = {
+	projectId: number;
+	projectTitle: string;
+	assetId: number;
+	originalName: string;
+	path: string;
+	reason: 'SOURCE_MISSING';
+};
+
 export type ExportResult = {
 	projects: number;
 	totalFiles: number;
@@ -73,4 +82,6 @@ export type ExportResult = {
 	failed: number;
 	aborted: boolean;
 	paths: string[];
+	/** Files unavailable at their snapshotted source; omitted by older workers. */
+	missingFiles?: ExportMissingFile[];
 };

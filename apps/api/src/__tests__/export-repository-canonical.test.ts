@@ -39,6 +39,30 @@ function claim(overrides: Partial<ClaimedExportJob> = {}): ClaimedExportJob {
 }
 
 describe('Phase 2 canonical export repository', () => {
+	it('allows deleted references for partial exports but rejects mutations to surviving sources', async () => {
+		const original = representation('original', 10, 'ORIGINAL', 'game.zip');
+		const value: ExportSnapshot = { version: 1, jobId: 'job', year: 2026, createdAt: updatedAt.toISOString(),
+			projects: [{ id: 7, title: 'Game', exhibition: { year: 2026, title: 'Show' }, members: [],
+				currentWebglDeploymentId: 'deployment', objects: [{ id: original.id, assetId: 10, kind: 'GAME',
+					role: 'ORIGINAL', bucket: original.bucket, objectKey: original.objectKey, mimeType: original.mimeType,
+					sizeBytes: 100, etag: original.etag, representationUpdatedAt: updatedAt.toISOString(),
+					originalName: 'game.zip', source: 'canonical' }] }] };
+		const projects = vi.fn().mockResolvedValue([]);
+		const objects = vi.fn().mockResolvedValue([]);
+		const repository = createExportRepository({ project: { findMany: projects },
+			assetRepresentation: { findMany: objects } } as unknown as PrismaClient);
+		expect(await repository.snapshotStillCurrent(value)).toBe(false);
+		expect(await repository.snapshotStillCurrent(value, { allowDeleted: true })).toBe(true);
+		projects.mockResolvedValue([{ id: 7, currentWebglDeploymentId: null }]);
+		objects.mockResolvedValue([{ ...original, state: 'DELETED' }]);
+		expect(await repository.snapshotStillCurrent(value, { allowDeleted: true })).toBe(true);
+		objects.mockResolvedValue([{ ...original, objectKey: 'replacement.zip' }]);
+		expect(await repository.snapshotStillCurrent(value, { allowDeleted: true })).toBe(false);
+		objects.mockResolvedValue([original]);
+		projects.mockResolvedValue([{ id: 7, currentWebglDeploymentId: 'replacement' }]);
+		expect(await repository.snapshotStillCurrent(value, { allowDeleted: true })).toBe(false);
+	});
+
 	it('snapshots only canonical representations and the current WebGL source deployment', async () => {
 		const gameOriginal = representation('game-original', 10, 'ORIGINAL', 'protected/assets/10/original/g1.zip');
 		const videoOriginal = representation('video-original', 11, 'ORIGINAL', 'protected/assets/11/original/g1.mov');

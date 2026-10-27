@@ -28,7 +28,7 @@ interface ExportWorkerRepository {
 	claimNext(token: string, leaseMs: number): Promise<ClaimedExportJob | null>;
 	heartbeat(input: { id: string; token: string; leaseMs: number; progress: ExportProgress }): Promise<boolean>;
 	loadOrCreateSnapshot(job: ClaimedExportJob): Promise<{ snapshot: ExportSnapshot; hash: string }>;
-	snapshotStillCurrent(snapshot: ExportSnapshot): Promise<boolean>;
+	snapshotStillCurrent(snapshot: ExportSnapshot, options?: { allowDeleted?: boolean }): Promise<boolean>;
 	complete(input: { id: string; token: string; snapshotHash: string; result: ExportResult }): Promise<boolean>;
 	retryOrFail(input: {
 		id: string; token: string; attemptCount: number; maxAttempts: number;
@@ -55,7 +55,7 @@ interface ExportStaging {
 		maxBytes: number;
 		signal?: AbortSignal;
 	}): Promise<number>;
-	publish(stage: NasExportStage, jobId: string, snapshotHash: string): Promise<string>;
+	publish(stage: NasExportStage, jobId: string, snapshotHash: string, result?: ExportResult): Promise<string>;
 	cleanup(stage: NasExportStage): Promise<void>;
 }
 
@@ -204,6 +204,8 @@ export function createExportWorker(deps: {
 		const timer = setInterval(() => { void pulse(); }, Math.max(1_000, Math.floor(deps.options.leaseMs / 3)));
 		let stage: NasExportStage | undefined;
 		let published = false;
+		let failedTransfer = false;
+		let transferError: unknown;
 		try {
 			const { snapshot, hash } = await deps.repository.loadOrCreateSnapshot(job);
 			const plan = planExport(snapshot);
@@ -211,16 +213,21 @@ export function createExportWorker(deps: {
 				phase: plan.length === 0 ? 'finishing' : 'downloading' };
 			await pulse();
 			if (controller.signal.aborted) return;
-			const result: ExportResult = {
+			let result: ExportResult = {
 				projects: snapshot.projects.length, totalFiles: plan.length,
 				downloaded: 0, skipped: 0, failed: 0, aborted: false,
-				paths: plan.map((item) => `ExportedAssets/${job.id}/${item.relativePath}`),
+				paths: job.dryRun ? plan.map((item) => `ExportedAssets/${job.id}/${item.relativePath}`) : [],
+				missingFiles: [],
 			};
 			if (!job.dryRun) {
 				stage = await deps.staging.prepare(job.id, hash);
 				if (stage.state === 'READY') {
-					result.skipped = plan.length;
-					progress = { ...progress, skipped: plan.length, phase: 'finishing' };
+					// A publication can succeed before the DB acknowledgement. Preserve
+					// its exact partial outcome instead of reporting every file as present.
+					result = stage.result ?? { ...result, skipped: plan.length,
+						paths: plan.map((item) => `ExportedAssets/${job.id}/${item.relativePath}`) };
+					progress = { ...progress, downloaded: result.downloaded, skipped: result.skipped,
+						failed: result.failed, phase: 'finishing' };
 				} else {
 					let reservedBytes = 0;
 					for (let projectIndex = 0; projectIndex < snapshot.projects.length; projectIndex++) {
@@ -242,7 +249,17 @@ export function createExportWorker(deps: {
 								const source = await deps.reader.open({
 									bucket: item.object.bucket, objectKey: item.object.objectKey, signal: controller.signal,
 								});
-								if (!source) throw new ExportSourceMissingError();
+								if (!source) {
+									result.skipped++;
+									result.missingFiles!.push({ projectId: project.id, projectTitle: project.title,
+										assetId: item.object.assetId, originalName: item.object.originalName,
+										path: `ExportedAssets/${job.id}/${item.relativePath}`, reason: 'SOURCE_MISSING' });
+									progress = { ...progress, skipped: result.skipped };
+									progress.currentProjectFiles[index] = { ...progress.currentProjectFiles[index]!, status: 'skipped' };
+									deps.logger.warn({ jobId: job.id, projectId: project.id, assetId: item.object.assetId,
+										representationId: item.object.id, relativePath: item.relativePath }, 'Export source missing; continuing');
+									continue;
+								}
 								if (!Number.isSafeInteger(source.sizeBytes) || source.sizeBytes < 0
 									|| source.sizeBytes > deps.options.maxObjectBytes
 									|| (item.object.sizeBytes !== null && item.object.sizeBytes !== source.sizeBytes)
@@ -259,22 +276,28 @@ export function createExportWorker(deps: {
 									body: source.body, expectedBytes: source.sizeBytes,
 									maxBytes: deps.options.maxObjectBytes, signal: controller.signal });
 								result.downloaded++;
+								result.paths.push(`ExportedAssets/${job.id}/${item.relativePath}`);
 								progress = { ...progress, downloaded: result.downloaded };
 								progress.currentProjectFiles[index] = { ...progress.currentProjectFiles[index]!, status: 'saved' };
 							}
 						};
-						await Promise.all(Array.from({ length: Math.min(deps.options.concurrency, projectFiles.length) }, consume));
+						// Stop and settle all writers before removing staging on a fatal error.
+						const transfers = await Promise.allSettled(Array.from({ length: Math.min(deps.options.concurrency, projectFiles.length) },
+							() => consume().catch((error) => {
+								if (!failedTransfer) { failedTransfer = true; transferError = error; }
+								controller.abort(error);
+								throw error;
+							})));
+						const failure = transfers.find((transfer) => transfer.status === 'rejected');
+						if (failure?.status === 'rejected') throw transferError;
 						if (controller.signal.aborted) return;
 						await pulse();
 					}
-					if (!await deps.repository.snapshotStillCurrent(snapshot)) throw new ExportSnapshotChangedError();
+					if (!await deps.repository.snapshotStillCurrent(snapshot, { allowDeleted: true })) throw new ExportSnapshotChangedError();
 					progress = { ...progress, phase: 'finishing' };
-					await deps.staging.publish(stage, job.id, hash);
+					await deps.staging.publish(stage, job.id, hash, result);
 					published = true;
 				}
-			}
-			if (!job.dryRun && !published && stage?.state === 'READY') {
-				if (!await deps.repository.snapshotStillCurrent(snapshot)) throw new ExportSnapshotChangedError();
 			}
 			progress = { ...progress, phase: 'finishing' };
 			await pulse();
@@ -287,7 +310,7 @@ export function createExportWorker(deps: {
 			if (stage && !published) await deps.staging.cleanup(stage).catch((cleanupError) => {
 				deps.logger.warn({ cleanupError, jobId: job.id }, 'Failed to clean export staging directory');
 			});
-			if (controller.signal.aborted || outerSignal?.aborted) return;
+			if ((controller.signal.aborted && !failedTransfer) || outerSignal?.aborted) return;
 			const message = safeFailure(error);
 			if (terminalError(error)) {
 				await deps.repository.failInvariant({ id: job.id, token: job.claimToken, error: message });
