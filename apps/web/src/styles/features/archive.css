@@ -652,3 +652,11 @@ button.archive-card {
     font-size: 0.9rem;
   }
 }
+
+.archive-card__image { position: relative; }
+.archive-card__awards { position: absolute; top: .5rem; right: .5rem; left: .5rem; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .3rem; pointer-events: none; }
+.award-badge { display: inline-flex; flex-direction: column; align-items: center; max-width: 5rem; padding: .2rem; border-radius: .4rem; background: #fffef0; color: #30250c; font-size: .7rem; overflow-wrap: anywhere; }
+.archive-card__image .award-badge img, .award-badge img { width: 2.5rem; height: 2.5rem; object-fit: contain; }
+.award-settings fieldset { display: grid; gap: .75rem; min-width: 0; }
+.award-settings details { padding: .75rem; border: 1px solid #aaa; }
+.award-settings label { display: block; margin-block: .5rem; }

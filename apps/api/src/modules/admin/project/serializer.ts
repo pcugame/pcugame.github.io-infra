@@ -1,3 +1,4 @@
+import { serializeAwards, type AwardLink } from '../../awards/serialization.js';
 import { publicationReadiness } from '@pcu/contracts';
 import { videoPlaybackFields, type PlaybackJobView } from '../../../shared/video-playbacks.js';
 import { projectRequiredAssets, type RequiredAssetsSource } from '../../../shared/project-required-assets.js';
@@ -67,6 +68,8 @@ function imageSourceFor(asset: {
 
 /** Serialize a project detail record to the API response shape */
 export type SerializableProject = {
+ exhibitionId?: number;
+ awards?: AwardLink[];
  publicationRequested?: boolean;
  publicationStatus?: 'PRIVATE' | 'PUBLIC';
  version?: number;
@@ -204,6 +207,8 @@ export function createProjectSerializer(
 		return {
 			requiredAssets: projectRequiredAssets(project, publicDelivery?.publicBucket),
 			id: project.id,
+ exhibitionId: project.exhibitionId,
+ awards: serializeAwards(project.awards, publicDelivery?.publicAssetOrigin ?? base, publicDelivery?.publicBucket ?? 'pcu-public'),
 			visibility: project.visibility,
 			exhibitionVisibility: project.exhibition.visibility,
 			canChangeVisibility: false,

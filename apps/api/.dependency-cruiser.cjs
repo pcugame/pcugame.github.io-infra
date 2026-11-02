@@ -1,6 +1,8 @@
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
 	forbidden: [
+ { name: 'award-policy-service-ports', severity: 'error', from: { path: 'src/modules/awards/(service|policy)\\.ts$' }, to: { path: '(generated/prisma|fastify|awards/repository)' } },
+ { name: 'award-write-encapsulation', severity: 'error', from: { path: 'src/modules/(public|admin/project)/' }, to: { path: 'src/modules/awards/(service|policy|repository|controller)\\.ts$' } },
 		{
 			name: 'no-circular',
 			severity: 'error',

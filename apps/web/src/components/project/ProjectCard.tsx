@@ -1,9 +1,10 @@
+import { AwardImage } from '../awards/AwardImage';
 import { useEffect, useRef } from 'react';
 import type { PublicProjectCard } from '../../contracts';
 import { ResponsiveImage } from '../common';
 
 interface Props {
-  project: Pick<PublicProjectCard, 'slug' | 'title' | 'summary' | 'poster' | 'members'>;
+  project: Pick<PublicProjectCard, 'slug' | 'title' | 'summary' | 'poster' | 'members' | 'awards'>;
   localPoster?: File | null;
   year: number;
   onSelect?: (slug: string) => void;
@@ -42,6 +43,7 @@ export function ProjectCard({ project, onSelect, localPoster }: Props) {
             <span>{project.title.charAt(0)}</span>
           </div>
         )}
+        <span className="archive-card__awards">{project.awards?.map(award => <AwardImage key={award.id} award={award} />)}</span>
       </div>
       <div className="archive-card__body">
         <div className="archive-card__title-wrap">

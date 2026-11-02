@@ -133,6 +133,8 @@ const garageEnv = {
 };
 
 const suites = {
+ 'awards-gateway': { files: ['src/__tests__/awards-gateway.garage.postgres.test.ts'], env: { RUN_POSTGRES_INTEGRATION: 'true', RUN_GARAGE_INTEGRATION: 'true', RUN_GATEWAY_INTEGRATION: 'true' } },
+ awards: { files: ['src/__tests__/awards.postgres.test.ts'], env: { RUN_POSTGRES_INTEGRATION: 'true' } },
 	voting: { files: ['src/__tests__/voting.postgres.test.ts'], env: { RUN_POSTGRES_INTEGRATION: 'true' } },
 	'orphan-renewal-timeout': {
 		files: ['src/__tests__/orphan-renewal-timeout.postgres.test.ts'],
@@ -234,6 +236,8 @@ const suites = {
 };
 
 const fullSuiteOrder = [
+ 'awards',
+ 'awards-gateway',
 	'voting',
 	'orphan-renewal-timeout',
 	'canonical-processing-fences',

@@ -1,3 +1,4 @@
+import type { Award } from './awards.js';
 import type { PublicationStatus, PublicationReadiness, PublicationCommand } from './publication.js';
 import type { ExternalLink } from './external-links.js';
 import type { Visibility } from './enums.js';
@@ -33,6 +34,7 @@ export type ProjectRequiredAssets = {
 };
 
 export type AdminProjectItem = {
+ awards?: Award[];
  publicationRequested?: boolean;
  publicationError?: string;
  publicationStatus?: PublicationStatus;
@@ -100,6 +102,8 @@ export type AdminProjectListResponse = {
 };
 
 export type AdminProjectDetail = {
+ exhibitionId?: number;
+ awards?: Award[];
  publicationRequested?: boolean;
  publicationError?: string;
  publicationStatus?: PublicationStatus;

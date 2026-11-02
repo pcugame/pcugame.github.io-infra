@@ -14,7 +14,7 @@ function project(id: number, poster?: PublicProjectCard['poster']): PublicProjec
 }
 
 describe('sortProjectsWithPosterFirst', () => {
-	it('moves projects without posters behind projects with posters', () => {
+	it('preserves server award priority even without posters', () => {
 		const sorted = sortProjectsWithPosterFirst([
 			project(1),
 			project(2, { original: { url: 'https://example.test/poster-2.webp' }, renditions: [] }),
@@ -22,7 +22,7 @@ describe('sortProjectsWithPosterFirst', () => {
 			project(4, { original: { url: 'https://example.test/poster-4.webp' }, renditions: [] }),
 		]);
 
-		expect(sorted.map((p) => p.id)).toEqual([2, 4, 1, 3]);
+		expect(sorted.map((p) => p.id)).toEqual([1, 2, 3, 4]);
 	});
 
 	it('keeps the original order within the same poster group', () => {

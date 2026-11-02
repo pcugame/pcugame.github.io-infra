@@ -1,3 +1,4 @@
+import { AwardSchema } from './awards.js';
 import { VIDEO_PLAYBACK_QUALITIES } from './video-playback.js';
 import { PublicationStatusSchema, PublicationReadinessSchema } from './publication.js';
 import { WebglDisplayDimensionSchema, WebglDisplayKindSchema, WebglDisplayModeSchema } from './webgl-display.js';
@@ -144,6 +145,7 @@ export const PublicYearListResponseSchema = z.object({
 }).strict();
 
 export const PublicProjectCardSchema = z.object({
+ awards: z.array(AwardSchema).default([]),
 	canChangeVisibility: z.boolean(),
 	exhibitionVisibility: VisibilitySchema,
 	visibility: VisibilitySchema,
@@ -237,6 +239,7 @@ export const PublicUploadConfigSchema = z.object({
 }).strict();
 
 export const PublicProjectDetailResponseSchema = z.object({
+ awards: z.array(AwardSchema).default([]),
 	canChangeVisibility: z.boolean(),
 	exhibitionVisibility: VisibilitySchema,
 	visibility: VisibilitySchema,
@@ -302,6 +305,7 @@ export const ProjectRequiredAssetsSchema = z.object({
 }).strict();
 
 export const AdminProjectItemSchema = z.object({
+ awards: z.array(AwardSchema).default([]),
  publicationRequested: z.boolean().optional(),
  publicationError: z.string().optional(),
  publicationStatus: PublicationStatusSchema.optional(),
@@ -342,6 +346,8 @@ export const AdminProjectListResponseSchema = z.object({
 }).strict();
 
 export const AdminProjectDetailSchema = z.object({
+ exhibitionId: z.number().int().optional(),
+ awards: z.array(AwardSchema).default([]),
  publicationRequested: z.boolean().optional(),
  publicationError: z.string().optional(),
  publicationStatus: PublicationStatusSchema.optional(),

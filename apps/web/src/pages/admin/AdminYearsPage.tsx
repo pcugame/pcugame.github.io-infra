@@ -1,3 +1,4 @@
+import { AwardSettings } from '../../features/admin/awards/AwardSettings';
 import {
 	Button,
 	CheckboxField,
@@ -468,6 +469,7 @@ export default function AdminYearsPage() {
 											<YearPosterControls year={year} large />
 										</section>
 									)}
+									{editingId === year.id && <AwardSettings exhibitionId={year.id} />}
 									<div className="exhibition-danger">
 										<Button
 											variant="danger"

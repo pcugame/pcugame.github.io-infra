@@ -1,3 +1,4 @@
+import { serializeAwards, type AwardLink } from '../awards/serialization.js';
 import { videoPlaybackFields, type PlaybackJobView } from '../../shared/video-playbacks.js';
 import { effectiveProjectExternalLinks } from '../../shared/project-external-links.js';
 import { resolveWebglDisplay, type WebglDisplayMode } from '@pcu/contracts';
@@ -27,6 +28,7 @@ interface PublicPosterRecord {
 }
 
 interface PublicProjectListRecord {
+ awards?: AwardLink[];
 	visibility: Visibility;
 	creatorId: number;
 	exhibition: { year: number; visibility: Visibility; isModificationEnabled: boolean };
@@ -159,6 +161,7 @@ export async function listProjectsByYear(
 		const poster = p.poster;
 		return {
 			id: p.id,
+ awards: serializeAwards(p.awards, imageOptions(deps).publicAssetOrigin, imageOptions(deps).publicBucket),
 			visibility: p.visibility,
 			exhibitionVisibility: p.exhibition.visibility,
 			canChangeVisibility: canChangeProjectVisibility(actor, p),
@@ -196,6 +199,7 @@ export async function listProjectsByExhibition(
 		const poster = p.poster;
 		return {
 			id: p.id,
+ awards: serializeAwards(p.awards, imageOptions(deps).publicAssetOrigin, imageOptions(deps).publicBucket),
 			visibility: p.visibility,
 			exhibitionVisibility: p.exhibition.visibility,
 			canChangeVisibility: canChangeProjectVisibility(actor, p),
@@ -322,6 +326,7 @@ export async function getProjectDetail(
 		visibility: project.visibility,
 		exhibitionVisibility: project.exhibition.visibility,
 		canChangeVisibility: canChangeProjectVisibility(actor, project),
+ awards: serializeAwards(project.awards, imageOptions(deps).publicAssetOrigin, imageOptions(deps).publicBucket),
 		year: project.exhibition.year,
 		slug: project.slug,
 		title: project.title,

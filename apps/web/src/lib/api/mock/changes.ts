@@ -1,3 +1,4 @@
+import { clearProjectAwards } from './awards';
 import {
   CreateProjectChangeSchema, UpdateProjectChangeSchema, RejectProjectChangeSchema,
   type ProjectChangeDetail, type ProjectChangeSummary, type ProjectChangeValues,
@@ -64,6 +65,7 @@ function apply(ctx: MockContext, row: ChangeRecord) {
   if (!validSource(ctx, row)) { row.state = 'CONFLICT'; row.error = 'Project changed or requester no longer has access'; discardStage(ctx, row); return; }
   const { project, stage, remaining } = ready(ctx, row);
   if (row.kind === 'DELETE') {
+    clearProjectAwards(ctx,project.id);
     delete ctx.state.projects[project.id];
     delete ctx.state.submissions[project.id];
     for (const request of Object.values(records(ctx))) if (request.projectId === project.id) request.projectId = null;

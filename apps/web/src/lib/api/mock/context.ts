@@ -1,3 +1,4 @@
+import type { AwardState } from '@pcu/contracts';
 import type { MockVotingState } from './voting';
 import type { AdminExhibitionItem, AdminProjectDetail } from '../../../contracts';
 import type { ProjectChangeDetail, WebglNetworkRequest } from '@pcu/contracts';
@@ -34,6 +35,7 @@ export type MockFault = { status: number; code: string; message: string; path?: 
 export type MockControls = { delayMs: number; fault: MockFault | null; worker: 'auto' | 'paused' | 'fail' };
 export type MockBannedIp = { id:number; ip:string; reason:string; createdAt:string; source:'AUTO'|'MANUAL'|'LEGACY'; active:boolean; disabledAt:string|null };
 export type MockState = {
+  awards?: Record<number, AwardState>;
 	videoRepairs?: Record<number, { projectId: number; dueAt: number }>;
   voting?: MockVotingState;
   version: 2; revision: number; counters: Record<string, number>; authUser: MockUserSelection; authExpiresAt?: string;

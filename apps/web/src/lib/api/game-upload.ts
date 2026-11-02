@@ -378,8 +378,8 @@ export async function uploadDirectAssetFile(
 	const owner: DirectAssetUploadOwner = typeof ownerOrProjectId === 'number'
 		? { type: 'PROJECT', id: ownerOrProjectId }
 		: ownerOrProjectId;
-	if (owner.type === 'EXHIBITION' && kind !== 'POSTER') {
-		throw new Error('Only poster uploads may be owned by an exhibition');
+	if (owner.type === 'EXHIBITION' && kind !== 'POSTER' && kind !== 'IMAGE') {
+		throw new Error('Only poster and image uploads may be owned by an exhibition');
 	}
 	throwIfAborted(options.signal);
 	const initialProgress = (phase: DirectAssetUploadProgress['phase']) => onProgress?.({ phase, uploadedChunks: 0, totalChunks: 0, uploadedBytes: 0, confirmedBytes: 0, inFlightBytes: 0, totalBytes: file.size, percent: 0 });

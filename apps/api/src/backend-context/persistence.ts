@@ -1,3 +1,5 @@
+import type { AwardRepository } from '../modules/awards/ports.js';
+import { createAwardRepository } from '../modules/awards/repository.js';
 import type { DiagnosticRepository } from '../modules/webgl-play/diagnostic-ports.js';
 import type { DatabaseHealth } from '../application/ports.js';
 import type { Env } from '../config/env.js';
@@ -35,6 +37,7 @@ import type { WebglPlayRepository } from '../modules/webgl-play/repository.js';
  * scripted domain ports and never need to construct or emulate Prisma delegates.
  */
 export interface BackendPersistencePorts {
+	awardRepository?: AwardRepository;
 	fileAccessRepository?: FileAccessRepository;
 	webglPlayRepository?: WebglPlayRepository;
 	webglDiagnosticRepository?: DiagnosticRepository;
@@ -59,6 +62,7 @@ export interface BackendPersistencePorts {
 export function createBackendPersistence(prisma: PrismaClient | undefined, config: Env): BackendPersistencePorts {
 	if (!prisma) throw new Error('Prisma persistence was not initialized');
 	return {
+		awardRepository: createAwardRepository(prisma),
 		purgeVoteInvestigations: () => prisma.$executeRaw`DELETE FROM vote_investigations WHERE "expiresAt" <= clock_timestamp()`,
 		databaseHealth: createPrismaHealth(prisma),
 		authRepository: createAuthRepository(prisma),

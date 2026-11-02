@@ -201,6 +201,8 @@ model User {
 }
 
 model Exhibition {
+  awardsVersion Int @default(0) @map("awards_version")
+  awards ExhibitionAward[]
   visibility Visibility @default(PUBLIC)
   id              Int      @id @default(autoincrement())
   year            Int
@@ -241,6 +243,8 @@ model PublicationException {
 }
 
 model Project {
+  awards ProjectAward[]
+  @@unique([id, exhibitionId])
   publicationStatus PublicationStatus @default(PRIVATE) @map("publication_status")
   publicationRequestedVersion Int? @map("publication_requested_version")
   publicationRequested Boolean @default(false) @map("publication_requested")
@@ -318,6 +322,7 @@ model ProjectMember {
 }
 
 model Asset {
+  awards ExhibitionAward[]
   id             Int         @id @default(autoincrement())
   projectId      Int?        @map("project_id")
   exhibitionId   Int?        @map("exhibition_id")
@@ -1165,4 +1170,29 @@ model VideoPlaybackRendition {
   @@index([bucket, objectKey])
   @@index([expiresAt])
   @@map("video_playback_renditions")
+}
+
+model ExhibitionAward {
+  id Int @id @default(autoincrement())
+  exhibitionId Int @map("exhibition_id")
+  name String
+  sortOrder Int @map("sort_order")
+  builtinKey String? @map("builtin_key")
+  assetId Int? @map("asset_id")
+  exhibition Exhibition @relation(fields: [exhibitionId], references: [id], onDelete: Cascade)
+  asset Asset? @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  recipients ProjectAward[]
+  @@unique([id, exhibitionId])
+  @@unique([exhibitionId, name])
+  @@map("exhibition_awards")
+}
+model ProjectAward {
+  exhibitionId Int @map("exhibition_id")
+  projectId Int @map("project_id")
+  awardId Int @map("award_id")
+  project Project @relation(fields: [projectId, exhibitionId], references: [id, exhibitionId], onDelete: Cascade, onUpdate: NoAction)
+  award ExhibitionAward @relation(fields: [awardId, exhibitionId], references: [id, exhibitionId], onDelete: Cascade, onUpdate: NoAction)
+  @@id([projectId, awardId])
+  @@index([awardId, exhibitionId])
+  @@map("project_awards")
 }
