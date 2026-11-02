@@ -439,8 +439,7 @@ export default function AdminYearsPage() {
 										>
 											<h3>포스터 관리</h3>
 											<p className="field-hint">
-												업로드·삭제는 별도로 반영되며 설정 취소로 되돌아가지
-												않습니다. 창을 닫아도 업로드는 유지됩니다.
+												포스터는 업로드가 완료되면 반영됩니다.
 											</p>
 											<YearPosterControls year={year} large />
 										</section>

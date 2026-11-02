@@ -72,6 +72,31 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('awards produ
   }
   const reopened=database.createClient();expect(await reopened.projectAward.count({where:{projectId:p.id}})).toBe(2);
  });
+ it('rejects every award mutation from project owners and anonymous callers without changing data',async()=>{
+  const {e,p,base}=await fixture();
+  // fixture() assigns the USER session's account as this project's creator.
+  expect(p.creatorId).toBe((await db.authSession.findUniqueOrThrow({where:{id:sessions['USER']!}})).userId);
+  const initial=await service().change(e.id,0,{kind:'create',name:'Protected',builtinKey:'laurel-gold',assetId:null});
+  const award=initial.items[0]!;
+  const version={expectedVersion:initial.version};
+  const edits=[
+   ['POST',base,{...version,name:'Forbidden',builtinKey:'laurel-gold',assetId:null}],
+   ['PATCH',`${base}/${award.id}`,{...version,name:'Forbidden',builtinKey:'laurel-slate',assetId:null}],
+   ['DELETE',`${base}/${award.id}`,version],
+   ['PUT',`${base}/order`,{...version,awardIds:[award.id]}],
+   ['PATCH',`${base}/${award.id}/recipients`,{...version,addProjectIds:[p.id],removeProjectIds:[]}],
+   ['PUT',`/api/admin/projects/${p.id}/awards`,{...version,awardIds:[award.id]}],
+   ['DELETE',`/api/admin/exhibitions/${e.id}/award-images/1`,version],
+  ] as const;
+  for(const [role,status] of [[null,401],['USER',403]] as const){
+   for(const [method,url,body] of edits){
+    const result=await request(method,url,body,role);
+    expect(result.statusCode,`${role}: ${method} ${url}: ${result.body}`).toBe(status);
+   }
+  }
+  expect(await service().read(e.id)).toEqual(initial);
+  expect(await db.projectAward.count({where:{projectId:p.id}})).toBe(0);
+ });
  it('rejects same-version races and rolls back invalid batch changes',async()=>{
   const {e,p}=await fixture();const s=service();const changes=await Promise.allSettled([1,2].map(n=>s.change(e.id,0,{kind:'create',name:`Award ${n}`,builtinKey:'medal',assetId:null})));
   expect(changes.filter(r=>r.status==='fulfilled')).toHaveLength(1);expect((changes.find(r=>r.status==='rejected') as PromiseRejectedResult).reason.statusCode).toBe(409);

@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AwardState } from '@pcu/contracts';
 
+const viewer = vi.hoisted(() => ({ role: 'ADMIN' as string | null }));
+vi.mock('../features/auth', () => ({ useMe: () => ({ user: viewer.role ? { role: viewer.role } : null }) }));
 const api = vi.hoisted(() => ({ read: vi.fn(), edit: vi.fn() }));
 vi.mock('../lib/api/awards', () => ({ awardApi: api }));
 vi.mock('../lib/api', () => ({ getApiErrorMessage: (error: Error) => error.message }));
@@ -18,6 +20,7 @@ const initial: AwardState = {
   assets: [{ id: 42, name: 'custom-award.png', imageUrl: '/custom-award.png' }],
 };
 beforeEach(() => {
+  viewer.role = 'ADMIN';
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
 });
@@ -115,4 +118,19 @@ it('retains the name draft on save failure and restores the saved value on Escap
   fireEvent.click(screen.getByRole('button', { name: '편집 닫기' }));
   fireEvent.click(screen.getByRole('button', { name: '수정' }));
   expect((screen.getByRole('textbox', { name: '상 이름' }) as HTMLInputElement).value).toBe('대상');
+});
+
+
+it.each([null, 'USER'])('hides award settings and skips protected reads for %s', (role) => {
+  viewer.role = role;
+  renderSettings();
+  expect(screen.queryByRole('region', { name: '상 및 수상작' })).toBeNull();
+  expect(api.read).not.toHaveBeenCalled();
+});
+
+it.each(['OPERATOR', 'ADMIN'])('allows %s to open award settings', async (role) => {
+  viewer.role = role;
+  renderSettings();
+  expect(await screen.findByRole('heading', { name: '상 및 수상작' })).toBeTruthy();
+  expect(api.read).toHaveBeenCalledWith(12);
 });

@@ -72,12 +72,12 @@ export function ExhibitionSettingsDialog({
 		>
 			<header className="exhibition-dialog__header">
 				<div className="exhibition-dialog__identity">
-					<p className="exhibition-dialog__eyebrow">
-						전시회 설정 · {year.year}
-					</p>
-					<h2 tabIndex={-1} id={`exhibition-dialog-title-${id}`}>
-						{year.title || '제목 없는 전시회'}
-					</h2>
+					<div className="exhibition-dialog__title-row">
+						<span className="admin-year-badge">{year.year}</span>
+						<h2 tabIndex={-1} id={`exhibition-dialog-title-${id}`}>
+							{year.title || '제목 없는 전시회'}
+						</h2>
+					</div>
 					<dl className="exhibition-dialog__facts">
 						{env.VISIBILITY_CONTROLS_ENABLED && (
 							<div>

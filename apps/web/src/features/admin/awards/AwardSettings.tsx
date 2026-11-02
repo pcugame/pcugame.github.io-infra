@@ -1,3 +1,4 @@
+import { useMe } from '../../auth';
 import { IconPlus } from '@tabler/icons-react';
 import { ProjectUploadDialog } from '../../../components/common/ProjectUploadDialog';
 import { useId, useRef, useState } from 'react';
@@ -11,14 +12,19 @@ import {
 import { awardApi } from '../../../lib/api/awards';
 import { getApiErrorMessage } from '../../../lib/api';
 import DirectImageUploadWidget from '../../../components/DirectImageUploadWidget';
-import { AwardImage } from '../../../components/awards/AwardImage';
 import { AwardIcon } from '../../../components/project/AwardIcon';
 import { laurelIcons } from '../../../components/project/awardIcons';
 
 type Save = (
 	action: () => Promise<AwardState>,
 ) => Promise<AwardState | undefined>;
-export function AwardSettings({
+export function AwardSettings(props: { exhibitionId: number; projectId?: number }) {
+	const { user } = useMe();
+	if (user?.role !== 'OPERATOR' && user?.role !== 'ADMIN') return null;
+	return <AuthorizedAwardSettings {...props} />;
+}
+
+function AuthorizedAwardSettings({
 	exhibitionId,
 	projectId,
 }: {
@@ -82,10 +88,10 @@ export function AwardSettings({
 		}
 	}
 	return (
-		<section aria-label="상 및 수상작" className="award-settings">
+		<section aria-label="상 및 수상작" className={`award-settings${projectId ? ' award-settings--project' : ''}`}>
 			<div className="award-settings__heading">
 				<h3>{projectId ? '받은 상' : '상 및 수상작'}</h3>
-				<span className="award-settings__count">{state.items.length}개</span>
+				{!projectId && <span className="award-settings__count">{state.items.length}개</span>}
 			</div>
 			<p className="field-hint">
 				{projectId
@@ -227,20 +233,19 @@ function ProjectAwards({
 		return <p>전시회 설정에서 상을 먼저 등록해 주세요.</p>;
 	return (
 		<>
-			{state.items.map((a) => (
-				<CheckboxField
-					key={a.id}
-					label={<AwardImage award={a} />}
-					checked={ids.includes(a.id)}
-					onChange={(e) =>
-						setIds(
-							e.target.checked
-								? [...ids, a.id]
-								: ids.filter((id) => id !== a.id),
-						)
-					}
-				/>
-			))}
+			<div className="project-award-tiles">
+				{state.items.map((award) => (
+					<label key={award.id} className="btn btn--secondary btn--small award-card__icon-tile project-award-tile" title={award.name}>
+						<input type="checkbox" checked={ids.includes(award.id)} onChange={(event) =>
+							setIds(event.target.checked ? [...ids, award.id] : ids.filter(id => id !== award.id))
+						} />
+						<AwardIcon award={award} />
+						<span>{award.name}</span>
+					</label>
+				))}
+			</div>
+			<div className="project-award-picker__footer">
+				<span>{ids.length ? `${ids.length}개 선택` : '선택한 상 없음'}</span>
 			<Button
 				onClick={() =>
 					void save(() => awardApi.project(projectId, state.version, ids))
@@ -248,6 +253,7 @@ function ProjectAwards({
 			>
 				수상 선택 저장
 			</Button>
+			</div>
 		</>
 	);
 }

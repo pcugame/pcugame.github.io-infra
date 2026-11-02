@@ -290,19 +290,25 @@
 	margin: auto;
 	padding: 0;
 	width: min(62rem, calc(100vw - 3rem));
+	height: min(48rem, calc(100dvh - 3rem));
 	max-height: calc(100dvh - 3rem);
 	border: 1px solid var(--color-border);
 	border-top: 3px solid var(--color-primary);
 	border-radius: 12px;
 	background: var(--color-surface);
 	color: var(--color-text);
-	overflow: auto;
+	overflow: hidden;
 	box-shadow: 0 20px 70px rgb(0 0 0 / 25%);
+}
+.exhibition-dialog[open] {
+	display: flex;
+	flex-direction: column;
 }
 .exhibition-dialog::backdrop {
 	background: rgb(0 0 0 / 55%);
 }
 .exhibition-dialog__header {
+	flex-shrink: 0;
 	display: flex;
 	align-items: flex-start;
 	justify-content: space-between;
@@ -313,11 +319,13 @@
 .exhibition-dialog__identity {
 	min-width: 0;
 }
-.exhibition-dialog__eyebrow {
-	margin: 0 0 0.45rem;
-	font-size: 0.78rem;
-	font-weight: 600;
-	color: var(--color-primary);
+.exhibition-dialog__title-row {
+	display: flex;
+	align-items: baseline;
+	gap: .75rem;
+}
+.exhibition-dialog__title-row .admin-year-badge {
+	flex-shrink: 0;
 }
 .exhibition-dialog__header h2 {
 	margin: 0;
@@ -349,9 +357,11 @@
 .exhibition-dialog__body {
 	display: flex;
 	flex-direction: column;
-	min-height: 29rem;
+	flex: 1;
+	min-height: 0;
 }
 .exhibition-dialog__tabs {
+	flex-shrink: 0;
 	display: flex;
 	justify-content: flex-start;
 	gap: 0.5rem;
@@ -384,7 +394,10 @@
 .exhibition-dialog__content {
 	width: 100%;
 	min-width: 0;
-	min-height: 29rem;
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	scrollbar-gutter: stable;
 	padding: 1.75rem 2rem;
 }
 .exhibition-dialog [role='tabpanel'][hidden] {
@@ -460,6 +473,7 @@
 @media (max-width: 50em) {
 	.exhibition-dialog {
 		width: calc(100vw - 1rem);
+		height: min(48rem, calc(100dvh - 1rem));
 		max-height: calc(100dvh - 1rem);
 	}
 	.exhibition-dialog__header {
@@ -901,3 +915,96 @@
 @media (max-width: 50em) {
   .award-card__icon-picker { padding-inline: 1rem; }
 }
+
+/* Poster editor: a quiet preview stage beside the existing upload controls. */
+.exhibition-dialog .admin-exhibition-poster--editor {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+	align-items: start;
+	gap: 2rem;
+}
+.exhibition-poster-stage {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1.25rem;
+	padding: 1.25rem;
+	border: 1px solid var(--color-border);
+	border-radius: 10px;
+	background: var(--color-bg);
+	min-width: 0;
+}
+.exhibition-poster-stage__label {
+	align-self: flex-start;
+	padding: .25rem .6rem;
+	border-radius: 5px;
+	background: var(--color-surface);
+	font-size: .75rem;
+	font-weight: 600;
+	color: var(--color-text-muted);
+}
+.exhibition-dialog .exhibition-poster-stage .project-poster-preview {
+	flex: none;
+	width: min(100%, 11rem);
+}
+.exhibition-dialog .exhibition-poster-stage .admin-exhibition-poster__preview {
+	width: min(100%, 11rem);
+	max-width: none;
+	border-radius: 6px;
+	background: var(--color-surface);
+}
+.exhibition-dialog .exhibition-poster-stage .project-poster-preview .admin-exhibition-poster__preview { width: 100%; }
+.exhibition-poster-stage > p {
+	margin: 0;
+	font-size: .75rem;
+	line-height: 1.6;
+	text-align: center;
+	color: var(--color-text-muted);
+}
+.exhibition-poster-editor__heading { margin-bottom: 1.5rem; }
+
+.exhibition-poster-editor__heading h4 { margin: 0 0 .5rem; font-size: 1rem; }
+.exhibition-poster-editor__heading p { margin: 0; font-size: .8rem; color: var(--color-text-muted); line-height: 1.6; }
+.exhibition-dialog .admin-exhibition-poster--editor .admin-exhibition-poster__name { font-size: .8rem; line-height: 1.6; }
+.exhibition-dialog .admin-exhibition-poster--editor .admin-exhibition-poster__size { font-size: .75rem; }
+.exhibition-dialog .admin-exhibition-poster--editor .game-upload {
+	margin: 1rem 0;
+	padding: 1rem;
+	border: 1px dashed var(--color-border);
+	border-radius: 8px;
+	background: var(--color-bg);
+}
+.admin-exhibition-poster--editor input[type='file'] { width: 100%; padding: 0; border: 0; background: transparent; font-size: .8rem; color: var(--color-text-muted); }
+.admin-exhibition-poster--editor input[type='file']::file-selector-button {
+	padding: .6rem .8rem;
+	margin-right: .65rem;
+	border: 1px solid var(--color-border);
+	border-radius: 6px;
+	background: var(--color-surface);
+	color: var(--color-text);
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+@media (max-width: 50em) {
+	.exhibition-dialog .admin-exhibition-poster--editor { grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
+	.exhibition-dialog .exhibition-poster-stage .project-poster-preview,
+	.exhibition-dialog .exhibition-poster-stage > .admin-exhibition-poster__preview { width: min(100%, 8rem); }
+}
+
+/* Award choices belong to the project editor, not the public badge layout. */
+.award-settings--project {
+	margin-top: 1.5rem;
+	padding-top: 1.5rem;
+	border-top: 1px solid var(--color-border);
+	gap: .75rem;
+}
+.award-settings--project > .field-hint { margin: 0 0 .25rem; }
+.project-award-tiles { display: flex; flex-wrap: wrap; gap: .4rem; }
+.project-award-tile { position: relative; }
+.project-award-tile input { position: absolute; top: .2rem; right: .2rem; width: .75rem; height: .75rem; margin: 0; accent-color: var(--color-primary); }
+.project-award-tile:has(:checked) { border-color: var(--color-primary); background: var(--color-bg); }
+.project-award-tile:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.project-award-tile:has(:disabled) { opacity: .65; cursor: wait; }
+.project-award-picker__footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; }
+.project-award-picker__footer > span { font-size: .8rem; color: var(--color-text-muted); }
