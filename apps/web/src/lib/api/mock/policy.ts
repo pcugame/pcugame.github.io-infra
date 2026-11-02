@@ -1,3 +1,4 @@
+import { clearProjectAwards } from './awards';
 import { mockPublicationStatus } from './publication';
 import type { WebglDisplayAnalysis } from '@pcu/contracts';
 import type { MockContext, MockProject } from './context';
@@ -48,6 +49,7 @@ export function canReadPublicProject(ctx: MockContext, project: MockProject) {
 export function bumpProjectVersion(ctx: MockContext, project: MockProject) { project.version = (project.version ?? 0) + 1; project.updatedAt = ctx.now(); }
 export const projectVersion = bumpProjectVersion;
 export function removeProject(ctx: MockContext, id: number) {
+ clearProjectAwards(ctx,id);
  delete ctx.state.projects[id]; delete ctx.state.submissions[id];
  for (const session of Object.values(ctx.state.sessions)) if (session.owner.type==='PROJECT' && session.owner.id===id) session.state='CANCELLED';
  for (const request of Object.values(ctx.state.changeRequests)) {

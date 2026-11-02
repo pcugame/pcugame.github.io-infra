@@ -19,6 +19,7 @@
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
     "@pcu/contracts": "*",
+    "@tabler/icons-react": "^3.50.0",
     "@tanstack/react-query": "^5.91.0",
     "@videojs/core": "10.1.0",
     "@videojs/react": "10.1.0",

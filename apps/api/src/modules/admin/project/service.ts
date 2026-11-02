@@ -1,3 +1,4 @@
+import { serializeAwards } from '../../awards/serialization.js';
 import type { PublicationCommand } from '@pcu/contracts';
 import { projectRequiredAssets } from '../../../shared/project-required-assets.js';
 import type { ExternalLink, Platform, Visibility } from '@pcu/contracts';
@@ -13,6 +14,7 @@ import type { Actor } from '../../../application/http-input.js';
 type ProjectSerializer = ReturnType<typeof createProjectSerializer>['serializeProjectDetail'];
 
 export interface ProjectServiceDependencies {
+ publicAssetOrigin?: string;
 	repository: ProjectCrudRepository;
 	resolveExternalLinks?: typeof enrichExternalLinks;
 	serializeProjectDetail: ProjectSerializer;
@@ -71,6 +73,7 @@ export async function listProjects(
 	const items: AdminProjectItem[] = projects.map((p) => ({
 		requiredAssets: projectRequiredAssets(p, deps.deletionBuckets.publicBucket),
 		id: p.id,
+ awards: serializeAwards(p.awards, deps.publicAssetOrigin ?? "http://localhost", deps.deletionBuckets.publicBucket),
 		visibility: p.visibility,
 		exhibitionVisibility: p.exhibition.visibility,
 		title: p.title,

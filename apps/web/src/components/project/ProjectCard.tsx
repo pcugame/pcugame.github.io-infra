@@ -1,9 +1,10 @@
+import { AwardBadge } from './AwardBadge';
 import { useEffect, useRef } from 'react';
 import type { PublicProjectCard } from '../../contracts';
 import { ResponsiveImage } from '../common';
 
 interface Props {
-  project: Pick<PublicProjectCard, 'slug' | 'title' | 'summary' | 'poster' | 'members'>;
+  project: Pick<PublicProjectCard, 'slug' | 'title' | 'summary' | 'poster' | 'members' | 'awards'>;
   localPoster?: File | null;
   year: number;
   onSelect?: (slug: string) => void;
@@ -41,6 +42,11 @@ export function ProjectCard({ project, onSelect, localPoster }: Props) {
           <div className="archive-card__placeholder" aria-hidden="true">
             <span>{project.title.charAt(0)}</span>
           </div>
+        )}
+        {Boolean(project.awards?.length) && (
+          <span className="archive-card__awards" role="group" aria-label="수상 내역">
+            {project.awards?.map(award => <AwardBadge key={award.id} award={award} />)}
+          </span>
         )}
       </div>
       <div className="archive-card__body">

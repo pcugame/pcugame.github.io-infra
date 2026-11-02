@@ -147,6 +147,7 @@ export function createExhibitionRepository(
 	/** Delete an Exhibition by primary key (cascades via DB FK) */
 	function deleteExhibition(id: number, outbox: ExhibitionDeletionOutboxConfig) {
 		return withExhibitionMutationTransaction(prisma, async (tx) => {
+			await tx.$queryRaw`SELECT id FROM projects WHERE exhibition_id = ${id} ORDER BY id FOR UPDATE`;
 			const existing = await lockExhibition(tx, id);
 			if (!existing) return null;
 			const sources = await tx.project.findMany({ where: { exhibitionId: id, changeRequestDraft: null }, select: { id: true }, orderBy: { id: 'asc' } });
@@ -169,11 +170,11 @@ export function createExhibitionRepository(
 				}),
 				tx.assetUploadSession.findMany({
 					where: {
-						project: { exhibitionId: id },
-						state: { in: ['ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING'] },
+						OR: [{ project: { exhibitionId: id } }, { exhibitionId: id }],
 					},
 					select: {
 						id: true,
+						bucket: true, state: true,
 						projectId: true,
 						kind: true,
 						objectKey: true,
@@ -187,12 +188,14 @@ export function createExhibitionRepository(
 			]);
 			const canonicalActiveUploads = activeUploads.map((upload) => ({
 				projectId: upload.projectId ?? undefined,
+				bucket: upload.bucket, state: upload.state,
 				uploadKind: upload.kind,
 				objectKey: upload.objectKey,
 				uploadId: upload.uploadId,
 				canonicalSessionId: upload.id,
 			}));
 			const targets = [
+				...canonicalActiveUploads.map(upload => ({ bucket: upload.bucket, storageKey: upload.objectKey, reason: `${outbox.reason}-upload-source` })),
 				...projectAssetDeletionTargets(assets, outbox),
 				...projects.flatMap((project) => projectWebglDeletionTargets(
 					project.id,
@@ -207,15 +210,17 @@ export function createExhibitionRepository(
 			];
 			await queueDurableDeletions(tx, targets);
 			for (const upload of canonicalActiveUploads) {
-				if (!upload.objectKey || !upload.uploadId) continue;
+				if (!upload.objectKey || !upload.uploadId || !['ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING'].includes(upload.state)) continue;
 				await queueMultipartAbortTask(tx, {
-					bucket: outbox.protectedBucket,
+					bucket: upload.bucket,
 					storageKey: upload.objectKey,
 					uploadId: upload.uploadId,
 					reason: `${outbox.reason}-active-multipart`,
 					uploadSessionId: upload.canonicalSessionId,
 				});
 			}
+			await tx.assetUploadSession.deleteMany({ where: { OR: [{ exhibitionId: id }, { project: { exhibitionId: id } }] } });
+			await tx.exhibitionAward.deleteMany({ where: { exhibitionId: id } });
 			await tx.exhibition.delete({ where: { id } });
 			return { id: existing.id, cleanupQueued: targets.length > 0 || canonicalActiveUploads.length > 0 };
 		}, policy);

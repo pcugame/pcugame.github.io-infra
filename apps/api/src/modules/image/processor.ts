@@ -42,6 +42,7 @@ export function createImageProcessor(deps: ImageProcessorDependencies) {
 					deps.logger.warn({ sessionId: session.id, declaredMimeType: session.declaredMimeType,
 						detectedMimeType: workspace.mimeType }, 'Image declared MIME did not match magic bytes');
 				}
+				if (session.owner.type === 'EXHIBITION' && session.kind === 'IMAGE' && !['image/png', 'image/webp', 'image/jpeg'].includes(workspace.mimeType)) throw new ImageRejectedError('Unsupported award image', 'MAGIC_INVALID');
 				if (workspace.mimeType === 'application/pdf') {
 					const pdf = await deps.operations.renderPdfFirstPage(workspace.sourcePath, workspace.pdfRasterPath, signal);
 					assertPdfPagePolicy(pdf.pages, deps.limits);

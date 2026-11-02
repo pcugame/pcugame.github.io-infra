@@ -5,7 +5,7 @@ export interface FileAccessResponse {
  token: string | null;
  expiresAt: string | null;
 }
-const mediaKeys = new Set(['url', 'webglUrl', 'gameDownloadUrl', 'downloadUrl', 'thumbnailUrl', 'posterUrl', 'originalDownloadUrl', 'playbackUrl', 'previewUrl']);
+const mediaKeys = new Set(['imageUrl', 'url', 'webglUrl', 'gameDownloadUrl', 'downloadUrl', 'thumbnailUrl', 'posterUrl', 'originalDownloadUrl', 'playbackUrl', 'previewUrl']);
 const externalLinkKeys = new Set(['externalLinks', 'githubUrl']);
 
 /** Resolve only serialized media, never upload capabilities or external project links. */

@@ -1,3 +1,4 @@
+import { awardInclude } from '../../awards/projection.js';
 import { changePublication, publicationSnapshotInclude } from './publication.repository.js';
 import { assertPublication, assertPublicationNotWorsened } from '../../../shared/publication-policy.js';
 import { canReadVisibility, isVisibilityStaff } from '../../../shared/visibility.js';
@@ -60,6 +61,7 @@ const projectAssetActivityInclude = {
 	} },
 } satisfies Prisma.ProjectInclude;
 const projectListInclude = {
+	awards: awardInclude,
 	...projectAssetActivityInclude,
 	currentWebglDeployment: { select: {
 		id: true, projectId: true, state: true,
@@ -94,6 +96,7 @@ const projectListInclude = {
 } as const satisfies Prisma.ProjectInclude;
 
 export const projectDetailInclude = {
+	awards: awardInclude,
 	...projectAssetActivityInclude,
 	exhibition: true,
 	changeRequestDraft: { select: { id: true } },

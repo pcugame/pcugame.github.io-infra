@@ -1,3 +1,4 @@
+import { createAwardGraph } from '../modules/awards/composition.js';
 import { createVideoRetryRepository } from '../modules/video/retry.repository.js';
 import { createVideoRetryService } from '../modules/video/retry.service.js';
 import { createVideoRetryController } from '../modules/video/retry.controller.js';
@@ -251,6 +252,7 @@ export function composeBackendRoutes({
 		};
 		routes.admin = async (app) => {
 			await app.register(baseRoutes.admin);
+ await app.register(createAwardGraph(persistence.awardRepository, config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL, config.S3_BUCKET_PUBLIC));
 			await app.register(createVideoRetryController(createVideoRetryService(
 				prisma && !hasSuppliedPersistence ? createVideoRetryRepository(prisma) : {
 					retry: async () => { throw new Error('Video retry persistence unavailable'); },

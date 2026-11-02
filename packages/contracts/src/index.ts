@@ -147,5 +147,7 @@ export { DirectAssetUploadCreationSchema, DirectAssetUploadCreationLookupSchema 
 export type { DirectAssetUploadCreation, DirectAssetUploadCreationLookup } from './game-upload.js';
 export * from './publication.js';
 
+export * from "./awards.js";
+
 export * from './video-retry.js';
 export * from './video-playback.js';

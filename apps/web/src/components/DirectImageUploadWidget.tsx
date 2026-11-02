@@ -437,7 +437,7 @@ function ImageUploadSession({
 			{canSelect && (
 				<div className="game-upload__file-input" hidden={linear}>
 					<label className="sr-only" htmlFor={fileInputId}>{title} 파일 선택</label>
-					<input id={fileInputId} type="file" multiple={kind === 'IMAGE'} accept="image/*,application/pdf,.pdf" onChange={(event) => {
+					<input id={fileInputId} type="file" multiple={kind === 'IMAGE'} accept={owner.type === 'EXHIBITION' && kind === 'IMAGE' ? 'image/png,image/webp,image/jpeg' : 'image/*,application/pdf,.pdf'} onChange={(event) => {
 						const selected = Array.from(event.target.files ?? []);
 						selectFiles(selected);
 						setFiles(selected);

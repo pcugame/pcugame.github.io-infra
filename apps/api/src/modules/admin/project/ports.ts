@@ -1,3 +1,4 @@
+import type { AwardLink } from '../../awards/serialization.js';
 import type { PublicationCommand } from '@pcu/contracts';
 import type { RequiredAssetsSource } from '../../../shared/project-required-assets.js';
 import type { ExternalLink, Platform, Visibility } from '@pcu/contracts';
@@ -77,6 +78,7 @@ export interface ProjectSubmissionRecord {
 }
 
 export interface ProjectListRecord extends RequiredAssetsSource {
+ awards?: AwardLink[];
  publicationRequested?: boolean;
  publicationStatus?: 'PRIVATE' | 'PUBLIC';
  version?: number;

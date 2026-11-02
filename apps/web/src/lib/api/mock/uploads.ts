@@ -1,3 +1,4 @@
+import { awardState } from './awards';
 import { z } from 'zod';
 import { SubmitProjectPayloadBaseSchema } from '@pcu/contracts';
 import type { DirectAssetUploadKind, DirectAssetUploadStatus, ProjectSubmissionStatusResponse, SubmitProjectPayload, SubmitProjectResponse } from '../../../contracts';
@@ -68,6 +69,7 @@ function ownedImage(owner: MockUploadSession['owner']) { const image = mockRespo
 function attachAsset(ctx: MockContext, session: MockUploadSession, ready: boolean): void {
   if (session.voteId) return;
   if (session.owner.type === 'EXHIBITION') {
+    if (ready && session.kind === 'IMAGE') { const id = session.resultAssetId ??= assetId(ctx); const state = awardState(ctx, session.owner.id); if (!state.assets.some(a => a.id === id)) state.assets.push({ id, name: session.originalName, imageUrl: ownedImage(session.owner).original.url }); return; }
     if (ready) { const exhibition = ctx.state.exhibitions.find(item => item.id === session.owner.id); if (exhibition) Object.assign(exhibition, { poster: ownedImage(session.owner), posterOriginalName: session.originalName, posterSize: session.totalBytes }); }
     return;
   }
@@ -203,8 +205,9 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
   if (match) {
     if (method !== 'POST') return fail(404, 'NOT_FOUND', 'Use POST');
     const owner = { type: match[1] === 'projects' ? 'PROJECT' as const : 'EXHIBITION' as const, id: Number(match[2]) }; const kind = match[3]!.toUpperCase() as DirectAssetUploadKind;
-    authorizeOwner(ctx, owner); if (owner.type === 'EXHIBITION' && kind !== 'POSTER') fail(404, 'NOT_FOUND', 'Only exhibition posters are supported');
+    authorizeOwner(ctx, owner); if (owner.type === 'EXHIBITION' && kind !== 'POSTER' && kind !== 'IMAGE') fail(404, 'NOT_FOUND', 'Only exhibition posters and images are supported');
     const body = json(options.body); const total = Number(body.totalBytes);
+    if (owner.type === 'EXHIBITION' && kind === 'IMAGE' && !['image/png', 'image/webp', 'image/jpeg'].includes(String(body.declaredMimeType))) fail(400, 'VALIDATION_ERROR', 'PNG, WebP, JPEG images required');
     const maxBytes = ['DOCUMENT', 'ATTACHMENT'].includes(kind) ? 50 * 1024 * 1024 : ctx.state.settings.maxGameFileMb * 1024 * 1024;
     if (!Number.isSafeInteger(total) || total < 1 || total > maxBytes || typeof body.originalName !== 'string' || !body.originalName || Array.from(body.originalName).some(character => character === '/' || character === '\\' || character.charCodeAt(0) < 32)) fail(400, 'VALIDATION_ERROR', 'Invalid file name or size');
     const digests = body.sourceIdentityBlockDigests;

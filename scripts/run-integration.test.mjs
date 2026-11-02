@@ -6,6 +6,8 @@ import { runIntegration } from './run-integration.mjs';
 
 // File selections and parallelism captured from the previous root commands.
 const expectedSuites = {
+ 'awards-gateway': ['src/__tests__/awards-gateway.garage.postgres.test.ts'],
+ awards: ['src/__tests__/awards.postgres.test.ts'],
  voting: ['src/__tests__/voting.postgres.test.ts'],
 	'orphan-renewal-timeout': [
 		'src/__tests__/orphan-renewal-timeout.postgres.test.ts'
@@ -116,6 +118,7 @@ const inheritedEnv = {
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const docker = process.platform === 'win32' ? 'docker.exe' : 'docker';
 const fullOrder = [
+ 'awards', 'awards-gateway',
 	'voting', 'orphan-renewal-timeout', 'canonical-processing-fences', 'import-transaction',
 	'idempotency', 'lease-clock-core', 'lifecycle-schema', 'responsive-image-migration',
 	'canonical-migration-chain',
@@ -138,7 +141,7 @@ for (const [name] of Object.entries(expectedSuites)) {
 		const expectedEnv = { ...inheritedEnv, ...postgresEnv };
 		if (name === 'video-playbacks') Object.assign(expectedEnv, { RUN_FFMPEG_TESTS: 'true' });
 		if (name === 'canonical-migration-chain') Object.assign(expectedEnv, garageEnv);
-		if (name === 'visibility-gateway') Object.assign(expectedEnv, { RUN_GARAGE_INTEGRATION: 'true', RUN_GATEWAY_INTEGRATION: 'true' });
+		if (name === 'visibility-gateway' || name === 'awards-gateway') Object.assign(expectedEnv, { RUN_GARAGE_INTEGRATION: 'true', RUN_GATEWAY_INTEGRATION: 'true' });
 		assert.deepEqual(calls[0], [npm, suiteArgs(name), { stdio: 'inherit', env: expectedEnv }]);
 		assert.deepEqual(inheritedEnv.DATABASE_URL, 'postgresql://other/database');
 	});
@@ -171,7 +174,7 @@ test('list and help are read-only and expose all suites and entry points', async
 	}
 });
 
-test('full run preserves startup, all 18 ordered suites, E2E, smokes, and cleanup', async () => {
+test('full run preserves startup, all ordered suites, E2E, smokes, and cleanup', async () => {
 	const calls = [];
 	const spawn = (...args) => { calls.push(args); return { status: 0 }; };
 	const status = await runIntegration([], {

@@ -12,7 +12,7 @@ function locate(ctx: MockContext, value: string) {
       ...project.assets.flatMap(a => 'image' in a ? [a.image.original.url, ...a.image.renditions.map(r => r.url)] : 'url' in a ? [a.url, a.playbackUrl, a.originalDownloadUrl] : [a.downloadUrl])];
     if (urls.some(url => url !== undefined && normalize(url) === clean)) return { projectId: project.id, exhibitionId: null };
   }
-  const exhibition = ctx.state.exhibitions.find(e => [e.poster?.original.url, ...e.poster?.renditions.map(r => r.url) ?? []].some(url => url !== undefined && normalize(url) === clean));
+  const exhibition = ctx.state.exhibitions.find(e => [...(ctx.state.awards?.[e.id]?.assets.map(a => a.imageUrl) ?? []), e.poster?.original.url, ...e.poster?.renditions.map(r => r.url) ?? []].some(url => url !== undefined && normalize(url) === clean));
   return exhibition ? { projectId: null, exhibitionId: exhibition.id } : null;
 }
 function authorize(ctx: MockContext, owner: { projectId: number | null; exhibitionId: number | null }) {

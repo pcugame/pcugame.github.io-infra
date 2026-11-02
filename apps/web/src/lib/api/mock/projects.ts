@@ -1,3 +1,4 @@
+import { projectAwards, compareMockProjects } from './awards';
 import { mockPublicationStatus, mockPublicationReadiness } from './publication';
 import {
  resolveWebglDisplay, AddMemberSchema, UpdateMemberBaseSchema, SwapProjectMembersSchema, UpdateProjectBaseSchema,
@@ -38,7 +39,7 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
  return result.data;
 }
 function methodAllowed(method:string, allowed:string[]) { if(!allowed.includes(method)) throw new MockHttpError(404,'NOT_FOUND','Method not allowed'); }
-function orderedProjects(ctx:MockContext) { return Object.values(ctx.state.projects).sort((a,b)=>a.sortOrder-b.sortOrder||a.id-b.id); }
+function orderedProjects(ctx:MockContext) { return Object.values(ctx.state.projects).sort((a,b)=>compareMockProjects(ctx,a,b)); }
 function requiredAssets(ctx: MockContext, p: MockProject): ProjectRequiredAssets {
  const sessions = Object.values(ctx.state.sessions).filter(session => session.owner.type === 'PROJECT' && session.owner.id === p.id).reverse();
  const activeKinds = new Set(sessions.filter(session => ['ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING'].includes(session.state)).map(session => session.kind));
@@ -69,12 +70,12 @@ export function adminProjectDetail(ctx:MockContext,p:MockProject): AdminProjectD
  const exhibition=projectExhibition(ctx,p);
  const {createdByUserId: _owner, participantUserIds: _participants, exhibitionId: _exhibition, createdAt: _created, updatedAt: _updated, version: _version,webglNetworkPolicyVersion:_network,isChangeRequestDraft:_stage,...detail}=p;
  void [_owner,_participants,_exhibition,_created,_updated,_version,_network,_stage];
- return {...detail, publicationStatus: mockPublicationStatus(p), version: p.version, publicationReadiness: mockPublicationReadiness(p, ctx.user?.role), requiredAssets:requiredAssets(ctx,p),hardwareRequirements: detail.hardwareRequirements ?? '',year:exhibition.year,exhibitionVisibility:exhibition.visibility,...projectCapabilities(ctx,p),members:[...p.members].sort((a,b)=>a.sortOrder-b.sortOrder||a.id-b.id)};
+ return {...detail, exhibitionId:p.exhibitionId, awards:projectAwards(ctx,p), publicationStatus: mockPublicationStatus(p), version: p.version, publicationReadiness: mockPublicationReadiness(p, ctx.user?.role), requiredAssets:requiredAssets(ctx,p),hardwareRequirements: detail.hardwareRequirements ?? '',year:exhibition.year,exhibitionVisibility:exhibition.visibility,...projectCapabilities(ctx,p),members:[...p.members].sort((a,b)=>a.sortOrder-b.sortOrder||a.id-b.id)};
 }
 function listCapabilities(ctx:MockContext,p:MockProject) { const {canEditWebglDisplay:_display,...capabilities}=projectCapabilities(ctx,p);void _display;return capabilities; }
 function publicCard(ctx:MockContext,p:MockProject) {
  const e=projectExhibition(ctx,p);
- return {id:p.id,slug:p.slug,title:p.title,summary:p.summary,poster:p.poster,visibility:p.visibility,exhibitionVisibility:e.visibility,canChangeVisibility:projectCapabilities(ctx,p).canChangeVisibility,members:[...p.members].sort((a,b)=>a.sortOrder-b.sortOrder).map(m=>({name:m.name,studentId:m.studentId})),exhibitionId:e.id,exhibitionTitle:e.title||`${e.year} 전시`};
+ return {awards:projectAwards(ctx,p),id:p.id,slug:p.slug,title:p.title,summary:p.summary,poster:p.poster,visibility:p.visibility,exhibitionVisibility:e.visibility,canChangeVisibility:projectCapabilities(ctx,p).canChangeVisibility,members:[...p.members].sort((a,b)=>a.sortOrder-b.sortOrder).map(m=>({name:m.name,studentId:m.studentId})),exhibitionId:e.id,exhibitionTitle:e.title||`${e.year} 전시`};
 }
 export function publicProjectDetail(ctx:MockContext,p:MockProject):PublicProjectDetailResponse {
  const display = resolveWebglDisplay({...p,analysis:mockWebglAnalysis(p)});
@@ -122,7 +123,7 @@ export function handleProjects(ctx:MockContext,pathname:string,method:string,opt
   ctx.requireAdmin(); const e=ctx.state.exhibitions.find(e=>e.id===Number(match![1])); if(!e) throw new MockHttpError(404,'NOT_FOUND','Exhibition not found');
   if(match[2]) { methodAllowed(method,['DELETE']); delete e.poster;delete e.posterOriginalName;delete e.posterSize;return; }
   methodAllowed(method,['PATCH','DELETE']);
-  if(method==='DELETE') { for(const p of Object.values(ctx.state.projects)) if(p.exhibitionId===e.id) removeProject(ctx,p.id);ctx.state.exhibitions.splice(ctx.state.exhibitions.indexOf(e),1);return; }
+  if(method==='DELETE') { for(const p of Object.values(ctx.state.projects)) if(p.exhibitionId===e.id) removeProject(ctx,p.id);ctx.state.exhibitions.splice(ctx.state.exhibitions.indexOf(e),1);if(ctx.state.awards)delete ctx.state.awards[e.id];return; }
   if(method==='PATCH') { const body=parse(UpdateExhibitionBaseSchema,options.body);if(body.title!==undefined&&ctx.state.exhibitions.some(other=>other.id!==e.id&&other.year===e.year&&(other.title??'')===body.title))throw new MockHttpError(409,'CONFLICT','Exhibition already exists');Object.assign(e,body);if(body.isModificationEnabled!==undefined||body.isUploadEnabled!==undefined){e.isModificationEnabled=body.isModificationEnabled??body.isUploadEnabled;e.isUploadEnabled=e.isModificationEnabled!;} }
   return {...e,projectCount:Object.values(ctx.state.projects).filter(p=>p.exhibitionId===e.id&&!p.isChangeRequestDraft).length};
  }
@@ -133,7 +134,7 @@ export function handleProjects(ctx:MockContext,pathname:string,method:string,opt
   const sort=validated.sort??'createdAt',direction=validated.order==='asc'?1:-1;
   items.sort((a,b)=> direction*(sort==='year'?a.year-b.year:sort==='title'?a.title.localeCompare(b.title,'ko'):sort==='status'?a.status.localeCompare(b.status):a.createdAt.localeCompare(b.createdAt))||a.id-b.id);
   const totalItems=items.length,totalPages=Math.ceil(totalItems/limit);
-  return {items:items.slice((page-1)*limit,page*limit).map(p=>({publicationStatus: mockPublicationStatus(p), version: p.version, requiredAssets:requiredAssets(ctx,p),id:p.id,title:p.title,slug:p.slug,year:p.year,status:p.status,visibility:p.visibility,exhibitionVisibility:projectExhibition(ctx,p).visibility,isIncomplete:p.isIncomplete,memberNames:p.members.map(m=>m.name),memberStudentIds:p.members.map(m=>m.studentId),updatedAt:p.updatedAt,createdByUserName:Object.values(MOCK_USERS).find(user=>user.id===p.createdByUserId)?.name,...listCapabilities(ctx,p)})),pagination:{page,limit,totalItems,totalPages,hasNextPage:page<totalPages,hasPreviousPage:page>1&&totalItems>0}};
+  return {items:items.slice((page-1)*limit,page*limit).map(p=>({awards:projectAwards(ctx,p),publicationStatus: mockPublicationStatus(p), version: p.version, requiredAssets:requiredAssets(ctx,p),id:p.id,title:p.title,slug:p.slug,year:p.year,status:p.status,visibility:p.visibility,exhibitionVisibility:projectExhibition(ctx,p).visibility,isIncomplete:p.isIncomplete,memberNames:p.members.map(m=>m.name),memberStudentIds:p.members.map(m=>m.studentId),updatedAt:p.updatedAt,createdByUserName:Object.values(MOCK_USERS).find(user=>user.id===p.createdByUserId)?.name,...listCapabilities(ctx,p)})),pagination:{page,limit,totalItems,totalPages,hasNextPage:page<totalPages,hasPreviousPage:page>1&&totalItems>0}};
  }
  if(pathname==='/api/admin/projects/bulk/status') {
   ctx.requireAdmin();methodAllowed(method,['PATCH']);const body=parse(BulkUpdateProjectStatusSchema,options.body);let updated=0;

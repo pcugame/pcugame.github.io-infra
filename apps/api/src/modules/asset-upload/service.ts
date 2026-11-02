@@ -252,6 +252,11 @@ export function createAssetUploadService(deps: {
 			return createSession('POSTER', actor, { type: 'PROJECT', id: projectId }, body);
 		},
 
+		async createExhibitionImageSession(actor: { id: number; role: string }, exhibitionId: number, body: DirectCreateBody) {
+			if (!['image/png', 'image/webp', 'image/jpeg'].includes(body.declaredMimeType ?? '')) throw badRequest('PNG, WebP, JPEG 이미지만 지원합니다.');
+			return createSession('IMAGE', actor, { type: 'EXHIBITION', id: exhibitionId }, body);
+		},
+
 		async createExhibitionPosterSession(actor: { id: number; role: string }, exhibitionId: number, body: DirectCreateBody) {
 			return createSession('POSTER', actor, { type: 'EXHIBITION', id: exhibitionId }, body);
 		},

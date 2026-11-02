@@ -257,15 +257,20 @@ export function YearPosterControls({
 
 	return (
 		<div
-			className={`admin-exhibition-poster${compact ? ' admin-exhibition-poster--compact' : ''}`}
+			className={`admin-exhibition-poster${compact ? ' admin-exhibition-poster--compact' : ''}${large ? ' admin-exhibition-poster--editor' : ''}`}
 		>
-			<ExhibitionPoster
-				year={year}
-				sizes={
-					large ? '(max-width: 700px) 240px, 300px' : compact ? '72px' : '120px'
-				}
-			/>
+			{large ? (
+				<div className="exhibition-poster-stage">
+					<span className="exhibition-poster-stage__label">{year.poster ? '등록된 포스터' : '포스터 미등록'}</span>
+					<ExhibitionPoster year={year} sizes="(max-width: 800px) 200px, 240px" />
+					<p>{year.poster ? '포스터를 누르면 크게 볼 수 있습니다.' : '전시회를 소개할 포스터를 등록해 주세요.'}</p>
+				</div>
+			) : <ExhibitionPoster year={year} sizes={compact ? '72px' : '120px'} />}
 			<div className="admin-exhibition-poster__body">
+				{large && <div className="exhibition-poster-editor__heading">
+					<h4>{year.poster ? '새로운 포스터로 교체' : '전시회의 첫인상을 담아주세요'}</h4>
+					<p>전시 목록에 표시할 대표 이미지를 선택하세요.</p>
+				</div>}
 				{year.posterOriginalName && (
 					<span
 						className="admin-exhibition-poster__name"

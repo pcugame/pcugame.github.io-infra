@@ -82,6 +82,7 @@ describe('admin project list service', () => {
 
 		expect(result.items).toEqual([
 			{
+                awards: [],
 				id: 1,
 				title: 'Alpha Project',
 				slug: 'alpha-project',

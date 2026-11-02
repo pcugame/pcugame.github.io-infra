@@ -1290,6 +1290,114 @@
       "uiSources": [
         "lib/api/game-upload.ts"
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/exhibitions/:id/awards",
+      "priority": "P1",
+      "domain": "awards.ts",
+      "testFiles": [
+        "Awards.test.tsx"
+      ],
+      "uiSources": [
+        "lib/api/awards.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/exhibitions/:id/awards",
+      "priority": "P1",
+      "domain": "awards.ts",
+      "testFiles": [
+        "Awards.test.tsx"
+      ],
+      "uiSources": [
+        "lib/api/awards.ts"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/exhibitions/:id/awards/:awardId",
+      "priority": "P1",
+      "domain": "awards.ts",
+      "testFiles": [
+        "Awards.test.tsx"
+      ],
+      "uiSources": [
+        "lib/api/awards.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/exhibitions/:id/awards/:awardId",
+      "priority": "P1",
+      "domain": "awards.ts",
+      "testFiles": [
+        "Awards.test.tsx"
+      ],
+      "uiSources": [
+        "lib/api/awards.ts"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/exhibitions/:id/awards/order",
+      "priority": "P1",
+      "domain": "awards.ts",
+      "testFiles": [
+        "Awards.test.tsx"
+      ],
+      "uiSources": [
+        "lib/api/awards.ts"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/exhibitions/:id/awards/:awardId/recipients",
+      "priority": "P1",
+      "domain": "awards.ts",
+      "testFiles": [
+        "Awards.test.tsx"
+      ],
+      "uiSources": [
+        "lib/api/awards.ts"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/projects/:id/awards",
+      "priority": "P1",
+      "domain": "awards.ts",
+      "testFiles": [
+        "Awards.test.tsx"
+      ],
+      "uiSources": [
+        "lib/api/awards.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/exhibitions/:id/award-images/:assetId",
+      "priority": "P1",
+      "domain": "awards.ts",
+      "testFiles": [
+        "Awards.test.tsx"
+      ],
+      "uiSources": [
+        "lib/api/awards.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/exhibitions/:id/direct-image-upload-sessions",
+      "priority": "P1",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "Awards.test.tsx"
+      ],
+      "uiSources": [
+        "lib/api/awards.ts"
+      ]
     }
   ]
 }

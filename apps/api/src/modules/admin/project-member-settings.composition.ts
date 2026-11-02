@@ -64,6 +64,7 @@ export function createProjectMemberSettingsProductionGraph(
 	const projectService = createProjectService({
 		repository: deps.projectRepository,
 		serializeProjectDetail: serializer.serializeProjectDetail,
+ publicAssetOrigin: deps.config.PUBLIC_ASSET_ORIGIN ?? deps.config.API_PUBLIC_URL,
 		deletionBuckets: {
 			publicBucket: deps.config.S3_BUCKET_PUBLIC,
 			protectedBucket: deps.config.S3_BUCKET_PROTECTED,

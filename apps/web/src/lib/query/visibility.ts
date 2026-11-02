@@ -6,7 +6,7 @@ export function useViewerKey() {
  const viewer = isPending ? 'pending' : user ? `${user.id}:${user.role}` : 'anonymous';
  return (key: QueryKey): QueryKey => [...key, { viewer }];
 }
-const visibilityRoots = new Set(['publicYears', 'yearProjects', 'exhibitionProjects', 'projectDetail', 'projectDetailById', 'adminExhibitions', 'adminProject', 'adminProjects', 'myProjects', 'changeRequests', 'fileAccess']);
+const visibilityRoots = new Set(['awards', 'publicYears', 'yearProjects', 'exhibitionProjects', 'projectDetail', 'projectDetailById', 'adminExhibitions', 'adminProject', 'adminProjects', 'myProjects', 'changeRequests', 'fileAccess']);
 export async function invalidateVisibilityQueries(client: QueryClient, options: { preserveProjectDrafts?: boolean } = {}) {
  // Applying staged edits must retain the mounted editor until its domains finish.
  // The editor refetches its hydrated detail at completion; inactive copies are removed.
