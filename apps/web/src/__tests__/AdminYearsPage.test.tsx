@@ -66,10 +66,28 @@ const open = async (index = 0) =>
 const change = (label: string, value: string) =>
 	fireEvent.change(screen.getByLabelText(label), { target: { value } });
 beforeEach(() => {
- Object.defineProperties(HTMLDialogElement.prototype, {
-  showModal: { configurable: true, value: function(this: HTMLDialogElement) { this.setAttribute('open', ''); } },
-  close: { configurable: true, value: function(this: HTMLDialogElement) { this.removeAttribute('open'); } },
- });
+	Object.defineProperty(window, 'matchMedia', {
+		configurable: true,
+		value: vi.fn(() => ({
+			matches: false,
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn(),
+		})),
+	});
+	Object.defineProperties(HTMLDialogElement.prototype, {
+		showModal: {
+			configurable: true,
+			value: function (this: HTMLDialogElement) {
+				this.setAttribute('open', '');
+			},
+		},
+		close: {
+			configurable: true,
+			value: function (this: HTMLDialogElement) {
+				this.removeAttribute('open');
+			},
+		},
+	});
 
 	controls.role = 'ADMIN';
 	controls.visibility = true;
@@ -105,6 +123,22 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 describe('exhibition management', () => {
+	it('preserves drafts across tabs and supports keyboard navigation', async () => {
+		mount();
+		await open();
+		change('제목', '탭 이동 후 보존');
+		const info = screen.getByRole('tab', { name: /기본 정보/ });
+		fireEvent.keyDown(info, { key: 'ArrowRight' });
+		const poster = screen.getByRole('tab', { name: /포스터/ });
+		expect(document.activeElement).toBe(poster);
+		expect(poster.getAttribute('aria-selected')).toBe('true');
+		expect(screen.queryByRole('button', { name: '설정 저장' })).toBeNull();
+		fireEvent.keyDown(poster, { key: 'Home' });
+		expect((screen.getByLabelText('제목') as HTMLInputElement).value).toBe(
+			'탭 이동 후 보존',
+		);
+		expect(controls.unmounts).not.toHaveBeenCalled();
+	});
 	it('discards cancelled drafts and explicitly clears a saved title', async () => {
 		mount();
 		await open();
@@ -142,24 +176,49 @@ describe('exhibition management', () => {
 		await waitFor(() => expect(save().disabled).toBe(false));
 		fireEvent.click(screen.getByLabelText('작품 등록·변경 허용'));
 		await waitFor(() => expect(save().disabled).toBe(true));
-		fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), { target: { value: (screen.getByRole('option', { name: '로그인 사용자' }) as HTMLOptionElement).value } });
+		fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), {
+			target: {
+				value: (
+					screen.getByRole('option', {
+						name: '로그인 사용자',
+					}) as HTMLOptionElement
+				).value,
+			},
+		});
 		await waitFor(() => expect(save().disabled).toBe(false));
-		fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), { target: { value: (screen.getByRole('option', { name: '전체 공개' }) as HTMLOptionElement).value } });
+		fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), {
+			target: {
+				value: (
+					screen.getByRole('option', { name: '전체 공개' }) as HTMLOptionElement
+				).value,
+			},
+		});
 		await waitFor(() => expect(save().disabled).toBe(true));
 		expect(adminExhibitionApi.update).not.toHaveBeenCalled();
 	});
 
- it('opens a modal without expanding the row and discards settings on Escape', async () => {
-  const { container } = mount(); await open();
-  const dialog = screen.getByRole('dialog', { name: '전시회 설정' });
-  expect(container.querySelector('.exhibition-item')?.contains(dialog)).toBe(false);
-  expect((screen.getByLabelText('연도') as HTMLInputElement).readOnly).toBe(true);
-  change('제목', '닫을 초안');
-  fireEvent(dialog, new Event('cancel', { bubbles: false, cancelable: true }));
-  expect(screen.queryByRole('dialog')).toBeNull();
-  await open(); expect((screen.getByLabelText('제목') as HTMLInputElement).value).toBe('전시 1');
-  expect(controls.mounts).toHaveBeenCalledTimes(1);
- });
+	it('opens a modal without expanding the row and discards settings on Escape', async () => {
+		const { container } = mount();
+		await open();
+		const dialog = screen.getByRole('dialog', { name: '전시 1' });
+		expect(container.querySelector('.exhibition-item')?.contains(dialog)).toBe(
+			false,
+		);
+		expect((screen.getByLabelText('연도') as HTMLInputElement).readOnly).toBe(
+			true,
+		);
+		change('제목', '닫을 초안');
+		fireEvent(
+			dialog,
+			new Event('cancel', { bubbles: false, cancelable: true }),
+		);
+		expect(screen.queryByRole('dialog')).toBeNull();
+		await open();
+		expect((screen.getByLabelText('제목') as HTMLInputElement).value).toBe(
+			'전시 1',
+		);
+		expect(controls.mounts).toHaveBeenCalledTimes(1);
+	});
 
 	it('shows invalid order and title errors without submitting', async () => {
 		mount();
@@ -194,6 +253,7 @@ describe('exhibition management', () => {
 		mount();
 		await open();
 		change('제목', '보존할 초안');
+		fireEvent.click(screen.getByRole('tab', { name: /포스터/ }));
 		fireEvent.click(screen.getByRole('button', { name: '업로드 완료 재현' }));
 		await screen.findByText('포스터가 변경되었습니다.');
 		await waitFor(() =>
@@ -225,7 +285,13 @@ describe('exhibition management', () => {
 			(screen.getByRole('button', { name: '추가' }) as HTMLButtonElement)
 				.disabled,
 		).toBe(true);
-		fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), { target: { value: (screen.getByRole('option', { name: '전체 공개' }) as HTMLOptionElement).value } });
+		fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), {
+			target: {
+				value: (
+					screen.getByRole('option', { name: '전체 공개' }) as HTMLOptionElement
+				).value,
+			},
+		});
 		fireEvent.click(screen.getByRole('button', { name: '추가' }));
 		await screen.findByText(/전시회를 추가하지 못했습니다/);
 	});
@@ -236,6 +302,7 @@ describe('exhibition management', () => {
 		);
 		mount();
 		await open();
+		fireEvent.click(screen.getByRole('tab', { name: /삭제 관리/ }));
 		fireEvent.click(screen.getByRole('button', { name: '전시회 삭제' }));
 		expect(window.confirm).toHaveBeenCalledWith(
 			expect.stringContaining('WebGL 배포 파일 포함'),
@@ -254,7 +321,13 @@ describe('exhibition management', () => {
 		await screen.findAllByRole('button', { name: '설정' });
 		fireEvent.click(screen.getByRole('button', { name: '전시회 추가' }));
 		change('제목', '같은 연도 새 전시');
-		fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), { target: { value: (screen.getByRole('option', { name: '전체 공개' }) as HTMLOptionElement).value } });
+		fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), {
+			target: {
+				value: (
+					screen.getByRole('option', { name: '전체 공개' }) as HTMLOptionElement
+				).value,
+			},
+		});
 		fireEvent.click(screen.getByRole('button', { name: '추가' }));
 		await screen.findByText(/년 전시회가 추가되었습니다/);
 		await waitFor(() =>

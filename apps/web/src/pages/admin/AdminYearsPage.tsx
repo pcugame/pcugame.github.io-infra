@@ -428,10 +428,63 @@ export default function AdminYearsPage() {
 							/>
 							{visitedIds.includes(year.id) && (
 								<ExhibitionSettingsDialog
-									id={year.id}
+									year={year}
 									open={editingId === year.id}
 									busy={settingsPending || deleteMutation.isPending}
 									onClose={closeSettings}
+									poster={
+										<section
+											className="exhibition-poster-section"
+											aria-label="포스터 관리"
+										>
+											<h3>포스터 관리</h3>
+											<p className="field-hint">
+												업로드·삭제는 별도로 반영되며 설정 취소로 되돌아가지
+												않습니다. 창을 닫아도 업로드는 유지됩니다.
+											</p>
+											<YearPosterControls year={year} large />
+										</section>
+									}
+									awards={
+										editingId === year.id && (
+											<AwardSettings exhibitionId={year.id} />
+										)
+									}
+									danger={
+										<div className="ui-stack">
+											<div>
+												<h3>전시회 삭제</h3>
+												<p className="field-hint">
+													삭제하면 전시회와 등록된 작품을 복구할 수 없습니다.
+												</p>
+											</div>
+											<div className="exhibition-danger">
+												<Button
+													variant="danger"
+													onClick={() => handleDelete(year)}
+													disabled={
+														deleteMutation.isPending ||
+														isAnyExporting ||
+														settingsPending
+													}
+												>
+													{deleteMutation.isPending
+														? '삭제 중…'
+														: '전시회 삭제'}
+												</Button>
+												<span className="field-hint">
+													등록된 작품과 제출된 파일도 삭제 대상입니다.
+												</span>
+											</div>
+											{deleteMutation.error &&
+												deleteMutation.variables === year.id && (
+													<p className="field-error" role="alert">
+														전시회를 삭제하지 못했습니다.{' '}
+														{getApiErrorMessage(deleteMutation.error)}
+													</p>
+												)}
+										</div>
+									}
 								>
 									{editingId === year.id && (
 										<ExhibitionSettings
@@ -456,43 +509,6 @@ export default function AdminYearsPage() {
 											}}
 										/>
 									)}
-									{visitedIds.includes(year.id) && (
-										<section
-											className="exhibition-poster-section"
-											aria-label="포스터 관리"
-										>
-											<h3>포스터 관리</h3>
-											<p className="field-hint">
-												업로드·삭제는 별도로 반영되며 설정 취소로 되돌아가지
-												않습니다. 창을 닫아도 업로드는 유지됩니다.
-											</p>
-											<YearPosterControls year={year} large />
-										</section>
-									)}
-									{editingId === year.id && <AwardSettings exhibitionId={year.id} />}
-									<div className="exhibition-danger">
-										<Button
-											variant="danger"
-											onClick={() => handleDelete(year)}
-											disabled={
-												deleteMutation.isPending ||
-												isAnyExporting ||
-												settingsPending
-											}
-										>
-											{deleteMutation.isPending ? '삭제 중…' : '전시회 삭제'}
-										</Button>
-										<span className="field-hint">
-											등록된 작품과 제출된 파일도 삭제 대상입니다.
-										</span>
-									</div>
-									{deleteMutation.error &&
-										deleteMutation.variables === year.id && (
-											<p className="field-error" role="alert">
-												전시회를 삭제하지 못했습니다.{' '}
-												{getApiErrorMessage(deleteMutation.error)}
-											</p>
-										)}
 								</ExhibitionSettingsDialog>
 							)}
 						</div>

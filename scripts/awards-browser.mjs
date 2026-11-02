@@ -16,6 +16,7 @@ try {
  });
  await page.reload();
  await page.getByRole('button', { name:'설정', exact:true }).first().click();
+ await page.getByRole('tab', {name: /상 및 수상작/}).click();
  await page.getByLabel('새 상 이름').fill('Gold');
  await page.getByRole('button',{name:'추가',exact:true}).click();
  const details = page.locator('.award-card').first();
