@@ -3,7 +3,7 @@ import { api } from './client';
 const base = (id: number) => `/api/admin/exhibitions/${id}/awards`;
 export const awardApi = {
  read: (id: number) => api.get<AwardState>(base(id)),
- create: (id: number, expectedVersion: number, name: string) => api.post<AwardState>(base(id), { expectedVersion, name, builtinKey: 'medal', assetId: null }),
+ create: (id: number, expectedVersion: number, name: string) => api.post<AwardState>(base(id), { expectedVersion, name, builtinKey: 'laurel-gold', assetId: null }),
  edit: (id: number, expectedVersion: number, award: Pick<Award, 'id' | 'name' | 'builtinKey' | 'assetId'>) => api.patch<AwardState>(`${base(id)}/${award.id}`, { expectedVersion, name: award.name, builtinKey: award.builtinKey, assetId: award.assetId }),
  remove: (id: number, expectedVersion: number, awardId: number) => api.delete<AwardState>(`${base(id)}/${awardId}`, { body: { expectedVersion } }),
  order: (id: number, expectedVersion: number, awardIds: number[]) => api.put<AwardState>(`${base(id)}/order`, { expectedVersion, awardIds }),

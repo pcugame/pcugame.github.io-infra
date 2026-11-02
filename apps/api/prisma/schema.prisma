@@ -1177,6 +1177,7 @@ model ExhibitionAward {
   exhibitionId Int @map("exhibition_id")
   name String
   sortOrder Int @map("sort_order")
+  /// Builtin keys (including laurel color variants) are constrained by the SQL migration.
   builtinKey String? @map("builtin_key")
   assetId Int? @map("asset_id")
   exhibition Exhibition @relation(fields: [exhibitionId], references: [id], onDelete: Cascade)

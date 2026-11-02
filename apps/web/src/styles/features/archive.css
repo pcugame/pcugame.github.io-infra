@@ -304,7 +304,7 @@
   aspect-ratio: 2 / 3;
 }
 
-.archive-grid--poster .archive-card__image img {
+.archive-grid--poster .archive-card__image > img {
   object-fit: cover;
 }
 
@@ -320,6 +320,12 @@
   transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 0;
+  text-align: left;
+  font-weight: inherit;
   min-height: 2.75rem;
   width: 100%;
   container-type: inline-size;
@@ -340,14 +346,14 @@
   flex-shrink: 0;
 }
 
-.archive-card__image img {
+.archive-card__image > img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   transition: transform 0.4s ease;
 }
 
-.archive-card:hover .archive-card__image img {
+.archive-card:hover .archive-card__image > img {
   transform: scale(1.04);
 }
 
@@ -654,9 +660,24 @@ button.archive-card {
 }
 
 .archive-card__image { position: relative; }
-.archive-card__awards { position: absolute; top: .5rem; right: .5rem; left: .5rem; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .3rem; pointer-events: none; }
+.archive-card__awards {
+  position: absolute;
+  inset: .4rem .4rem auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: .25rem;
+  pointer-events: none;
+}
+
+@container (max-width: 12rem) {
+  .archive-card__awards { inset: .3rem .3rem auto; gap: .2rem; }
+  .archive-card__awards .project-award {
+    gap: 0;
+    padding: .05rem .25rem;
+    font-size: .625rem;
+  }
+  .archive-card__awards .project-award__icon { width: 1.5rem; height: 1.5rem; }
+}
 .award-badge { display: inline-flex; flex-direction: column; align-items: center; max-width: 5rem; padding: .2rem; border-radius: .4rem; background: #fffef0; color: #30250c; font-size: .7rem; overflow-wrap: anywhere; }
-.archive-card__image .award-badge img, .award-badge img { width: 2.5rem; height: 2.5rem; object-fit: contain; }
-.award-settings fieldset { display: grid; gap: .75rem; min-width: 0; }
-.award-settings details { padding: .75rem; border: 1px solid #aaa; }
-.award-settings label { display: block; margin-block: .5rem; }
+.award-badge :is(img, svg) { width: 2.5rem; height: 2.5rem; object-fit: contain; }

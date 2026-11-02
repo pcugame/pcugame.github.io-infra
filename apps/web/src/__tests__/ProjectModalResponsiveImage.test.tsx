@@ -2,7 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PublicProjectDetailResponse, ResponsiveImage } from '@pcu/contracts';
 
@@ -19,6 +19,7 @@ vi.mock('../lib/api', () => ({
 }));
 
 import { ProjectModal } from '../components/project/ProjectModal';
+import ProjectDetailPage from '../pages/ProjectDetailPage';
 
 const poster: ResponsiveImage = {
 	original: {
@@ -91,6 +92,31 @@ function renderModal(onClose = vi.fn()) {
 }
 
 describe('ProjectModal responsive images', () => {
+	it.each([false, true])('shows all awards with or without media (media: %s)', async (withMedia) => {
+		mocks.getProjectDetail.mockResolvedValue({
+			...project,
+			poster: withMedia ? poster : undefined,
+			images: [],
+			awards: [
+				{ id: 1, name: '대상', sortOrder: 0, builtinKey: 'trophy', assetId: null },
+				{ id: 2, name: '관객상', sortOrder: 1, builtinKey: null, assetId: 20, imageUrl: 'https://images.test/award.webp' },
+			],
+		});
+		renderModal();
+		const awards = await screen.findByRole('group', { name: '수상 내역' });
+		expect(awards.textContent).toBe('대상관객상');
+		const images = awards.querySelectorAll('img');
+		expect(images[0].getAttribute('src')).toContain('/awards/trophy.svg');
+		expect(images[1].getAttribute('src')).toBe('https://images.test/award.webp');
+	});
+
+	it.each([undefined, []])('omits the award group for an unawarded project (%s)', async (awards) => {
+		mocks.getProjectDetail.mockResolvedValue({ ...project, awards });
+		renderModal();
+		await screen.findByText(project.title);
+		expect(screen.queryByRole('group', { name: '수상 내역' })).toBeNull();
+	});
+
 	it.each([false, true])('only closes on an unhandled Escape (video visible: %s)', async (videoVisible) => {
 		mocks.getProjectDetail.mockResolvedValue(videoVisible ? {
 			...project,
@@ -171,3 +197,18 @@ describe('ProjectModal responsive images', () => {
 		expect(container.querySelector('video')).not.toBeNull();
 	});
 });
+
+ it.each([true, false])('renders awards on the direct detail route only when awarded (%s)', async (awarded) => {
+  mocks.getProjectDetail.mockResolvedValue({ ...project, awards: awarded ? [
+    { id: 1, name: '우수상', sortOrder: 2, builtinKey: 'medal', assetId: null },
+  ] : [] });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}>
+    <MemoryRouter initialEntries={['/years/2026/projects/responsive-game']}>
+      <Routes><Route path="/years/:year/projects/:slug" element={<ProjectDetailPage />} /></Routes>
+    </MemoryRouter>
+  </QueryClientProvider>);
+  await screen.findByRole('heading', { name: project.title });
+  expect(Boolean(screen.queryByRole('group', { name: '수상 내역' }))).toBe(awarded);
+  if (awarded) expect(screen.getByText('우수상')).toBeTruthy();
+ });

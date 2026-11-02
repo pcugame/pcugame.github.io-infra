@@ -1,8 +1,6 @@
-import { useState } from 'react';
 import type { Award } from '@pcu/contracts';
+import { AwardIcon } from '../project/AwardIcon';
 
 export function AwardImage({ award }: { award: Award }) {
- const src = award.imageUrl ?? (award.builtinKey ? `${import.meta.env.BASE_URL}awards/${award.builtinKey}.svg` : undefined);
- const [failedSrc, setFailedSrc] = useState<string>();
- return <span className="award-badge">{src && src !== failedSrc && <img key={src} src={src} alt="" onError={() => setFailedSrc(src)} />}<span>{award.name}</span></span>;
+  return <span className="award-badge"><AwardIcon award={award} /><span>{award.name}</span></span>;
 }

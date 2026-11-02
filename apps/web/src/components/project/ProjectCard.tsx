@@ -1,4 +1,4 @@
-import { AwardImage } from '../awards/AwardImage';
+import { AwardBadge } from './AwardBadge';
 import { useEffect, useRef } from 'react';
 import type { PublicProjectCard } from '../../contracts';
 import { ResponsiveImage } from '../common';
@@ -43,7 +43,11 @@ export function ProjectCard({ project, onSelect, localPoster }: Props) {
             <span>{project.title.charAt(0)}</span>
           </div>
         )}
-        <span className="archive-card__awards">{project.awards?.map(award => <AwardImage key={award.id} award={award} />)}</span>
+        {Boolean(project.awards?.length) && (
+          <span className="archive-card__awards" role="group" aria-label="수상 내역">
+            {project.awards?.map(award => <AwardBadge key={award.id} award={award} />)}
+          </span>
+        )}
       </div>
       <div className="archive-card__body">
         <div className="archive-card__title-wrap">
