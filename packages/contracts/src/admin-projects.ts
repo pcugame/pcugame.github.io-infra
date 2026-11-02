@@ -1,3 +1,4 @@
+import type { Award } from './awards.js';
 import type { ExternalLink } from './external-links.js';
 import type { Visibility } from './enums.js';
 import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from './enums.js';
@@ -31,6 +32,7 @@ export type ProjectRequiredAssets = {
 };
 
 export type AdminProjectItem = {
+ awards?: Award[];
 	/** Older API releases omit this summary. Video readiness requires playable output. */
 	requiredAssets?: ProjectRequiredAssets;
 	canChangeVisibility: boolean;
@@ -93,6 +95,8 @@ export type AdminProjectListResponse = {
 };
 
 export type AdminProjectDetail = {
+ exhibitionId?: number;
+ awards?: Award[];
 	/** Older API releases omit this summary. Video readiness requires playable output. */
 	requiredAssets?: ProjectRequiredAssets;
 	canChangeVisibility: boolean;
@@ -182,6 +186,7 @@ export type ProjectSubmissionManifestItem = {
 export type ProjectSubmissionItemStatus = ProjectSubmissionManifestItem & {
 	id: string;
 	state: 'EXPECTED' | 'UPLOADING' | 'VERIFYING' | 'READY' | 'FAILED' | 'CANCELLED';
+	awaitingReview?: boolean;
 	sessionId?: string;
 	generation?: number;
 	failureReason?: string;

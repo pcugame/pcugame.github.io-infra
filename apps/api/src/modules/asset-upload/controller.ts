@@ -64,6 +64,10 @@ export function createAssetUploadController(deps: { service: Service }): Fastify
 			const result = await deps.service.createProjectPosterSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body));
 			sendCreated(reply, result);
 		});
+		app.post<{ Params: { id: string } }>('/exhibitions/:id/direct-image-upload-sessions', { preHandler: requireLogin }, async (request, reply) => {
+			const result = await deps.service.createExhibitionImageSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body));
+			sendCreated(reply, result);
+		});
 		app.post<{ Params: { id: string } }>('/exhibitions/:id/direct-poster-upload-sessions', { preHandler: requireLogin }, async (request, reply) => {
 			const result = await deps.service.createExhibitionPosterSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body));
 			sendCreated(reply, result);
@@ -103,6 +107,7 @@ export function createUnavailableAssetUploadController(): FastifyPluginAsync {
 		app.post('/projects/:id/direct-image-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/projects/:id/direct-poster-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/exhibitions/:id/direct-poster-upload-sessions', { preHandler: requireLogin }, unavailable);
+ app.post('/exhibitions/:id/direct-image-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/direct-asset-upload-sessions/:sessionId/part-urls', { preHandler: requireLogin }, unavailable);
 		app.get('/direct-asset-upload-sessions/:sessionId', { preHandler: requireLogin }, unavailable);
 		app.post('/direct-asset-upload-sessions/:sessionId/complete', { preHandler: requireLogin }, unavailable);

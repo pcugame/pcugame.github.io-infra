@@ -1,0 +1,5 @@
+.vendor/
+.source.tar.gz
+bin/
+obj/
+publish/

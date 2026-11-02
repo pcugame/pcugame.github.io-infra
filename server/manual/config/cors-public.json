@@ -1,0 +1,27 @@
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": [
+        "https://web.pcu.test"
+      ],
+      "AllowedMethods": [
+        "GET",
+        "HEAD"
+      ],
+      "AllowedHeaders": [
+        "Range",
+        "If-Range",
+        "If-None-Match",
+        "If-Modified-Since"
+      ],
+      "ExposeHeaders": [
+        "ETag",
+        "Last-Modified",
+        "Content-Length",
+        "Content-Range",
+        "Content-Encoding"
+      ],
+      "MaxAgeSeconds": 300
+    }
+  ]
+}

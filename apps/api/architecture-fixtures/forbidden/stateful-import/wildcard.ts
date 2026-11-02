@@ -1,1 +1,1 @@
-export * from '../../../src/infrastructure/production-ports.js';
+export * from './src/infrastructure/production-ports.js';

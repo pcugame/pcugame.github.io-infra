@@ -91,6 +91,7 @@ function serializeSubmissionItems(submission: ProjectSubmissionRecord): ProjectS
 		...(item.uploadSession ? {
 			sessionId: item.uploadSession.id,
 			generation: item.uploadSession.generation,
+			...(item.uploadSession.state === 'AWAITING_REVIEW' ? { awaitingReview: true } : {}),
 		} : {}),
 		...(item.failureReason ? { failureReason: item.failureReason } : {}),
 		...(item.playbackState !== 'NONE' ? { playbackState: item.playbackState } : {}),

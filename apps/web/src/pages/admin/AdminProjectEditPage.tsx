@@ -1,10 +1,13 @@
+import { AwardSettings } from '../../features/admin/awards/AwardSettings';
+import { BuildReviewPanel } from '../../features/admin/build-reviews/BuildReviewPanel';
+import { AdminVideoRetryPanel } from '../../features/admin/projects/AdminVideoRetryPanel';
 import { StudioPreview } from '../../features/project-submission/studio/StudioPreview';
 import { ProjectUploadDialog } from '../../components/common/ProjectUploadDialog';
 import { usePreventWindowClose } from '../../components/common/usePreventWindowClose';
 import { effectiveExternalLinks } from '../../components/project/externalLinks';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { PROJECT_PLATFORMS, type AdminProjectDetail } from '@pcu/contracts';
@@ -45,25 +48,34 @@ const metadata = (project: AdminProjectDetail): UpdateProjectFormInput => ({
 export default function AdminProjectEditPage() {
 	const { id: idParam } = useParams<{ id: string }>();
 	const id = Number(idParam);
-	const { user } = useMe();
+	const { user, isPending } = useMe();
+	if (isPending) return <LoadingSpinner />;
+	if (!user) return null;
+	return <ProjectEditSession key={`${id}:${user.id}:${user.role}`} id={id} user={user} />;
+}
+
+function ProjectEditSession({ id, user }: { id: number; user: NonNullable<ReturnType<typeof useMe>['user']> }) {
+	const queryKey = [...queryKeys.adminProject(id), { viewer: `${user.id}:${user.role}` }];
 	const { data: project, isLoading, error, refetch } = useQuery({
-		queryKey: queryKeys.adminProject(id),
+		queryKey,
 		queryFn: () => adminProjectApi.getDetail(id),
 		enabled: !isNaN(id),
+		refetchInterval: query => query.state.data?.videos.some(video => video.playbackStatus === 'PENDING') ? 5000 : false,
 	});
 	if (isLoading) return <LoadingSpinner />;
 	if (error && !project) return <ErrorMessage error={error} onReset={() => refetch()} />;
 	if (!project) return null;
 	const isPrivileged = user?.role === 'OPERATOR' || user?.role === 'ADMIN';
-	const canEditContent = isPrivileged || project.canEdit === true;
+	const canEditContent = !error && (isPrivileged || project.canEdit === true);
 	return (
 		<AdminProjectUploadProvider key={id} project={project} projectId={id} limits={getClientUploadLimits(user?.role ?? 'USER')} canEditContent={canEditContent}>
-			<ProjectEditor key={id} project={project} isPrivileged={isPrivileged} canEditContent={canEditContent} />
+			{isPrivileged && !error && <BuildReviewPanel projectId={id} />}
+			<ProjectEditor key={id} project={project} queryKey={queryKey} accessError={error} retryAccess={() => { void refetch(); }} isPrivileged={isPrivileged} canEditContent={canEditContent} />
 		</AdminProjectUploadProvider>
 	);
 }
 
-function ProjectEditor({ project, isPrivileged, canEditContent }: { project: AdminProjectDetail; isPrivileged: boolean; canEditContent: boolean }) {
+function ProjectEditor({ project, queryKey, accessError, retryAccess, isPrivileged, canEditContent }: { project: AdminProjectDetail; queryKey: QueryKey; accessError: unknown; retryAccess: () => void; isPrivileged: boolean; canEditContent: boolean }) {
 	const id = project.id;
 	const qc = useQueryClient();
 	const queue = useAdminProjectUploadQueue();
@@ -129,13 +141,12 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 					...(data.title !== defaults?.title ? { title: data.title } : {}),
 					...(data.summary !== defaults?.summary ? { summary: data.summary } : {}),
 					...(data.description !== defaults?.description ? { description: data.description } : {}),
-					...(data.sortOrder !== defaults?.sortOrder ? { sortOrder: data.sortOrder } : {}),
 					...(isPrivileged && baselineStatus !== 'DRAFT' && nextStatus !== baselineStatus ? { status: nextStatus } : {}),
 				};
 				const response = Object.keys(patch).length > 0 ? await mutations.updateMutation.mutateAsync(patch) : project;
 				form.reset(metadata(response));
 				setBaselineStatus(response.status);
-				qc.setQueryData(queryKeys.adminProject(id), response);
+				qc.setQueryData(queryKey, response);
 			}
 			await qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
 			await qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
@@ -175,6 +186,10 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 	}, [project, queue.removals, storedAssets, savedPoster]);
 	const info = { project, form, formId, isPending: pending, canEditContent, onSubmit: onApply };
 
+	// Keep form/member/upload state mounted, but remove protected media and all
+	// submission controls until the server confirms access again.
+	if (accessError) return <ErrorMessage error={accessError} onReset={retryAccess} />;
+
 	return (
 		<div className="admin-project-edit-page" inert={showUploadDialog} aria-hidden={showUploadDialog}>
 
@@ -183,7 +198,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 			{!canEditContent && project.canRequestChange && <div className="admin-card" style={{ marginBottom: '1rem' }}><p>이 작품이 속한 연도는 닫혀 있습니다. 변경 내용은 운영자 승인 후 반영됩니다.</p><Link className="btn btn--primary" to={`/me/projects/${id}/change-request`}>수정 요청 작성</Link></div>}
 			<form id={formId} onSubmit={onApply} />
 			<ProjectEditStudio title={<>작품 수정{isPrivileged && project.isIncomplete && <span className="incomplete-badge">불완전</span>}</>} secondaryAction={<Link className="btn btn--secondary project-edit-header__back" to={isPrivileged ? '/admin/projects' : '/me/projects'} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 돌아가시겠어요?'))) event.preventDefault(); }} aria-disabled={pending}>{isPrivileged ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기'}</Link>} step={step} onStepChange={next => { setNotice(''); setStep(next); }} disabled={pending} notice={notice}
-				introduction={<AdminProjectBasicInfoForm {...info} section="introduction" />}
+				introduction={<><AdminProjectBasicInfoForm {...info} section="introduction" />{isPrivileged && project.exhibitionId && <AwardSettings exhibitionId={project.exhibitionId} projectId={id} />}</>}
 				game={<AdminProjectBasicInfoForm {...info} section="game" members={<AdminProjectMemberEditor
 								members={members.members} canEditContent={canEditContent} isBusy={pending}
 								errors={showMemberErrors ? members.validationErrors : []}
@@ -193,8 +208,9 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 					<p className="submission-studio__upload-recommendation">네이티브 빌드·웹 빌드·동영상·스크린샷을 모두 등록하는 것을 권장합니다.</p>
 					<AdminProjectPosterUpload project={project} canEditContent={canEditContent} studio />
 					<AdminProjectAssetManager canEditContent={canEditContent} studio />
+					{isPrivileged && <AdminVideoRetryPanel project={project} disabled={pending || hasChanges} />}
 				</>}
-				settings={<WebglDisplaySettingsForm project={project} isPending={pending} onPendingChange={setIsSavingDisplay} horizontal />}
+				settings={<><WebglDisplaySettingsForm project={project} isPending={pending} onPendingChange={setIsSavingDisplay} horizontal />{isPrivileged && <Link className="btn btn--secondary" to={`/admin/projects/${id}/network`} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 외부 연결 관리로 이동할까요?'))) event.preventDefault(); }}>게임 외부 연결 관리</Link>}</>}
 				preview={<StudioPreview exhibitionSelected values={{ title: values.title ?? '', summary: values.summary, members: members.members }} poster={selected('POSTER').at(-1) ?? null} savedPoster={savedPoster} assetChecks={[
 					{ label: '네이티브 빌드', ready: selected('GAME').length > 0 || !!savedGame },
 					{ label: '웹 빌드', ready: selected('WEBGL').length > 0 || !!queue.hasWebgl && !queue.removeWebgl },

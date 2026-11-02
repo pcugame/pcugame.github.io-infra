@@ -75,7 +75,7 @@ export function createMultipartAbortService(deps: {
 					));
 					failed++;
 				} finally {
-					claim.stop();
+					await claim.stop();
 				}
 			}
 			return { tried: tasks.length, resolved, failed };

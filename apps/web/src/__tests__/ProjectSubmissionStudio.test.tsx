@@ -11,6 +11,7 @@ import type { ProjectSubmissionItemStatus, ProjectSubmissionManifestItem } from 
 import { ProjectSubmissionStudio } from '../features/project-submission/studio/ProjectSubmissionStudio';
 
 const controls = vi.hoisted(() => ({
+	userId: 9,
 	role: 'USER',
 	email: '20260001@pcu.ac.kr',
 	studentId: '20260001' as string | undefined,
@@ -29,7 +30,7 @@ const controls = vi.hoisted(() => ({
 }));
 vi.mock('../lib/env', () => ({ env: { get VISIBILITY_CONTROLS_ENABLED() { return controls.visibilityEnabled; }, BASE_PATH: '/' } }));
 vi.mock('../features/auth', () => ({
-	useMe: () => ({ user: { id: 9, name: '홍길동', studentId: controls.studentId, email: controls.email, role: controls.role } }),
+	useMe: () => ({ user: { id: controls.userId, name: '홍길동', studentId: controls.studentId, email: controls.email, role: controls.role } }),
 }));
 vi.mock('../lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../lib/api')>()),
@@ -57,6 +58,7 @@ const draft = () => ({
 beforeEach(() => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 	items = [];
+	controls.userId = 9;
 	controls.role = 'USER';
 	controls.email = '20260001@pcu.ac.kr';
 	controls.studentId = '20260001';
@@ -285,6 +287,9 @@ describe('submission studio', () => {
 		await enterMetadata('PUBLIC');
 		await goTo(1);
 		fireEvent.click(screen.getByLabelText('PC'));
+		fireEvent.change(screen.getByLabelText('필수 하드웨어'), { target: { value: 'VR 헤드셋' } });
+		fireEvent.change(screen.getByLabelText('외부 링크 1 이름'), { target: { value: '다운로드' } });
+		fireEvent.change(screen.getByLabelText('외부 링크 1 URL'), { target: { value: 'https://example.com/game' } });
 		await goTo(2);
 		await waitFor(() => expect(controls.config).toHaveBeenCalled());
 		select(container, 'poster', [new File(['poster'], 'cover.png', { type: 'image/png' })]);
@@ -300,7 +305,7 @@ describe('submission studio', () => {
 		expect(controls.getApi).toHaveBeenCalledWith(mode);
 		const data = controls.submit.mock.calls[0]![0].formData as FormData;
 		expect([...data.keys()]).toEqual(['payload']);
-		expect(JSON.parse(String(data.get('payload')))).toMatchObject({ title: '선택한 작품', platforms: ['PC'] });
+		expect(JSON.parse(String(data.get('payload')))).toMatchObject({ title: '선택한 작품', platforms: ['PC'], hardwareRequirements: 'VR 헤드셋', externalLinks: [{ label: '다운로드', url: 'https://example.com/game' }] });
 		expect(items.map(item => item.kind).sort()).toEqual(['DOCUMENT', 'GAME', 'IMAGE', 'POSTER', 'VIDEO', 'WEBGL']);
 		for (const call of controls.upload.mock.calls) {
 			const item = items.find(item => item.kind === call[2])!;
@@ -663,4 +668,110 @@ it.each(['user', 'admin'] as const)('keeps faculty participants blank and unlink
  await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
  const payload = JSON.parse(String(controls.submit.mock.calls[0][0].formData.get('payload')));
  expect(payload.members).toEqual([{ name: '홍길동', studentId: '20269999' }]);
+});
+
+it('retains existing file recovery inputs after reloading a pending DRAFT without browser files', async () => {
+	items = [
+		{
+			id: 'poster-item',
+			kind: 'POSTER',
+			slot: 'poster',
+			clientToken: 'poster-token',
+			required: true,
+			state: 'EXPECTED',
+		},
+		{
+			id: 'game-item',
+			kind: 'GAME',
+			slot: 'game',
+			clientToken: 'game-token',
+			required: true,
+			state: 'EXPECTED',
+		},
+	];
+	window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
+	mount();
+	await screen.findByText('전체 취소');
+	expect(screen.getByRole('dialog').querySelector('[aria-label="포스터 업로드 진행"] input[type="file"]')).toBeTruthy();
+	expect(screen.getByRole('dialog').querySelector('[aria-label="네이티브 빌드 업로드 진행"] input[type="file"]')).toBeTruthy();
+	expect(controls.submit).not.toHaveBeenCalled();
+	expect(controls.upload).not.toHaveBeenCalled();
+	controls.cancel.mockResolvedValue(undefined);
+	fireEvent.click(screen.getByRole('button', { name: '전체 취소' }));
+	await waitFor(() => expect(controls.cancel).toHaveBeenCalledWith(73));
+	await waitFor(() =>
+		expect(window.sessionStorage.getItem('pcu.pending-project-submission:user:9')).toBeNull(),
+	);
+});
+
+it.each(['user', 'admin'] as const)('keeps poster help local and restores focus in the %s studio', async mode => {
+ const { container } = mount(mode);
+ await enterMetadata();
+ await goTo(2);
+ select(container, 'poster', [new File(['poster'], 'keep.png', { type: 'image/png' })]);
+ const inputClicks = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="file"]')).map(input => vi.spyOn(input, 'click'));
+ const trigger = screen.getByRole('button', { name: '포스터 사용 방법' });
+ for (const dismiss of ['button', 'escape', 'backdrop']) {
+  trigger.focus();
+  fireEvent.click(trigger);
+  const dialog = screen.getByRole('dialog', { name: '포스터 사용 방법' });
+  const close = within(dialog).getByRole('button', { name: '도움말 닫기' });
+  expect(container.contains(dialog)).toBe(false);
+  expect(document.body.style.overflow).toBe('hidden');
+  expect(document.activeElement).toBe(close);
+  fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+  const last = within(dialog).getByRole('button', { name: '확인' });
+  expect(document.activeElement).toBe(last);
+  fireEvent.keyDown(last, { key: 'Tab' });
+  expect(document.activeElement).toBe(close);
+  if (dismiss === 'button') fireEvent.click(close);
+  else if (dismiss === 'escape') fireEvent.keyDown(document, { key: 'Escape' });
+  else fireEvent.click(dialog.parentElement!);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+  expect(document.body.style.overflow).toBe('');
+  expect(screen.getByText('keep.png')).toBeTruthy();
+ }
+ expect(inputClicks.every(click => click.mock.calls.length === 0)).toBe(true);
+ expect(controls.submit).not.toHaveBeenCalled();
+ expect(controls.upload).not.toHaveBeenCalled();
+});
+
+it('resets metadata, participants and selected files when the signed-in account changes', async () => {
+ const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+ const { container, rerender } = render(<ProjectSubmissionStudio mode="admin" />, {
+  wrapper: ({ children }) => <MemoryRouter><QueryClientProvider client={client}>{children}</QueryClientProvider></MemoryRouter>,
+ });
+ await enterMetadata();
+ await goTo(1);
+ fireEvent.change(screen.getByLabelText('이름'), { target: { value: '기존 학생' } });
+ await goTo(2);
+ select(container, 'native', [new File(['zip'], 'previous.zip')]);
+ const oldFileInput = container.querySelector('input[type="file"]');
+ controls.userId = 10;
+ controls.email = 'A00001@pcu.ac.kr';
+ controls.studentId = undefined;
+ rerender(<ProjectSubmissionStudio mode="admin" />);
+ expect((screen.getByLabelText('작품명 *') as HTMLInputElement).value).toBe('');
+ await goTo(1);
+ expect((screen.getByLabelText('이름') as HTMLInputElement).value).toBe('');
+ expect((screen.getByLabelText('학번') as HTMLInputElement).value).toBe('');
+ await goTo(2);
+ expect(container.querySelector('input[type="file"]')).not.toBe(oldFileInput);
+ expect(screen.queryByText('previous.zip')).toBeNull();
+ expect(controls.submit).not.toHaveBeenCalled();
+ expect(controls.upload).not.toHaveBeenCalled();
+});
+
+describe.each(['user', 'admin'] as const)('%s submission without files', mode => {
+ it.each(['STAFF', 'AUTHENTICATED', 'PUBLIC'] as const)('submits %s visibility with an empty manifest', async visibility => {
+  mount(mode);
+  await enterMetadata(visibility);
+  fireEvent.click(screen.getByRole('button', { name: mode === 'admin' ? '작품 등록' : '작품 제출' }));
+  await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
+  const payload = JSON.parse(String(controls.submit.mock.calls[0][0].formData.get('payload')));
+  expect(payload.visibility).toBe(visibility);
+  expect(payload.manifest).toEqual([]);
+  expect(controls.upload).not.toHaveBeenCalled();
+ });
 });

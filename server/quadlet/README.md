@@ -3,8 +3,14 @@
 Quadlet owns the runtime topology and systemd owns process lifecycle and
 restart. `../deploy.sh` updates the immutable application digest and requests
 systemd operations on an already adopted host. It does not install Quadlet for
-the first time or migrate legacy units. Production adoption and operation have
-not been verified; repository edits do not activate these definitions.
+the first time or migrate legacy units. The prior operational investigation
+confirmed rootless Quadlet adoption for the API and workers. That evidence does not validate newly edited definitions
+or the single-PC topology. Repository edits do not activate services.
+
+For a new manually configured single-PC installation, use the
+[operator guide](../../docs/guide/README.md) and its
+[configuration reference](../../docs/guide/configuration.md). Keep this renderer
+and the adoption procedure for existing managed hosts; do not mix their outputs.
 
 For first installation, use the separately gated [first-adoption runbook](ADOPTION.md)
 and [Podman compatibility policy](COMPATIBILITY.md). Normal releases cannot adopt
@@ -115,6 +121,25 @@ defaults. An empty value is written as `KEY=`.
 | `COOKIE_SECURE` | `true` |
 | `COOKIE_SAME_SITE` | `none` |
 | `ALLOWED_GOOGLE_HD` | Empty |
+
+`SHUTDOWN_DRAIN_MS` is the **total** API shutdown budget, including request
+draining, Fastify close, and backend cleanup; it is not an extra drain phase.
+Supported values are positive integer milliseconds up to **60000** (default
+15000). API startup and runtime-file validation reject larger/non-finite values.
+Cleanup reserves `min(5000, max(1000, floor(budget / 3)))` milliseconds within
+that total; requests receive the remaining budget. Very small budgets may leave
+no request-drain time. Exceeding the total forces exit with status 1.
+
+API `StopTimeout=65` covers the maximum supported app budget plus 5 seconds;
+`TimeoutStopSec=75` gives Podman another 10 seconds for service teardown.
+Parity tests enforce both inequalities and schema/parser agreement, including
+native generated service settings when the generator is available. Changing
+only `api.env` within the supported range cannot exceed the container grace.
+Raising the supported maximum requires updating both validators and reviewing
+the two outer timeouts together. The renderer still never reads runtime values.
+Existing installed units require the established topology update/adoption
+procedure before this policy applies; an image-only release does not update
+their timeouts. These definitions have not been activated on production.
 
 `postgres.env` is PostgreSQL-only: `POSTGRES_DB`, `POSTGRES_USER`, and
 `POSTGRES_PASSWORD` are all required, with no defaults. Do not place application

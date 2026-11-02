@@ -1,3 +1,4 @@
+import type { VideoPlaybackQuality } from '@pcu/contracts';
 import type { createBanMutationQueue } from '../../shared/ban-mutation-queue.js';
 import { attachmentContentDisposition, buildGameDownloadFilename, normalizeIpTarget } from '@pcu/contracts';
 import type { AssetKind, UserRole, Visibility } from '@pcu/contracts';
@@ -94,6 +95,7 @@ export interface AssetsServiceDependencies {
 }
 
 export interface BannedIpStartupGate {
+	assertIpAllowed(ip: string): void;
 	warm(ips: string[]): void;
 	add(ip: string): void;
 	remove(ip: string): void;
@@ -107,13 +109,27 @@ export interface BannedIpStartupGate {
  * interpret an uninitialized empty set as "no banned IPs".
  */
 export function createBannedIpStartupGate(limiter: {
+	assertIpAllowed(ip: string): void;
 	loadBannedIps(ips: string[]): void;
 	addBan(ip: string): void;
 	removeBan(ip: string): void;
 	check(ip: string, principalScope?: string): DownloadRateLimitResult;
 }): BannedIpStartupGate {
 	let ready = false;
+	function assertReady() {
+		if (!ready) {
+			throw new AppError(
+				503,
+				'Protected downloads are unavailable until the banned-IP cache is ready.',
+				'BANNED_IP_CACHE_UNAVAILABLE',
+			);
+		}
+	}
 	return {
+		assertIpAllowed(ip) {
+			assertReady();
+			limiter.assertIpAllowed(ip);
+		},
 		warm(ips) {
 			limiter.loadBannedIps(ips);
 			ready = true;
@@ -121,13 +137,7 @@ export function createBannedIpStartupGate(limiter: {
 		add: (ip) => limiter.addBan(ip),
 		remove: (ip) => limiter.removeBan(ip),
 		check(ip, principalScope) {
-			if (!ready) {
-				throw new AppError(
-					503,
-					'Protected downloads are unavailable until the banned-IP cache is ready.',
-					'BANNED_IP_CACHE_UNAVAILABLE',
-				);
-			}
+			assertReady();
 			return limiter.check(ip, principalScope);
 		},
 		isReady: () => ready,
@@ -176,6 +186,8 @@ async function grantProtectedAssetDownload(
 	variant: AssetDownloadVariant,
 	clientIp: string,
 	user: ProtectedAssetAccessUser | undefined,
+	profile?: 'native' | 'cap60' | 'cap30',
+	quality?: VideoPlaybackQuality,
 ): Promise<HttpResponseDescriptor> {
 	if (!asset.project || asset.projectId === null) {
 		throw new AppError(500, 'Protected asset has no project identity', 'INTERNAL_ERROR');
@@ -185,7 +197,7 @@ async function grantProtectedAssetDownload(
 		if (!user) throw unauthorized();
 		throw forbidden('Not allowed to access this asset');
 	}
-	const representation = resolveDownloadRepresentation(asset, variant);
+	const representation = resolveDownloadRepresentation(asset, variant, profile, quality);
 
 	clientIp = normalizeIpTarget(clientIp);
 	const principalScope = user
@@ -234,10 +246,12 @@ export async function downloadAssetById(
 	variant: AssetDownloadVariant,
 	clientIp: string,
 	user: ProtectedAssetAccessUser | undefined,
+	profile?: 'native' | 'cap60' | 'cap30',
+	quality?: VideoPlaybackQuality,
 ): Promise<HttpResponseDescriptor> {
 	const asset = await deps.repository.findAssetByIdForDownload(assetId);
 	if (!asset) throw notFound('Asset not found');
-	return grantProtectedAssetDownload(deps, asset, variant, clientIp, user);
+	return grantProtectedAssetDownload(deps, asset, variant, clientIp, user, profile, quality);
 }
 
 /** Delete an asset using a locked DB identity claim around storage I/O. */
@@ -270,7 +284,9 @@ export function createAssetsService(deps: AssetsServiceDependencies) {
 			variant: AssetDownloadVariant,
 			clientIp: string,
 			user: ProtectedAssetAccessUser | undefined,
-		) => downloadAssetById(deps, assetId, variant, clientIp, user),
+			profile?: 'native' | 'cap60' | 'cap30',
+			quality?: VideoPlaybackQuality,
+		) => downloadAssetById(deps, assetId, variant, clientIp, user, profile, quality),
 		deleteAsset: (assetId: number, actor: Actor) => deleteAsset(deps, assetId, actor),
 	};
 }

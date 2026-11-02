@@ -2,6 +2,7 @@ import { accelerationMarkup, accelerationStyle } from './runtime-acceleration-pr
 import { createHash } from 'node:crypto';
 
 interface ShellConfig {
+	BUILD_PACKAGE_REVIEW_ENABLED?: boolean;
 	API_PUBLIC_URL: string;
 	WEB_PUBLIC_URL: string;
 	PUBLIC_ASSET_ORIGIN?: string;
@@ -195,7 +196,7 @@ window.addEventListener('pagehide', () => {
 });
 async function start() {
   try {
-    if (!window.isSecureContext || typeof WebAssembly === 'undefined') {
+    if (!window.isSecureContext || (root.dataset.generalWeb !== 'true' && typeof WebAssembly === 'undefined')) {
       stop('이 실행 환경에서는 WebAssembly를 사용할 수 없습니다. HTTPS로 접속하고 데스크톱 Chrome, Edge 또는 Firefox를 확인해 주세요.');
       return;
     }
@@ -228,7 +229,7 @@ async function start() {
     // Without WebGL, Unity's loader rejects before fetching its build and its
     // stock alert is suppressed by the sandbox. Keep the explicit launch attempt,
     // but do not leave the parent claiming that the game is still loading.
-    announce(accelerationStatus === 'unavailable'
+    announce(root.dataset.generalWeb !== 'true' && accelerationStatus === 'unavailable'
       ? '게임 실행을 요청했지만 현재 브라우저에서 WebGL을 사용할 수 없습니다. 그래픽 가속을 켜고 브라우저를 완전히 다시 시작한 뒤 재시도해 주세요.'
       : window.crossOriginIsolated
       ? '게임 파일을 불러오고 있습니다. 처음 실행할 때는 시간이 걸릴 수 있습니다.'
@@ -343,6 +344,8 @@ try {
 } catch { /* Browser detection is optional. */ }
 function inspectAcceleration() {
   if (released) return;
+  // Canvas/DOM games must not be gated on a WebGL capability probe.
+  if (root.dataset.generalWeb === 'true') { release(); return; }
   const result = accelerationStatus = detectGraphicsAcceleration();
   if (result === 'available' || result === 'unknown') { release(); return; }
   document.getElementById('acceleration-description').textContent = result === 'unavailable'
@@ -400,5 +403,5 @@ export function renderPlayShell(config: ShellConfig, projectId: number): string 
 	if (!Number.isSafeInteger(projectId) || projectId <= 0) throw new Error('Invalid project ID');
 	const back = new URL(`/projects/${projectId}`, config.WEB_PUBLIC_URL).href;
 	const assetOrigin = new URL(config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL).origin;
-	return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebGL Player</title><style>${shellStyles(config)}</style></head><body><main data-graphics-assets="${escapeHtml(graphicsAssets(config))}" data-project-id="${projectId}" data-asset-origin="${escapeHtml(assetOrigin)}"><header><h1 id="title">WebGL Player</h1><a id="back" href="${escapeHtml(back)}" rel="noopener">작품으로 돌아가기</a><button id="fullscreen" type="button" aria-pressed="false" hidden>전체화면</button><button id="diagnose" type="button">연결 진단으로 다시 실행</button><button id="restart" type="button" disabled>게임 다시 시작</button></header><p id="status" role="status">실행 권한을 확인하고 있습니다.</p><p id="display-info" hidden></p><details id="diagnostics" hidden><summary>연결 진단</summary><pre id="diagnostic-output"></pre><p>CSP 보고는 신뢰할 수 없는 참고 정보이며 자동 승인에 사용하지 않습니다. CORS·TLS·DNS·WebSocket Origin 검사·서비스 인증·게임 설정은 개발자 도구에서 확인하세요. 승인으로 외부 서버 설정이 변경되지는 않습니다.</p></details><div id="game"></div>${accelerationMarkup}<details><summary>게임이 실행되지 않나요?</summary><p>데스크톱 Chrome·Edge·Firefox에서 실행해 주세요. 브라우저를 업데이트하고 그래픽 가속을 확인해 주세요. Safari와 모바일은 지원 보장 대상이 아닙니다.</p><p>다른 탭으로 이동한 상태에서 권한이 만료되면 돌아왔을 때 다시 시작해야 합니다. 게임별 저장소 분리와 방문 간 저장 데이터 유지는 보장하지 않습니다. Firefox는 credentialless 지원과 저장소 동작이 다를 수 있으며 실제 게임과 Worker의 격리 결과에 따라 스레드 지원이 결정됩니다.</p><p>외부 연결 실패 시 개발자 도구에서 CSP 차단과 외부 서버 CORS 오류를 구분할 수 있습니다. 승인된 외부 서버도 실제 NAS 게임 origin에 대한 CORS 설정이 필요합니다. 작품명, 브라우저 버전과 오류 내용을 운영자에게 전달해 주세요.</p></details></main><script>${script}</script></body></html>`;
+	return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebGL Player</title><style>${shellStyles(config)}</style></head><body><main data-general-web="${config.BUILD_PACKAGE_REVIEW_ENABLED === true}" data-graphics-assets="${escapeHtml(graphicsAssets(config))}" data-project-id="${projectId}" data-asset-origin="${escapeHtml(assetOrigin)}"><header><h1 id="title">WebGL Player</h1><a id="back" href="${escapeHtml(back)}" rel="noopener">작품으로 돌아가기</a><button id="fullscreen" type="button" aria-pressed="false" hidden>전체화면</button><button id="diagnose" type="button">연결 진단으로 다시 실행</button><button id="restart" type="button" disabled>게임 다시 시작</button></header><p id="status" role="status">실행 권한을 확인하고 있습니다.</p><p id="display-info" hidden></p><details id="diagnostics" hidden><summary>연결 진단</summary><pre id="diagnostic-output"></pre><p>CSP 보고는 신뢰할 수 없는 참고 정보이며 자동 승인에 사용하지 않습니다. CORS·TLS·DNS·WebSocket Origin 검사·서비스 인증·게임 설정은 개발자 도구에서 확인하세요. 승인으로 외부 서버 설정이 변경되지는 않습니다.</p></details><div id="game"></div>${accelerationMarkup}<details><summary>게임이 실행되지 않나요?</summary><p>데스크톱 Chrome·Edge·Firefox에서 실행해 주세요. 브라우저를 업데이트하고 그래픽 가속을 확인해 주세요. Safari와 모바일은 지원 보장 대상이 아닙니다.</p><p>다른 탭으로 이동한 상태에서 권한이 만료되면 돌아왔을 때 다시 시작해야 합니다. 게임별 저장소 분리와 방문 간 저장 데이터 유지는 보장하지 않습니다. Firefox는 credentialless 지원과 저장소 동작이 다를 수 있으며 실제 게임과 Worker의 격리 결과에 따라 스레드 지원이 결정됩니다.</p><p>외부 연결 실패 시 개발자 도구에서 CSP 차단과 외부 서버 CORS 오류를 구분할 수 있습니다. 승인된 외부 서버도 실제 NAS 게임 origin에 대한 CORS 설정이 필요합니다. 작품명, 브라우저 버전과 오류 내용을 운영자에게 전달해 주세요.</p></details></main><script>${script}</script></body></html>`;
 }

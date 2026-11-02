@@ -7,7 +7,7 @@ const steps = workflow.split(/^      - /m).slice(1);
 
 test('every release SSH/SCP action allows bounded connection establishment, including recovery', () => {
   const remote = steps.filter(step => /uses: appleboy\/(?:ssh|scp)-action@/.test(step));
-  assert.equal(remote.length, 12);
+  assert.equal(remote.length, 14);
   for (const step of remote) {
     assert.match(step, /^          timeout: 120s$/m, step.split('\n')[0]);
     assert.doesNotMatch(step, /retry|continue-on-error:/i);

@@ -1,3 +1,4 @@
+import { createWorkerControl } from './runtime/worker-control.js';
 import { waitForWorkerPoll } from './shared/worker-wait.js';
 import { pathToFileURL } from 'node:url';
 import { loadEnv } from './config/env.js';
@@ -22,19 +23,21 @@ export async function runProjectPublicationWorker(): Promise<void> {
 		ids: createCryptoIdGenerator(),
 		logger,
 	});
+	const control = await createWorkerControl();
 	const abort = new AbortController();
 	const stop = () => abort.abort(new Error('Project publication worker is stopping'));
 	process.once('SIGTERM', stop);
 	process.once('SIGINT', stop);
 	try {
 		while (!abort.signal.aborted) {
-			const result = await worker.runPass(abort.signal).catch((error) => {
+			const result = await control.gate.run(() => worker.runPass(abort.signal), { claimed: 0, completed: 0, retried: 0, failed: 0, cancelled: 0 }).catch((error) => {
 				logger.error({ error }, 'Project publication pass failed');
 				return { claimed: 0 };
 			});
 			if (result.claimed === 0) await waitForWorkerPoll(config.DIRECT_UPLOAD_WORKER_POLL_MS, abort.signal);
 		}
 	} finally {
+		await control.close();
 		process.off('SIGTERM', stop);
 		process.off('SIGINT', stop);
 		s3.destroy();

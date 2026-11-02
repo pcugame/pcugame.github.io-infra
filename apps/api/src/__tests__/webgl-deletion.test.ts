@@ -11,6 +11,8 @@ const mocks = {
 };
 
 const projectService = createProjectService({
+	loadProjectWithAccess: vi.fn(),
+	resolveExternalLinks: vi.fn(),
 	deletionBuckets: { publicBucket: 'public', protectedBucket: 'protected' },
 	repository: {
 		clearWebglDeployment: mocks.clearWebglDeployment,
@@ -19,7 +21,7 @@ const projectService = createProjectService({
 		findProjectsForUser: vi.fn(),
 		findProjectById: vi.fn(),
 		isMemberOfProject: vi.fn(),
-		updateProject: vi.fn(),
+		runProjectUpdate: vi.fn(),
 		findAssetById: vi.fn(),
 		setProjectVideoOrder: vi.fn(),
 		setProjectPoster: vi.fn(),

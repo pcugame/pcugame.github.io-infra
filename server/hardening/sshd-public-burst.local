@@ -1,0 +1,9 @@
+# Install as /etc/fail2ban/jail.d/zz-pcu-sshd-public-burst.local.
+# Override only the existing public jail; retain its filter and tailnet split.
+[sshd]
+maxretry = 3
+findtime = 10m
+bantime = 1d
+bantime.increment = true
+bantime.multipliers = 1 2 4 7
+bantime.maxtime = 7d

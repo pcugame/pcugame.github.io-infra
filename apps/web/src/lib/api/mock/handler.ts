@@ -1,7 +1,8 @@
+import { handleAwards } from './awards';
 import { handleVoting } from './voting';
 import { MOCK_USERS, MockHttpError, UNHANDLED, type MockContext, type MockRequestOptions, type MockUserSelection } from './context';
 import { allowMethod, bodyObject } from './common';
-import { handleProjects } from './projects';
+import { handleProjects, advanceVideoRepairs } from './projects';
 import { handleUploads, advanceUploadJobs } from './uploads';
 import { handleChanges, advanceChangeJobs } from './changes';
 import { handleWebgl } from './webgl';
@@ -10,6 +11,7 @@ import { handleManagement, advanceExportJobs } from './management';
 
 export async function dispatchMockRequest(ctx: MockContext, pathname: string, method: string, options: MockRequestOptions, path: string): Promise<unknown> {
   advanceUploadJobs(ctx); advanceChangeJobs(ctx); advanceExportJobs(ctx);
+  advanceVideoRepairs(ctx);
   if (pathname === '/api/public/upload-config') { allowMethod(method, 'GET'); return { materialMaxCount: 5, materialMaxBytes: 50 * 1024 * 1024 }; }
   if (pathname === '/api/me') { allowMethod(method, 'GET'); return ctx.user ? { authenticated: true, user: ctx.user } : { authenticated: false }; }
   if (pathname === '/api/auth/logout') { allowMethod(method, 'POST'); ctx.state.authUser = 'anonymous'; return { message: 'logged out' }; }
@@ -35,7 +37,7 @@ export async function dispatchMockRequest(ctx: MockContext, pathname: string, me
     const error = errors[String(scenario)] ?? [400, 'VALIDATION_ERROR', 'Unknown login failure'];
     throw new MockHttpError(...error);
   }
-  for (const handler of [handleVoting, handleUploads, handleProjects, handleChanges, handleWebgl, handleAccess, handleManagement]) {
+  for (const handler of [handleAwards, handleVoting, handleUploads, handleProjects, handleChanges, handleWebgl, handleAccess, handleManagement]) {
     const result = await handler(ctx, pathname, method, options, path);
     if (result !== UNHANDLED) return result;
   }

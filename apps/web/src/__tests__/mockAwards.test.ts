@@ -1,0 +1,76 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { AwardStateSchema } from '@pcu/contracts';
+import { awardApi } from '../lib/api/awards';
+import { forgetMockCacheForTests, getMockSnapshot, mockFetch, resetMockState, selectMockUser } from '../lib/api/mock/transport';
+
+beforeEach(async () => { vi.stubEnv('VITE_MOCK', 'true'); await resetMockState(); await selectMockUser('ADMIN'); });
+afterEach(() => vi.unstubAllEnvs());
+it('previews awards, persists edits and reflects recipients on public projects', async () => {
+  const snapshot = await getMockSnapshot();
+  const project = Object.values(snapshot.projects).find(p => p.status === 'PUBLISHED' && p.visibility === 'PUBLIC')!;
+  const id = project.exhibitionId;
+  let state = AwardStateSchema.parse(await awardApi.read(id));
+  expect(state.items).toHaveLength(3);
+  state = await awardApi.create(id, state.version, '특별상');
+  const award = state.items.at(-1)!;
+  state = await awardApi.recipients(id, state.version, award.id, [project.id], []);
+  const response = await mockFetch(`/api/public/projects/${project.id}`);
+  expect(response.status).toBe(200);
+  expect((await response.json()).data.awards).toEqual(expect.arrayContaining([expect.objectContaining({ name: '특별상' })]));
+  await forgetMockCacheForTests();
+  expect(await awardApi.read(id)).toEqual(state);
+  await expect(awardApi.create(id, 0, '오래된 요청')).rejects.toMatchObject({ status: 409 });
+  state = await awardApi.project(project.id, state.version, []);
+  expect(state.items.every(a => !a.projectIds.includes(project.id))).toBe(true);
+  for (const item of [...state.items]) state = await awardApi.remove(id, state.version, item.id);
+  expect(AwardStateSchema.parse(await awardApi.read(id)).items).toEqual([]);
+  await selectMockUser('owner');
+  await expect(awardApi.read(id)).rejects.toMatchObject({ status: 403 });
+});
+
+it('uses the common upload lifecycle for exhibition images without replacing the poster', async () => {
+  const { File } = await import('node:buffer');
+  const { uploadDirectAssetFile, getDirectAssetUploadStatus } = await import('../lib/api/game-upload');
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    const snapshot = await getMockSnapshot();
+    const exhibition = snapshot.exhibitions[0];
+    const owner = { type: 'EXHIBITION' as const, id: exhibition.id };
+    const file = new File([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64')], 'award.png', { type: 'image/png' });
+    let state = await awardApi.read(owner.id);
+    expect(state.assets).toEqual([]);
+    await selectMockUser('owner');
+    await expect(uploadDirectAssetFile(owner, file as unknown as globalThis.File, 'IMAGE')).rejects.toMatchObject({ status: 403 });
+    await selectMockUser('ADMIN');
+    const completion = await uploadDirectAssetFile(owner, file as unknown as globalThis.File, 'IMAGE');
+    expect((await awardApi.read(owner.id)).assets).toEqual([]);
+    vi.setSystemTime(Date.now() + 1500);
+    expect((await getDirectAssetUploadStatus(completion.sessionId)).state).toBe('READY');
+    state = AwardStateSchema.parse(await awardApi.read(owner.id));
+    expect(state.assets).toHaveLength(1);
+    const image = state.assets[0];
+    expect(image.imageUrl).toMatch(/^data:image\/png;base64,/);
+    expect((await getMockSnapshot()).exhibitions[0].poster).toEqual(exhibition.poster);
+    state = await awardApi.edit(owner.id, state.version, { ...state.items[0], builtinKey: null, assetId: image.id });
+    expect(state.items[0].imageUrl).toBe(image.imageUrl);
+    const projectId = state.items[0].projectIds[0];
+    const response = await mockFetch(`/api/public/projects/${projectId}`);
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.awards[0].imageUrl).toBe(image.imageUrl);
+    await forgetMockCacheForTests();
+    expect((await awardApi.read(owner.id)).assets[0]).toEqual(image);
+    await expect(awardApi.deleteImage(owner.id, state.version, image.id)).rejects.toMatchObject({ status: 409 });
+    const other = snapshot.exhibitions.find(e => e.id !== owner.id)!;
+    const otherState = await awardApi.read(other.id);
+    await expect(awardApi.edit(other.id, otherState.version, { ...otherState.items[0], builtinKey: null, assetId: image.id })).rejects.toMatchObject({ status: 400 });
+    state = await awardApi.edit(owner.id, state.version, { ...state.items[0], builtinKey: 'medal', assetId: null });
+    expect(state.items[0].imageUrl).toBeUndefined();
+    state = await awardApi.deleteImage(owner.id, state.version, image.id);
+    expect(state.assets).toEqual([]);
+    const poster = await uploadDirectAssetFile(owner, new File([file], 'poster.png', { type: 'image/png' }) as unknown as globalThis.File, 'POSTER');
+    vi.setSystemTime(Date.now() + 1500);
+    expect((await getDirectAssetUploadStatus(poster.sessionId)).state).toBe('READY');
+    expect((await getMockSnapshot()).exhibitions[0].posterOriginalName).toBe('poster.png');
+    expect((await awardApi.read(owner.id)).assets).toEqual([]);
+  } finally { vi.useRealTimers(); }
+});

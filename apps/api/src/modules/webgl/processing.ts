@@ -1,3 +1,6 @@
+import { inspectBuildPackage, isBuildContainer } from '../build-package/inspect.js';
+import { BuildReviewRequired } from '../build-package/types.js';
+import type { BuildReviewWorkerPort } from '../build-review/ports.js';
 import type { WebglDisplayAnalysis } from '@pcu/contracts';
 import { analyzeWebglDisplayArchive } from './display-analysis.js';
 import { createWriteStream } from 'node:fs';
@@ -161,6 +164,7 @@ function assertCanonicalSource(session: CanonicalWebglUploadSession): void {
 }
 
 export function createWebglProcessingProcessor(deps: {
+	reviews?: BuildReviewWorkerPort;
 	publicBucket: string;
 	protectedBucket: string;
 	tempRoot: string;
@@ -201,7 +205,7 @@ export function createWebglProcessingProcessor(deps: {
 				|| totalBytes > deps.physicalArchiveByteLimit) {
 				throw new WebglTerminalValidationError('WebGL source exceeds the physical archive byte limit');
 			}
-			const releaseDisk = deps.diskBudget.tryReserve(totalBytes);
+			const releaseDisk = deps.diskBudget.tryReserve(deps.reviews ? deps.physicalArchiveByteLimit : totalBytes);
 			if (!releaseDisk) throw new Error('WebGL processing temp disk budget is exhausted');
 			let directory: string | undefined;
 			try {
@@ -245,9 +249,23 @@ export function createWebglProcessingProcessor(deps: {
 						profile: 'WEBGL',
 						signal: context.signal,
 						maxArchiveBytes: deps.physicalArchiveByteLimit,
+						...(deps.reviews ? { allowNestedArchivePath: isBuildContainer } : {}),
 						...deps.zipPolicy,
 					});
-					layout = analyzeWebglArchive(summary);
+					if (deps.reviews) {
+						const approval = await deps.reviews.approval(session.id, session.generation, session.sourceIdentity);
+						const inspection = await inspectBuildPackage({ archivePath, summary, signal: context.signal,
+							tempByteLimit: deps.physicalArchiveByteLimit, selectedEntry: approval?.entryPath,
+							maxTotalUncompressedBytes: deps.zipPolicy?.maxTotalUncompressedBytes, maxEntries: deps.zipPolicy?.maxEntries });
+						if (inspection.outcome === 'REJECT') throw new ZipValidationError(inspection.reasons.join('; '));
+						if (inspection.outcome === 'REVIEW' && !approval) {
+							await context.assertClaimOwned();
+							if (!await deps.reviews.awaitReview({ sessionId: session.id, generation: session.generation, sourceIdentity: session.sourceIdentity, token: context.claimToken, inspection })) throw new Error('Review lost validation fence');
+							throw new BuildReviewRequired(inspection);
+						}
+						if (!inspection.entryPath) throw new ZipValidationError('Web entry could not be resolved');
+						layout = analyzeWebglArchive(summary, inspection.entryPath);
+					} else layout = analyzeWebglArchive(summary);
 				} catch (error) {
 					throw terminalValidationError(error) ?? error;
 				}
@@ -259,7 +277,7 @@ export function createWebglProcessingProcessor(deps: {
 				await context.assertClaimOwned();
 
 				const candidateDeploymentId = deps.ids.next();
-				const candidateKeys = createCanonicalWebglPublicKeys(session.projectId, candidateDeploymentId);
+				const candidateKeys = createCanonicalWebglPublicKeys(session.projectId, candidateDeploymentId, layout.entryPath);
 				const reservation = await deps.repository.reserveDeployment({
 					sessionId: session.id,
 					generation: session.generation,
@@ -271,7 +289,7 @@ export function createWebglProcessingProcessor(deps: {
 					entryObjectKey: candidateKeys.entryObjectKey,
 					sourceRepresentationId: session.sourceRepresentation.id,
 				});
-				const keys = createCanonicalWebglPublicKeys(session.projectId, reservation.id);
+				const keys = createCanonicalWebglPublicKeys(session.projectId, reservation.id, layout.entryPath);
 				if (reservation.projectId !== session.projectId
 					|| reservation.publicBucket !== deps.publicBucket
 					|| reservation.publicPrefix !== keys.publicPrefix
@@ -291,7 +309,7 @@ export function createWebglProcessingProcessor(deps: {
 						signal: context.signal,
 					});
 					if (!publishedObjectKeys.includes(reservation.outputEntryObjectKey)) {
-						throw new Error('Validated WebGL publish omitted index.html');
+						throw new Error('Validated WebGL publish omitted the selected entry');
 					}
 					const objects: WebglPublishedObjectManifestEntry[] = [];
 					for (const objectKey of [...publishedObjectKeys].sort()) {

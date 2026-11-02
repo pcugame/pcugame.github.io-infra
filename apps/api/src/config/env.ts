@@ -31,9 +31,10 @@ const envSchema = z
     SESSION_IDLE_MS: z.coerce.number().int().positive().default(2 * 60 * 60 * 1000),
     SESSION_ABSOLUTE_MS: z.coerce.number().int().positive().default(14 * 24 * 60 * 60 * 1000),
     SESSION_TOUCH_MIN_INTERVAL_MS: z.coerce.number().int().nonnegative().default(5 * 60 * 1000),
-    // Max time the process waits for in-flight requests to finish after SIGTERM
-    // before it force-closes. Long enough to let a game-upload complete finalize (15s default).
-    SHUTDOWN_DRAIN_MS: z.coerce.number().int().positive().default(15_000),
+    // Total SIGTERM budget: request drain AND Fastify/backend cleanup.
+    // Quadlet reserves 65s for Podman and 75s for systemd; keep the 60s cap
+    // aligned with runtime-env.py (cross-checked by parity.test.py).
+    SHUTDOWN_DRAIN_MS: z.coerce.number().int().positive().max(60_000).default(15_000),
     COOKIE_SECURE: z
       .enum(['true', 'false'])
       .default('true')
@@ -124,9 +125,11 @@ const envSchema = z
     // Session-lifetime replacement capability allowance.  Initial issuance is
     // always permitted for every multipart part; only re-issuance spends this.
     DIRECT_UPLOAD_PART_URL_REFRESH_MAX: z.coerce.number().int().min(0).max(1024).default(64),
+    BUILD_PACKAGE_REVIEW_ENABLED: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
     DIRECT_UPLOAD_WORKER_TEMP_ROOT: z.string().default('/tmp/pcu-direct-upload'),
     DIRECT_UPLOAD_WORKER_TEMP_MAX_MB: z.coerce.number().int().positive().default(6144),
     DIRECT_UPLOAD_WORKER_POLL_MS: z.coerce.number().int().min(100).default(5_000),
+    VIDEO_PLAYBACK_RENDITIONS_ENABLED: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
     VIDEO_WORKER_TEMP_ROOT: z.string().default('/tmp/pcu-video-worker'),
     VIDEO_WORKER_TEMP_DISK_MB: z.coerce.number().int().positive().default(2048),
     VIDEO_WORKER_POLL_MS: z.coerce.number().int().min(100).default(2_000),

@@ -1,0 +1,110 @@
+{
+  "engine": "Ren\u2019Py",
+  "source": "https://renpytom.itch.io/renpy-8-web-demo",
+  "revision": "itch-upload-7080742",
+  "license": "RenPy demo from engine maintainer; upstream licenses apply; local verification only. HTML includes itch hosting injection.",
+  "files": [
+    {
+      "path": "index.html",
+      "url": "https://html-classic.itch.zone/html/7080742/index.html",
+      "size": 4257,
+      "sha256": "ab9c0043764fe71813cf85e7e1a7049330cdd61d210b5c8954a65ce0d82e7007"
+    },
+    {
+      "path": "renpy-pre.js",
+      "url": "https://html-classic.itch.zone/html/7080742/renpy-pre.js",
+      "size": 24927,
+      "sha256": "880792fe4ab3e6f5671e0514f741a2661ee1e6d3cf74bd7db9832b6bc43002f5"
+    },
+    {
+      "path": "renpy.js",
+      "url": "https://html-classic.itch.zone/html/7080742/renpy.js",
+      "size": 377930,
+      "sha256": "29c629b3192d8d43df445a6503318c56d5670ee94220baa03729a26471bb779b"
+    },
+    {
+      "path": "manifest.json",
+      "url": "https://html-classic.itch.zone/html/7080742/manifest.json",
+      "size": 1930,
+      "sha256": "49286032c48479190a0b4521cb267ed377543b71c506ad96a55f4f45226b8d04"
+    },
+    {
+      "path": "service-worker.js",
+      "url": "https://html-classic.itch.zone/html/7080742/service-worker.js",
+      "size": 2594,
+      "sha256": "c0c0e5b95f0dfcdd33863ea34549b909d85cc4cb9c6978f2d8c2068c8963dd4c"
+    },
+    {
+      "path": "renpy.wasm",
+      "url": "https://html-classic.itch.zone/html/7080742/renpy.wasm",
+      "size": 14951536,
+      "sha256": "e352f69efdb43cd25e36154486ec2e1433c242fa320a7ceee9d002e378b38847"
+    },
+    {
+      "path": "renpy.data",
+      "url": "https://html-classic.itch.zone/html/7080742/renpy.data",
+      "size": 13770861,
+      "sha256": "560f93676fccfd2af739a189e6371dd892ca64cf24944ef053ccbabae1ccd75a"
+    },
+    {
+      "path": "game.zip",
+      "url": "https://html-classic.itch.zone/html/7080742/game.zip",
+      "size": 5772274,
+      "sha256": "536620f80417e6a54774e4fdb9b35943f964af5e5449aa85deb04723abef2a85"
+    },
+    {
+      "path": "web-presplash.jpg",
+      "url": "https://html-classic.itch.zone/html/7080742/web-presplash.jpg",
+      "size": 1144617,
+      "sha256": "b6b7f0ff892cb02791a351c9805e0dfc8e3c1b359a8d30269dd68e3435c9a75d"
+    },
+    {
+      "path": "icons/icon-72x72.png",
+      "url": "https://html-classic.itch.zone/html/7080742/icons/icon-72x72.png",
+      "size": 6995,
+      "sha256": "874b39fcde72b9951de6301db3078c6833f6898d02acded94218d4fb739d63df"
+    },
+    {
+      "path": "icons/icon-96x96.png",
+      "url": "https://html-classic.itch.zone/html/7080742/icons/icon-96x96.png",
+      "size": 11356,
+      "sha256": "23eba9c850a0991808c64883feb7edae53a84319da3ce9ef01c66e85e931e9b0"
+    },
+    {
+      "path": "icons/icon-128x128.png",
+      "url": "https://html-classic.itch.zone/html/7080742/icons/icon-128x128.png",
+      "size": 17663,
+      "sha256": "a4235507b3af175e27e91d75e7e03e879540a30583ebfc022c2e80590d30642a"
+    },
+    {
+      "path": "icons/icon-144x144.png",
+      "url": "https://html-classic.itch.zone/html/7080742/icons/icon-144x144.png",
+      "size": 21069,
+      "sha256": "8f872f69658fd0b789ffb6f6339f86950bc2614880ffc372cfafff62a72d9c63"
+    },
+    {
+      "path": "icons/icon-152x152.png",
+      "url": "https://html-classic.itch.zone/html/7080742/icons/icon-152x152.png",
+      "size": 23065,
+      "sha256": "5d6ff9dffb99a087c19e45a1fc2f6b6116fa9918f8b9b701a3843e94d41a8e78"
+    },
+    {
+      "path": "icons/icon-192x192.png",
+      "url": "https://html-classic.itch.zone/html/7080742/icons/icon-192x192.png",
+      "size": 34178,
+      "sha256": "4263da10662ec475a9d25cce786f68f627a5497e672ff77c8392e38b4e479e8e"
+    },
+    {
+      "path": "icons/icon-384x384.png",
+      "url": "https://html-classic.itch.zone/html/7080742/icons/icon-384x384.png",
+      "size": 103160,
+      "sha256": "1f1b1550bfdd5cec06e240e26b2f2fc259a6159fa7b6a7a4c2a9baa10cf3478c"
+    },
+    {
+      "path": "icons/icon-512x512.png",
+      "url": "https://html-classic.itch.zone/html/7080742/icons/icon-512x512.png",
+      "size": 133047,
+      "sha256": "e3cb2d724290b1f7376e4962cefab74a0a6bfeab89440f6db601122b013d45c7"
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "engine": "playcanvas",
+  "source": "https://github.com/talpitoo/flappy-bird-clone-browser-game",
+  "revision": "97d5388238067a45ecd2181e5a2c6b7e9b90895f",
+  "license": "Not declared by repository; download for local verification only. Do not redistribute fixtures.",
+  "files": [
+    {
+      "path": "404993.json",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/404993.json",
+      "size": 64364,
+      "sha256": "446034cf6df2156872f35b4e07df080a9c2d5dad1345687aba808e2ba8d1ec46"
+    },
+    {
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/README.md",
+      "size": 2236,
+      "sha256": "87afd237ea0c3321d820b09ab65a50acb59a6ad42cc90b4755b007bb52168447"
+    },
+    {
+      "path": "__game-scripts.js",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/__game-scripts.js",
+      "size": 47317,
+      "sha256": "beaea21fc092c20b291c4cae582a2018aa87fbe61821288564f24743ca40cf5c"
+    },
+    {
+      "path": "__loading__.js",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/__loading__.js",
+      "size": 3170,
+      "sha256": "76dd09a8fd4c070afd31db33ca2e8b64452843b0cde685e935039aebd0932e34"
+    },
+    {
+      "path": "__start__.js",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/__start__.js",
+      "size": 7935,
+      "sha256": "44434d5154d8e7e76f9b8be77ffc79d7752309428ea0f98688620540462c0f94"
+    },
+    {
+      "path": "config.json",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/config.json",
+      "size": 34213,
+      "sha256": "6c9e8c76c2819f50b56842590d7314567eb580f5d64e22c45437fb1884be0a5d"
+    },
+    {
+      "path": "favicon.ico",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/favicon.ico",
+      "size": 21238,
+      "sha256": "7a6b06844d6ff6ca717c7b6623f0c4da46836a81b799d33af436e49590ccb1e5"
+    },
+    {
+      "path": "files/assets/20731438/1/spritesheet.png",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/files/assets/20731438/1/spritesheet.png",
+      "size": 9998,
+      "sha256": "fca5ea3742aebf4978bf6cc161a0282ecae9ed51ae170c8680623f68b19989d1"
+    },
+    {
+      "path": "files/assets/3371285/1/sfx_hit.mp3",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/files/assets/3371285/1/sfx_hit.mp3",
+      "size": 9448,
+      "sha256": "ab4b0bc260a796d006e08d287fff30d942bb324dfe4efb4dfd7165eabec11dac"
+    },
+    {
+      "path": "files/assets/3371286/1/sfx_wing.mp3",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/files/assets/3371286/1/sfx_wing.mp3",
+      "size": 3152,
+      "sha256": "192c631025267c871020bec53b35e5ceb55cf36abafc18b3197979544bf282b7"
+    },
+    {
+      "path": "files/assets/3371287/1/sfx_die.mp3",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/files/assets/3371287/1/sfx_die.mp3",
+      "size": 12791,
+      "sha256": "c72181162c5ef8264f4248992ee52af8bd63272f98f5c9cc6c5a5fd871ee64db"
+    },
+    {
+      "path": "files/assets/3371288/1/sfx_point.mp3",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/files/assets/3371288/1/sfx_point.mp3",
+      "size": 9344,
+      "sha256": "e05929e758397927a8ebce588f5230b9199f4b983666ab0bdb7b249d2c0fa937"
+    },
+    {
+      "path": "files/assets/3371289/1/sfx_swooshing.mp3",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/files/assets/3371289/1/sfx_swooshing.mp3",
+      "size": 13440,
+      "sha256": "6e785251d221044e92cff4954a56aa4522cf1d5a3151fdf59f32f2241f01fe5f"
+    },
+    {
+      "path": "files/assets/flappy-bird-add-to-home-screen-icons.jpg",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/files/assets/flappy-bird-add-to-home-screen-icons.jpg",
+      "size": 24797,
+      "sha256": "82b799ece1bbf94af4cb76132ab59e4bb68a43a30dd74d4a7b4f9169fd98b1df"
+    },
+    {
+      "path": "files/assets/flappy-bird-viewport-new.jpg",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/files/assets/flappy-bird-viewport-new.jpg",
+      "size": 213983,
+      "sha256": "365778ffa7be80c396749bd3ad5c06cdcf920431567387d02edc481b4021f61c"
+    },
+    {
+      "path": "files/assets/flappy-bird-viewport-old.jpg",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/files/assets/flappy-bird-viewport-old.jpg",
+      "size": 267264,
+      "sha256": "8014fd641f54b12ee32bcc13f9b955bc56f7b32cdd8c54926f323463258a84cb"
+    },
+    {
+      "path": "flappybird_original_icon_256.png",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/flappybird_original_icon_256.png",
+      "size": 38033,
+      "sha256": "258801daaf56f2701f36f50c8ce15a759b715abacbd3603c04ca7ed59f78f26d"
+    },
+    {
+      "path": "index.html",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/index.html",
+      "size": 2409,
+      "sha256": "ed12cb4329e0c9a94ae73eb020c5cbaf162f4e0f05858939fe5dc9205733a607"
+    },
+    {
+      "path": "logo.png",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/logo.png",
+      "size": 12543,
+      "sha256": "7da6fe339464b3f89535af978341d1e51c5699bc3e21f23652265a797d15c220"
+    },
+    {
+      "path": "playcanvas-stable.min.js",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/playcanvas-stable.min.js",
+      "size": 1283067,
+      "sha256": "5a4700698e8fd9b8265bd446b84b3e0af8bfb0d6cec45294327b427cd641a430"
+    },
+    {
+      "path": "styles.css",
+      "url": "https://raw.githubusercontent.com/talpitoo/flappy-bird-clone-browser-game/97d5388238067a45ecd2181e5a2c6b7e9b90895f/styles.css",
+      "size": 412,
+      "sha256": "53e6bdc3ff844b5112a819077c1c665dbaf6186597887b5ecad2cf0e71c7c878"
+    }
+  ]
+}

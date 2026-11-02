@@ -4,7 +4,7 @@
 do_api_smoke() {
   local api_elapsed=0 api_healthy=0
   while (( api_elapsed < HEALTHCHECK_TIMEOUT )); do
-    if podman exec "$API_CONTAINER" wget -qO- http://localhost:4000/api/health 2>/dev/null | grep -q '"ok":true'; then
+    if podman exec "$API_CONTAINER" wget -qO- "http://localhost:${API_HEALTH_PORT}/api/health" 2>/dev/null | grep -q '"ok":true'; then
       api_healthy=1
       break
     fi

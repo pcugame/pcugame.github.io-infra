@@ -4,23 +4,38 @@ import { CONNECTION_PROFILES } from './connection-profiles.js';
 import { ConnectionRule, CreateWebglNetworkRequestSchema } from './webgl-network.js';
 
 describe('new connection drafts', () => {
- it.each(['example.com', 'https://EXAMPLE.com', 'https://example.com/', 'https://example.com:*'])('defaults %s to explicit all ports', host => {
+ it.each(['example.com', ' EXAMPLE.com '])('normalizes host %s with explicit all ports', host => {
   expect(draftOrigin({ ...emptyConnectionDraft, host })).toBe('https://example.com:*');
  });
- it.each(['example.com:443', 'https://EXAMPLE.com:443/'])('normalizes matching explicit 443 without broadening %s', host => {
-  expect(draftOrigin({ ...emptyConnectionDraft, host, ports: 'specific' })).toBe('https://example.com');
-  expect(() => draftOrigin({ ...emptyConnectionDraft, host })).toThrow('포트 정책');
+ it.each(['443', ' 00443 '])('normalizes specific 443 without broadening %s', port => {
+  expect(draftOrigin({ ...emptyConnectionDraft, host: 'example.com', ports: 'specific', port })).toBe('https://example.com');
  });
- it.each(['https://u:p@example.com', 'https://@example.com', 'https://example.com/path', 'https://example.com/.', 'https://example.com?', 'https://example.com#', 'https://example.com\\', 'https://exa\nmple.com', 'https://%65xample.com', 'https://example.com:0', 'https://example.com:65536', 'localhost', '*.com', '*.github.io'])('does not sanitize forbidden input %s', host => {
-  expect(() => draftOrigin({ ...emptyConnectionDraft, host })).toThrow();
+ it.each(['https://example.com', 'wss://example.com', 'example.com:443', 'example.com:*', '*.example.com', 'https://u:p@example.com', 'example.com/path', 'example.com?', 'example.com#', 'exa\nmple.com', '%65xample.com', 'example.com; connect-src *', 'localhost', '127.0.0.1'])('rejects misplaced syntax or non-public host %s in every scope', host => {
+  for (const scope of ['exact', 'subdomains'] as const) {
+   for (const ports of ['all', 'specific'] as const) {
+    expect(() => draftOrigin({ ...emptyConnectionDraft, host, scope, ports })).toThrow();
+   }
+  }
+ });
+ it.each(['', '0', '65536', '-1', '1.5', '443abc', '*', '4e3'])('rejects invalid specific port %s', port => {
+  expect(() => draftOrigin({ ...emptyConnectionDraft, host: 'example.com', ports: 'specific', port })).toThrow('특정 포트');
  });
  it('keeps modes, host scope and ports independent', () => {
-  expect(() => draftOrigin({ ...emptyConnectionDraft, host: 'wss://example.com:*' })).toThrow('방식');
-  expect(() => draftOrigin({ ...emptyConnectionDraft, host: '*.example.com:*' })).toThrow('하위 도메인');
-  const origin = draftOrigin({ ...emptyConnectionDraft, host: 'wss://*.example.com:8443', mode: 'WSS', scope: 'subdomains', ports: 'specific', port: '8443' });
-  expect(origin).toBe('wss://*.example.com:8443');
-  expect(ConnectionRule.parse(origin).includesHostname('example.com')).toBe(false);
-  expect(() => draftOrigin({ ...emptyConnectionDraft, host: 'https://example.com:*', ports: 'specific' })).toThrow('포트 정책');
+  for (const mode of ['HTTPS', 'WSS'] as const) {
+   for (const scope of ['exact', 'subdomains'] as const) {
+    for (const port of ['1', '443', '8443', '65535', '*']) {
+     const origin = draftOrigin({ host: 'example.com', mode, scope, ports: port === '*' ? 'all' : 'specific', port });
+     const rule = ConnectionRule.parse(origin);
+     expect(rule.mode).toBe(mode);
+     expect(rule.port).toBe(port === '*' ? '*' : Number(port));
+     expect(rule.includesHostname('example.com')).toBe(scope === 'exact');
+     expect(rule.includesHostname('a.example.com')).toBe(scope === 'subdomains');
+    }
+   }
+  }
+ });
+ it.each(['com', 'github.io'])('rejects wildcard suffix %s', host => {
+  expect(() => draftOrigin({ ...emptyConnectionDraft, host, scope: 'subdomains' })).toThrow();
  });
  it('uses canonical request contracts for every service example without port duplicates', () => {
   for (const profile of CONNECTION_PROFILES) {

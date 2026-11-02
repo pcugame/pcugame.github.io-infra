@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 case "${RELEASE_OPERATION:-}" in
-  release|snapshot)
+  release|rolling|snapshot)
     [ -z "${FINAL_IMAGE:-}${FORWARD_FIX_ACKNOWLEDGEMENT:-}" ] || {
       echo 'release and snapshot reject manual image and forward-fix inputs' >&2; exit 1;
     } ;;

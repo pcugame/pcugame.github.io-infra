@@ -1,3 +1,4 @@
+import { DownloadRateLimiter } from '../shared/download-rate-limit.js';
 import { createDiagnosticRepository } from '../modules/webgl-play/diagnostic-repository.js';
 import { createDiagnosticService } from '../modules/webgl-play/diagnostic-service.js';
 import { createHash } from 'node:crypto';
@@ -22,6 +23,9 @@ import { createFileAccessRepository } from "../modules/file-access/repository.js
 import { registerAuth } from "../plugins/auth.js";
 import { AppError } from "../shared/errors.js";
 import type { Env } from "../config/env.js";
+
+const downloadIpLimiter = new DownloadRateLimiter();
+const allowDownloadIp = (ip: string) => downloadIpLimiter.assertIpAllowed(ip);
 
 describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
   "trusted play authenticated HTTP boundary",
@@ -268,6 +272,7 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
         createFileAccessController(
           createFileAccessRepository(db),
           config,
+          allowDownloadIp,
           () => time,
           async (bucket, key) =>
             `http://protected.test/${bucket}/${key}?signedAt=${time.getTime()}`,
@@ -365,6 +370,25 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
       expect(response.headers["content-security-policy"]).not.toContain("unsafe-inline");
       expect(response.headers["cross-origin-opener-policy"]).toBe("same-origin");
       expect(response.headers["cross-origin-embedder-policy"]).toBe("require-corp");
+    });
+    it("preserves a custom Unicode entry through issuance and gateway authorization", async () => {
+      const deployment = await db.webglDeployment.findUniqueOrThrow({ where: { id: deploymentId } });
+      const entry = deployment.publicPrefix + "게임 시작.html";
+      const manifest = deployment.objectManifest as { version: number; objects: Array<{ objectKey: string; sizeBytes: string; mimeType: string }> };
+      await db.webglDeployment.update({ where: { id: deploymentId }, data: {
+        entryObjectKey: entry,
+        objectManifest: { ...manifest, objects: [...manifest.objects, { objectKey: entry, sizeBytes: '1', mimeType: 'text/html' }] },
+      } });
+      try {
+        const response = await issue(); expect(response.statusCode).toBe(200);
+        const grant = response.json().data;
+        expect(decodeURIComponent(new URL(grant.iframeUrl).pathname)).toContain('/게임 시작.html');
+        const authorization = await gate(grant.iframeUrl);
+        expect(authorization.statusCode).toBe(204);
+        expect(decodeURIComponent(String(authorization.headers['x-pcu-object-path'] ?? ''))).toContain('게임 시작.html');
+      } finally {
+        await db.webglDeployment.update({ where: { id: deploymentId }, data: { entryObjectKey: deployment.entryObjectKey, objectManifest: manifest } });
+      }
     });
     it("issues separated hash-only credentials through authenticated serialized HTTP", async () => {
       const response = await issue();

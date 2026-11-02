@@ -1,6 +1,9 @@
 {
   "name": "pcu-graduation-project",
   "private": true,
+  "engines": {
+    "node": ">=26.12.1 <27"
+  },
   "scripts": {
     "test": "npm test --workspaces --if-present",
     "test:release-controls": "node scripts/test-release-controls.mjs",

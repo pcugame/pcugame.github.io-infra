@@ -1,22 +1,6 @@
+/* Baselines use zero specificity; explicit primitives and feature styles win.
+   data-ui="unstyled" opts a custom control/subtree out of native baselines only. */
 /* ── Shared forms ────────────────────────────────────────────── */
-
-/* Native theme fallback must allow explicit component classes to override it. */
-[data-theme='dark'] :where(input, textarea, select) {
-  background: #131315;
-  color: var(--color-text);
-  border-color: var(--color-border);
-}
-
-[data-theme='dark'] input:focus,
-[data-theme='dark'] textarea:focus,
-[data-theme='dark'] select:focus {
-  box-shadow: 0 0 0 3px rgba(124, 172, 248, 0.15);
-}
-
-[data-theme='dark'] input::placeholder,
-[data-theme='dark'] textarea::placeholder {
-  color: #606068;
-}
 
 form.project-form {
   margin-bottom: 2.5rem;
@@ -26,6 +10,7 @@ fieldset.form-section,
 .project-form fieldset,
 .year-create-form fieldset,
 fieldset.status-section {
+  min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: var(--admin-panel-padding, 1.75rem);
@@ -77,6 +62,11 @@ fieldset.status-section legend {
   text-transform: uppercase;
 }
 
+:where(
+  input:not([type='checkbox'], [type='radio'], [type='file'], [type='range'], [type='color'], [type='hidden'], [type='button'], [type='submit'], [type='reset'], [data-ui='unstyled'], [data-ui='unstyled'] *),
+  textarea:not([data-ui='unstyled'], [data-ui='unstyled'] *),
+  select:not([data-ui='unstyled'], [data-ui='unstyled'] *)
+),
 .form-control,
 .form-field input:not([type]),
 .form-field input[type='search'],
@@ -103,6 +93,11 @@ fieldset.status-section legend {
   line-height: 1.5;
 }
 
+:where(input, textarea, select):where(:focus-visible):where(:not([data-ui='unstyled'], [data-ui='unstyled'] *)) {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .form-control:focus,
 .form-field input:focus,
 .form-field textarea:focus,
@@ -110,6 +105,11 @@ fieldset.status-section legend {
   outline: none;
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+:where(input, textarea):where(:not([data-ui='unstyled'], [data-ui='unstyled'] *))::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
 }
 
 /* Accept both legacy wrapper and label modifiers; choices have their own label style. */
@@ -170,6 +170,7 @@ label.form-field--checkbox,
 
 /* ── File input ──────────────────────────────────────────────── */
 
+:where(input[type='file']:not([data-ui='unstyled'], [data-ui='unstyled'] *)),
 .form-field input[type='file'],
 .game-upload__file-input input[type='file'] {
   width: 100%;
@@ -197,6 +198,7 @@ label.form-field--checkbox,
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
+:where(input[type='file']:not([data-ui='unstyled'], [data-ui='unstyled'] *))::file-selector-button,
 .form-field input[type='file']::file-selector-button,
 .game-upload__file-input input[type='file']::file-selector-button {
   font-family: inherit;
@@ -294,6 +296,11 @@ label.form-field--checkbox,
     font-size: 0.72rem;
   }
 
+  :where(
+    input:not([type='checkbox'], [type='radio'], [type='file'], [type='range'], [type='color'], [type='hidden'], [type='button'], [type='submit'], [type='reset'], [data-ui='unstyled'], [data-ui='unstyled'] *),
+    textarea:not([data-ui='unstyled'], [data-ui='unstyled'] *),
+    select:not([data-ui='unstyled'], [data-ui='unstyled'] *)
+  ),
   .form-control,
   .form-field input:not([type]),
   .form-field input[type='search'],
@@ -340,6 +347,7 @@ label.form-field--checkbox,
 }
 
 /* Native selects keep keyboard/mobile behavior while matching the shared fields. */
+:where(select:not([multiple], [size], [data-ui='unstyled'], [data-ui='unstyled'] *)),
 .form-field select:not([multiple]):not([size]),
 select.form-control:not([multiple]):not([size]) {
   appearance: none;
@@ -351,16 +359,29 @@ select.form-control:not([multiple]):not([size]) {
   cursor: pointer;
 }
 select.form-control:invalid { color: var(--color-text-muted); }
+:where(select:not([data-ui='unstyled'], [data-ui='unstyled'] *) option),
 select.form-control option { color: var(--color-text); background: var(--color-surface); }
+:where(input, select, textarea):where(:disabled):where(:not([data-ui='unstyled'], [data-ui='unstyled'] *)),
 .form-control:disabled,
 .form-field :is(input, select, textarea):disabled {
   opacity: .6;
   cursor: not-allowed;
 }
+:where(input, select, textarea):where([aria-invalid='true']):where(:not([data-ui='unstyled'], [data-ui='unstyled'] *)),
 .form-control[aria-invalid='true'],
 .form-field :is(input, select, textarea)[aria-invalid='true'] { border-color: var(--color-danger); }
+:where(textarea:not([data-ui='unstyled'], [data-ui='unstyled'] *)) { resize: vertical; }
 .form-field textarea { resize: vertical; }
 @media (forced-colors: active) {
+  .form-control:focus-visible,
+  .form-field input:focus-visible,
+  .form-field textarea:focus-visible,
+  .form-field select:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  :where(select:not([multiple], [size], [data-ui='unstyled'], [data-ui='unstyled'] *)),
   .form-field select:not([multiple]):not([size]),
   select.form-control:not([multiple]):not([size]) { appearance: auto; background-image: none; }
 }

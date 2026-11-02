@@ -1,3 +1,4 @@
+import { ProjectAwards } from '../components/project/AwardBadge';
 import { useViewerKey } from '../lib/query';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -53,6 +54,8 @@ export default function ProjectDetailPage() {
       <h1>
         {project.title}
       </h1>
+
+      <ProjectAwards awards={project.awards} />
 
       <ProjectPublicMeta githubUrl={project.githubUrl} externalLinks={project.externalLinks} platforms={project.platforms} hardwareRequirements={project.hardwareRequirements} />
 

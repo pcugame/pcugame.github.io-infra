@@ -20,7 +20,13 @@ export function FileAccessRenewal() {
    try {
     await Promise.all([...tokens].map((token) => api.post<FileAccessResponse>(`/api/file-access/${encodeURIComponent(token)}/renew`)));
    } catch {
-    if (!disposed) await invalidateVisibilityQueries(client);
+    if (!disposed) {
+     // Refresh capabilities without unmounting the active project's local draft.
+     await Promise.all([
+      invalidateVisibilityQueries(client, { preserveProjectDrafts: true }),
+      client.invalidateQueries({ queryKey: ['adminProject'] }),
+     ]);
+    }
    } finally { renewing = false; }
   }
   const timer = window.setInterval(() => void renew(), 30_000);

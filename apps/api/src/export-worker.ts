@@ -1,3 +1,4 @@
+import { listenControl } from './infrastructure/runtime-control.js';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadEnv } from './config/env.js';
@@ -63,6 +64,7 @@ export async function runExportWorker(): Promise<void> {
 		logger,
 		config: workerConfig,
 	});
+	let closeControl: (() => Promise<void>) | undefined;
 	let closePromise: Promise<void> | undefined;
 	const closeLoop = () => closePromise ??= Promise.resolve().then(() => graph.loop.close());
 	let resolveStopped!: () => void;
@@ -76,9 +78,15 @@ export async function runExportWorker(): Promise<void> {
 	process.once('SIGTERM', stop);
 	process.once('SIGINT', stop);
 	try {
+		closeControl = await listenControl(command => {
+			if (command === 'quiesce') graph.loop.gate.quiesce();
+			if (command === 'resume') graph.loop.gate.resume();
+			return { kind: 'worker', ...graph.loop.gate.status() };
+		});
 		await graph.loop.start();
 		await stopped;
 	} finally {
+		await closeControl?.();
 		process.off('SIGTERM', stop);
 		process.off('SIGINT', stop);
 		try {

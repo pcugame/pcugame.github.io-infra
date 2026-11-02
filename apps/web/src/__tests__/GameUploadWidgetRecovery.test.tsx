@@ -49,6 +49,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 
 		expect(await screen.findByText('업로드 완료')).toBeTruthy();
 		expect(controls.waitReady).toHaveBeenCalledWith('webgl-long', {
+			onStatus: expect.any(Function),
 			signal: expect.any(AbortSignal),
 		});
 		expect(window.sessionStorage.getItem('pcu.direct-asset-upload:7:WEBGL')).toBeNull();
@@ -142,7 +143,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 		fireEvent.click(screen.getByRole('button', { name: '이어올리기' }));
 		await waitFor(() => expect(controls.getStatus).toHaveBeenCalledTimes(2));
 		expect(controls.upload).not.toHaveBeenCalled();
-		expect(controls.waitReady).toHaveBeenCalledWith('game-verifying', { signal: expect.any(AbortSignal) });
+		expect(controls.waitReady).toHaveBeenCalledWith('game-verifying', { signal: expect.any(AbortSignal), onStatus: expect.any(Function) });
 		expect(await screen.findByText('업로드 완료')).toBeTruthy();
 	});
 
@@ -332,7 +333,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 
 		await screen.findByRole('button', { name: '일시 정지' });
 		fireEvent.click(screen.getByRole('button', { name: '취소 (세션 삭제)' }));
-		await waitFor(() => expect(controls.waitReady).toHaveBeenCalledWith('game-cancel-verifying', { signal: expect.any(AbortSignal) }));
+		await waitFor(() => expect(controls.waitReady).toHaveBeenCalledWith('game-cancel-verifying', { signal: expect.any(AbortSignal), onStatus: expect.any(Function) }));
 		expect(await screen.findByText('업로드 완료')).toBeTruthy();
 	});
 

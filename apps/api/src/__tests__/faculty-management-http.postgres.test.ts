@@ -16,7 +16,7 @@ import { createProjectController } from '../modules/admin/project/controller.js'
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
 import { createProjectService } from '../modules/admin/project/service.js';
 import { createProjectSerializer } from '../modules/admin/project/serializer.js';
-import { assertStatusTransition } from '../modules/admin/project/project-status.service.js';
+import { enrichExternalLinks } from '../modules/external-links/resolver.js';
 import { createProjectAccessService } from '../modules/admin/project-access.service.js';
 import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
 
@@ -47,7 +47,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('faculty logi
 		});
 		const auth = createAuthService({ repository: authRepository, googleTokens: { verify: async () => ({ sub: subject, email: 'A00000@pcu.ac.kr', hd: 'pcu.ac.kr', name: '교원' }) }, clock, ids: { next: randomUUID }, sessionAbsoluteMs: 3600000, googleClientIds: ['test'], allowedGoogleHostedDomain: 'pcu.ac.kr', logger: app.log });
 		const repository = createProjectCrudRepository(db);
-		const service = createProjectService({
+		const service = createProjectService({ loadProjectWithAccess: createProjectAccessService(createProjectAccessRepository(db)).loadProjectWithAccess, resolveExternalLinks: enrichExternalLinks,
 			repository, serializeProjectDetail: createProjectSerializer('http://localhost:3000').serializeProjectDetail,
 			deletionBuckets: { publicBucket: 'pcu-public', protectedBucket: 'pcu-protected' },
 			abortMultipart: async () => {}, wakeDeletionWorker() {}, wakeMaintenance() {}, logger: app.log,
@@ -55,7 +55,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('faculty logi
 		registerRouteSchemas(app);
 		await app.register(createAuthController({ config, clock, service: auth }), { prefix: '/api' });
 		await app.register(createAdminProjectMetadataController({ service: createSubmitProjectService({ repository, webPublicUrl: 'http://localhost:5173' }), route: { rateLimit: { max: 100, timeWindow: 60000 } } }), { prefix: '/api/admin' });
-		await app.register(createProjectController({ service, access: createProjectAccessService(createProjectAccessRepository(db)), status: { assertTransition: assertStatusTransition, bulkUpdate: async (ids, status) => ({ updated: (await repository.bulkUpdateStatus(ids, status)).count }) } }), { prefix: '/api/admin' });
+		await app.register(createProjectController({ service, access: createProjectAccessService(createProjectAccessRepository(db)), status: { bulkUpdate: async (ids, status) => ({ updated: (await repository.bulkUpdateStatus(ids, status)).count }) } }), { prefix: '/api/admin' });
 	});
 	afterAll(async () => { await app?.close(); await database?.close(); });
 	it('keeps faculty USER unprivileged, preserves explicit ADMIN, and records the creator without a participant link', async () => {

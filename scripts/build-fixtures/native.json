@@ -1,0 +1,43 @@
+[
+  {
+    "name": "unity-linux",
+    "source": "https://github.com/beamcode/bounce_master",
+    "url": "https://raw.githubusercontent.com/beamcode/bounce_master/fceec08f18232ff0ca6e13df598eeb4a1719ba49/Linux.zip",
+    "size": 35861751,
+    "sha256": "cf9706e57ebdc53912cddcbc3042dfc17ae4a31f9f8c356e534036e90b23292a",
+    "expected": "PASS"
+  },
+  {
+    "name": "godot-linux",
+    "expected": "PASS",
+    "source": "https://github.com/Rhythia/sound-space-plus/releases/tag/jun21-2026",
+    "url": "https://github.com/David20122/sound-space-plus/releases/download/jun21-2026/linux.zip",
+    "size": 107046823,
+    "sha256": "962d64d688176acb049b747f9cfeb3e2ccede8ffc0bfb1bf34da0f32fbd5b94d"
+  },
+  {
+    "name": "construct-apk",
+    "source": "https://github.com/sm2322/Test-Game",
+    "url": "https://raw.githubusercontent.com/sm2322/Test-Game/efbd0bd27974b69191afa1561507b1fd2228a8dc/Test.android.release.apk",
+    "size": 4060988,
+    "sha256": "40266fb51ecc479fef8bdc77308bf6807938d93aa1bd5d7aa0cea3b98ad49d4c",
+    "wrap": "\uac8c\uc784.apk",
+    "expected": "REVIEW"
+  },
+  {
+    "name": "unity-windows",
+    "source": "https://github.com/beamcode/bounce_master",
+    "url": "https://raw.githubusercontent.com/beamcode/bounce_master/fceec08f18232ff0ca6e13df598eeb4a1719ba49/WIndows.zip",
+    "size": 33493299,
+    "sha256": "b0506163f601432f7906b59c21fde012b9c057150cf538a8e8bb7617ae696a28",
+    "expected": "PASS"
+  },
+  {
+    "name": "unity-macos",
+    "source": "https://github.com/beamcode/bounce_master",
+    "url": "https://raw.githubusercontent.com/beamcode/bounce_master/fceec08f18232ff0ca6e13df598eeb4a1719ba49/MacOS.zip",
+    "size": 33408396,
+    "sha256": "bfe0dc6f041b1d237ee839cf50bc07e90b00cf09ab06c6d686e2415ce3daa7b9",
+    "expected": "PASS"
+  }
+]

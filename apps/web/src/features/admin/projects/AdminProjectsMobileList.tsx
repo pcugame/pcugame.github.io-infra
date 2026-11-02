@@ -93,6 +93,7 @@ export function AdminProjectsMobileList({
 							<span>{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</span>
 						</div>
 					</Link>
+                    {isPrivileged && !mobileSelectMode && <Link className="btn btn--small btn--secondary" to={`/admin/projects/${p.id}/network`}>외부 연결</Link>}
 				</div>
 			))}
 		</div>

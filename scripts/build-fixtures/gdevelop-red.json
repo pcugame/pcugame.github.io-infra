@@ -1,0 +1,488 @@
+{
+  "engine": "gdevelop-red",
+  "source": "https://github.com/RedEdge967/adventures-of-red",
+  "revision": "fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd",
+  "license": "Upstream licenses apply; download for local verification only. Do not redistribute fixtures.",
+  "files": [
+    {
+      "path": "Bush (1).png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Bush%20%281%29.png",
+      "size": 1901,
+      "sha256": "b38219f5f849fef2e5035bf4b5db30f3017367a240078b2ce6352eb74dd44ba2"
+    },
+    {
+      "path": "Coin.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Coin.png",
+      "size": 3438,
+      "sha256": "d460357a1680a5c7f5cb132fb566b1aca7c2ab830b7a40999a36ba6a4977ad0f"
+    },
+    {
+      "path": "Coins 10.aac",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Coins%2010.aac",
+      "size": 6130,
+      "sha256": "49c6d869e084446d31e2ff5e8e6266ef5374f577ec6d1c250ebfd59de167ab57"
+    },
+    {
+      "path": "Extensions/PlatformBehavior/platformerobjectruntimebehavior.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Extensions/PlatformBehavior/platformerobjectruntimebehavior.js",
+      "size": 24780,
+      "sha256": "b5115a49f63387e672cee175b6f9f6ced8ed05ade6895dd24447f74d11305dca"
+    },
+    {
+      "path": "Extensions/PlatformBehavior/platformruntimebehavior.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Extensions/PlatformBehavior/platformruntimebehavior.js",
+      "size": 3260,
+      "sha256": "99c315fe956ff5ef2ea0784dea63c4bef6773ab3d3c3d9a2c6abb0a707f4e3d9"
+    },
+    {
+      "path": "Extensions/PlatformBehavior/platformtools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Extensions/PlatformBehavior/platformtools.js",
+      "size": 312,
+      "sha256": "f571f1bdc8e69086148193f9d930221302460e1b549ddc453494028976474b4c"
+    },
+    {
+      "path": "Extensions/TextObject/textruntimeobject-pixi-renderer.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Extensions/TextObject/textruntimeobject-pixi-renderer.js",
+      "size": 2763,
+      "sha256": "2900307d2482b3e74a8272aff56f43dc1001469721ac96a086434a989b672f6d"
+    },
+    {
+      "path": "Extensions/TextObject/textruntimeobject.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Extensions/TextObject/textruntimeobject.js",
+      "size": 4811,
+      "sha256": "b51d283a59e1ea52dcda9d696a8309c849c1a487f4f735a8530b2e3109f2738a"
+    },
+    {
+      "path": "Extensions/TiledSpriteObject/tiledspriteruntimeobject-pixi-renderer.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Extensions/TiledSpriteObject/tiledspriteruntimeobject-pixi-renderer.js",
+      "size": 1818,
+      "sha256": "e823c902a39188af1069c4cabe8b52a805803ba5f3dcc4acfadac739330cd094"
+    },
+    {
+      "path": "Extensions/TiledSpriteObject/tiledspriteruntimeobject.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Extensions/TiledSpriteObject/tiledspriteruntimeobject.js",
+      "size": 2277,
+      "sha256": "503d2ff7964bd644ba9cb6c97ea3399fe128e89e78501f6bddd75efa268e0f09"
+    },
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/LICENSE",
+      "size": 1072,
+      "sha256": "eddf37214bc34bea24bd56c21106ce5f66d60f5cb7c8ace2ae386cd1bdd60945"
+    },
+    {
+      "path": "Left arrow button.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Left%20arrow%20button.png",
+      "size": 968,
+      "sha256": "d52c1fc0f18c961fc2e9680ccd1240e798710c1c3fa4028c81359c1a1c0aee5d"
+    },
+    {
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/README.md",
+      "size": 2220,
+      "sha256": "ac662b03274b5e8b8da4a3eb78ffcb92e3b7db6bc61af675a0ef93e96c886e7c"
+    },
+    {
+      "path": "Red player_stand.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Red%20player_stand.png",
+      "size": 483,
+      "sha256": "05fee9e94b29e788ba4462dcec7df1f12b4700919d745f20c4d8960391faf8da"
+    },
+    {
+      "path": "Red player_up_1.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Red%20player_up_1.png",
+      "size": 483,
+      "sha256": "409798ad6800a818e1c32a3670ff58e601ffb927c5bc8452abf674d69ecb68e0"
+    },
+    {
+      "path": "Red player_up_2.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Red%20player_up_2.png",
+      "size": 535,
+      "sha256": "80ec425c3a952e1ebf04e22c5bd4ac61d704ba3f173849787eb2e6a697d5c962"
+    },
+    {
+      "path": "Red player_up_3.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Red%20player_up_3.png",
+      "size": 552,
+      "sha256": "4c2987527040e9b137f8bf16ccbc37b9f1147f5b837151d5e3fda45065234184"
+    },
+    {
+      "path": "Red player_walk_1.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Red%20player_walk_1.png",
+      "size": 483,
+      "sha256": "50323087089f1467ac8bddadd0a2e6dbe7bff3c1146d262b8fc5aee415750408"
+    },
+    {
+      "path": "Red player_walk_2.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Red%20player_walk_2.png",
+      "size": 527,
+      "sha256": "963bfafa134d7bbbebb32d343ab96ae3cfc06b75b4cad4b22da1fa591fa19940"
+    },
+    {
+      "path": "Red player_walk_3.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Red%20player_walk_3.png",
+      "size": 526,
+      "sha256": "21ba536294f4ea5eb840d6e4e71bfce531a0378b210c1f2b477f3d0d526130eb"
+    },
+    {
+      "path": "Red player_walk_4.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Red%20player_walk_4.png",
+      "size": 510,
+      "sha256": "d669a046925ca64703d36e0a66a99e31483471c3db2b702271e9d0d6fdfcf298"
+    },
+    {
+      "path": "Red player_walk_5.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Red%20player_walk_5.png",
+      "size": 509,
+      "sha256": "912757f908757a2e800ce1812b329842daba971a3cff9599b6a7aad03a022b4e"
+    },
+    {
+      "path": "Right arrow button.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Right%20arrow%20button.png",
+      "size": 950,
+      "sha256": "ef73c976c2a7926512becd9d5df6e7feb556f0170383b9b4f7ca9dc347fca419"
+    },
+    {
+      "path": "Sign Arrow_left.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Sign%20Arrow_left.png",
+      "size": 362,
+      "sha256": "7be1d10316c1eb3b85306751bf93aa3aae6d689bd93b59cb6e048e8b2bf5ffb0"
+    },
+    {
+      "path": "Small Green Platform.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Small%20Green%20Platform.png",
+      "size": 914,
+      "sha256": "a48fd87bc190f0841d50de3369a42e9777a5535836177f7cb04e9ff98b736575"
+    },
+    {
+      "path": "Walking enemy_1.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Walking%20enemy_1.png",
+      "size": 453,
+      "sha256": "8073ea25d1d716d1d797b5f9b31d01b47ce4b7164ffa112a1ff4253e14426d4c"
+    },
+    {
+      "path": "Walking enemy_2.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Walking%20enemy_2.png",
+      "size": 511,
+      "sha256": "83490dcfc28c795621980d0e97dd3e8de66cb5efab48f164bbbf4bab3665da27"
+    },
+    {
+      "path": "Walking enemy_3.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/Walking%20enemy_3.png",
+      "size": 508,
+      "sha256": "65124b4bf91e9b245e667db9d2df23038d1c558f9bc04eea287f7202e87fe883"
+    },
+    {
+      "path": "cloud (1).png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/cloud%20%281%29.png",
+      "size": 4048,
+      "sha256": "d1b46bbad9f7b68d6a939c5a9978115066e88c26f225492c573fa9a1afea933d"
+    },
+    {
+      "path": "code0.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/code0.js",
+      "size": 18147,
+      "sha256": "0e44e57858b7eb7d569453c56de201e422d3627db5f236376997bc521da9bc9d"
+    },
+    {
+      "path": "data.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/data.js",
+      "size": 28351,
+      "sha256": "a313b2a103ec97ecedb6dbb5d544239e3b4386b3eb2172f507105d876bc4999e"
+    },
+    {
+      "path": "events-tools/cameratools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/events-tools/cameratools.js",
+      "size": 3165,
+      "sha256": "407370eee2ea4457ef8a08c2999f4b066d354fb7e3e82ff6b08e06ca91449c2f"
+    },
+    {
+      "path": "events-tools/commontools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/events-tools/commontools.js",
+      "size": 1667,
+      "sha256": "21b950deea7b5eced0cd398cc077dfaf41e00d8d62047b57de7c01e0bf4818b3"
+    },
+    {
+      "path": "events-tools/inputtools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/events-tools/inputtools.js",
+      "size": 4206,
+      "sha256": "da694e8e51e1b9ee46f0b71ce7d1f91a5c3bc8a9349a20e4a20955e3c2486e76"
+    },
+    {
+      "path": "events-tools/networktools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/events-tools/networktools.js",
+      "size": 1574,
+      "sha256": "fd22bc2ee78231bbfb33fd17254f39d643c1f28f90ea642346dda68ab9860c57"
+    },
+    {
+      "path": "events-tools/objecttools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/events-tools/objecttools.js",
+      "size": 4921,
+      "sha256": "99004b9387f696ca8b4a6d972decfcd9a663ead23ff5fff4ab4d3a7a1f812ff1"
+    },
+    {
+      "path": "events-tools/runtimescenetools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/events-tools/runtimescenetools.js",
+      "size": 2735,
+      "sha256": "82944d5dbdc935b652a943c4b6bbb8f549b01cb7a704d2ba4b29a458aef8ff44"
+    },
+    {
+      "path": "events-tools/soundtools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/events-tools/soundtools.js",
+      "size": 5262,
+      "sha256": "1fa83d4e732e6c0911c0b2cfe862847f69bf110ebe45b925eee7b134eb077052"
+    },
+    {
+      "path": "events-tools/storagetools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/events-tools/storagetools.js",
+      "size": 2298,
+      "sha256": "76cf02415edea1d5a2c3434508c44c4aa9ebe5dee82d71322ef60132f5b137e9"
+    },
+    {
+      "path": "events-tools/stringtools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/events-tools/stringtools.js",
+      "size": 915,
+      "sha256": "4660db513238cb0f4ca517e42787857652231b1dbb91ea5a7bc76d00c66ce881"
+    },
+    {
+      "path": "events-tools/variabletools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/events-tools/variabletools.js",
+      "size": 1901,
+      "sha256": "74c54052dd515ae67d52cfa09d0d3c6dc3dfa902277f636acad305f22e768544"
+    },
+    {
+      "path": "events-tools/windowtools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/events-tools/windowtools.js",
+      "size": 1687,
+      "sha256": "3b4194400c4c4c5fc3e692323575b69c248a2b045bb1ba92bac85b53ed5b70ff"
+    },
+    {
+      "path": "fontfaceobserver-font-manager/fontfaceobserver-font-manager.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/fontfaceobserver-font-manager/fontfaceobserver-font-manager.js",
+      "size": 1762,
+      "sha256": "405c16c5cad5e19f9a5d3c458de650eb1678145ed01f28ab64f657839dfbe024"
+    },
+    {
+      "path": "fontfaceobserver-font-manager/fontfaceobserver.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/fontfaceobserver-font-manager/fontfaceobserver.js",
+      "size": 6046,
+      "sha256": "d74c0d30ed0a818bfbeff7abea7e38d2e4c58bb8dd811c7b178d12fe8714fd5c"
+    },
+    {
+      "path": "force.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/force.js",
+      "size": 1178,
+      "sha256": "085b1bfd22f8ec419159b04637cc18ac202b934924a5580cac90e58b568c310d"
+    },
+    {
+      "path": "gd.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/gd.js",
+      "size": 4495,
+      "sha256": "369e99dc040aa70fb091278848a6c98e55facf126ee90dbfba08401aa64c6d32"
+    },
+    {
+      "path": "howler-sound-manager/howler-sound-manager.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/howler-sound-manager/howler-sound-manager.js",
+      "size": 6823,
+      "sha256": "bef1a1d5294582328f388c01c58bc6ce99c4c82eaf7e867fe33b845af879ac3c"
+    },
+    {
+      "path": "howler-sound-manager/howler.min.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/howler-sound-manager/howler.min.js",
+      "size": 26595,
+      "sha256": "7839b4659aca65174e43b59148abb955802f90f6cc8f0c3bbc9d320579ea8ba6"
+    },
+    {
+      "path": "index.html",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/index.html",
+      "size": 5756,
+      "sha256": "f228b8d125d36d645d08f39ba4d3be36dba727d9fd4276cdfa6a8b65786b1431"
+    },
+    {
+      "path": "inputmanager.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/inputmanager.js",
+      "size": 3470,
+      "sha256": "1083b78c8c557a840d5e391b2dc92fdeb42779aa2fa0966f005a88007a7b644a"
+    },
+    {
+      "path": "jsonmanager.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/jsonmanager.js",
+      "size": 1624,
+      "sha256": "82d127c600088010f956c3b0792418c3e19cfb56c6466ab070f2c6d94b5e4b72"
+    },
+    {
+      "path": "layer.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/layer.js",
+      "size": 4635,
+      "sha256": "79ca4f8207d3b762593cb769f34079535381f3deac96f2155598850a0ff94752"
+    },
+    {
+      "path": "libs/jshashtable.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/libs/jshashtable.js",
+      "size": 639,
+      "sha256": "86a9e6f85d309f936671c860033eba5a23af76d783c47a08f53c7cb8db46565e"
+    },
+    {
+      "path": "libs/rbush.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/libs/rbush.js",
+      "size": 19547,
+      "sha256": "d89f5e348908d36aa851f89ef07afb94229ae7fa3ff582ad4745d6033feabb4a"
+    },
+    {
+      "path": "logger.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/logger.js",
+      "size": 812,
+      "sha256": "03cff8a6fcda3581f411acc6aa9480d6182bac91ca7dc24d2f9d5b7801085f8a"
+    },
+    {
+      "path": "oncetriggers.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/oncetriggers.js",
+      "size": 564,
+      "sha256": "0f155f7061fcf26a100f8ff1d8f1255f72e63ee50901b1f433d9e30f5a591fae"
+    },
+    {
+      "path": "pixi-renderers/layer-pixi-renderer.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/pixi-renderers/layer-pixi-renderer.js",
+      "size": 3508,
+      "sha256": "7e591ec8fcd152af581cf8185b9433a3a912b06a710c08881f1a53a7ec47c162"
+    },
+    {
+      "path": "pixi-renderers/loadingscreen-pixi-renderer.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/pixi-renderers/loadingscreen-pixi-renderer.js",
+      "size": 4675,
+      "sha256": "d55577d06d2de82110e1e49311fd446715cfb00263eeb3e1630cea8684abd4a7"
+    },
+    {
+      "path": "pixi-renderers/pixi-bitmapfont-manager.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/pixi-renderers/pixi-bitmapfont-manager.js",
+      "size": 2783,
+      "sha256": "d9cf0fdbcc33732dff6f0ed90254872bf2383b5b06c1ada0c635850038e6e9b9"
+    },
+    {
+      "path": "pixi-renderers/pixi-effects-manager.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/pixi-renderers/pixi-effects-manager.js",
+      "size": 2053,
+      "sha256": "d5993e85cdc2ba08e49a03cccdf7e941c7090b16fec935c59c6eb73a7a273212"
+    },
+    {
+      "path": "pixi-renderers/pixi-filters-tools.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/pixi-renderers/pixi-filters-tools.js",
+      "size": 961,
+      "sha256": "61e98a8f051bc5ef2571d292cd113ad04f21865b82e4e3ac87dac3da0cdd707e"
+    },
+    {
+      "path": "pixi-renderers/pixi-image-manager.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/pixi-renderers/pixi-image-manager.js",
+      "size": 2366,
+      "sha256": "0194f2b0662c288b69ac17420330ab7badd79e942f5bd55d3739d67ed315b568"
+    },
+    {
+      "path": "pixi-renderers/pixi.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/pixi-renderers/pixi.js",
+      "size": 645765,
+      "sha256": "3de683ae12f0a4c49694e6058c7899aec4f8f1b7775dd819600dfb3f987bb28c"
+    },
+    {
+      "path": "pixi-renderers/runtimegame-pixi-renderer.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/pixi-renderers/runtimegame-pixi-renderer.js",
+      "size": 8715,
+      "sha256": "c611c06000aad6b19d40d1688270b946ae445fd25df98d9776a889a4cc1e16ff"
+    },
+    {
+      "path": "pixi-renderers/runtimescene-pixi-renderer.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/pixi-renderers/runtimescene-pixi-renderer.js",
+      "size": 4608,
+      "sha256": "7890fd10542f30b7bf4f41c45406a2f3a4715cc47bc8cda676c39d038323ebc0"
+    },
+    {
+      "path": "pixi-renderers/spriteruntimeobject-pixi-renderer.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/pixi-renderers/spriteruntimeobject-pixi-renderer.js",
+      "size": 3068,
+      "sha256": "22205511c76f83800c8a9287a229136f4b822735aa9f24c6d3da19106fc78cb9"
+    },
+    {
+      "path": "polygon.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/polygon.js",
+      "size": 4770,
+      "sha256": "019b79ec40c0a06e3cfa3a556d1f1cd7ff76ddb4fbf77f2447399e21143e9657"
+    },
+    {
+      "path": "profiler.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/profiler.js",
+      "size": 2745,
+      "sha256": "27b607e147b83d8ab48942faaa63a34bd68ceec46885735d7006d081727900d5"
+    },
+    {
+      "path": "runtimebehavior.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/runtimebehavior.js",
+      "size": 1315,
+      "sha256": "d24943289e6b4a37967fb45921d586de5ae12e3086bb78e90cedb5e3264e6ac3"
+    },
+    {
+      "path": "runtimegame.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/runtimegame.js",
+      "size": 8368,
+      "sha256": "c50d8f0cb21995de29a42a7267ee1b1d153d964016fa02e7d64bf6ccdc312fcb"
+    },
+    {
+      "path": "runtimeobject.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/runtimeobject.js",
+      "size": 20081,
+      "sha256": "6c2860bb568672d8912fb0f26820010214bb77d92fe58c4d1ddf283bf1619c3c"
+    },
+    {
+      "path": "runtimescene.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/runtimescene.js",
+      "size": 13964,
+      "sha256": "782234f42123463289fe33c66fd09d1c30de7a5cc7a6c0287c13caf516c5a704"
+    },
+    {
+      "path": "scenestack.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/scenestack.js",
+      "size": 1912,
+      "sha256": "b0f7028b4b16d7360cb5ef3449671ea385149345415c9965ee847a22cdef601f"
+    },
+    {
+      "path": "splash/gd-logo-dark.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/splash/gd-logo-dark.js",
+      "size": 5919,
+      "sha256": "df549d1a636bbc3ad97267b75c7168271ebd8d8f799bee6a70de3f066d89615c"
+    },
+    {
+      "path": "spriteruntimeobject.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/spriteruntimeobject.js",
+      "size": 14197,
+      "sha256": "7ad0624d898f040fbab16b70dfec5e19e8256731994c32f942f018ccb71a1880"
+    },
+    {
+      "path": "tiled_Green Platform.png",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/tiled_Green%20Platform.png",
+      "size": 638,
+      "sha256": "57b503c1ecf7727a2e1526827c7789a69eaacac6d270e56b902d5f0549c70453"
+    },
+    {
+      "path": "timemanager.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/timemanager.js",
+      "size": 1104,
+      "sha256": "5f7101c9c454bc593909ac4858ba1d19b0382fa321c138c2e2ea47eec5448ed7"
+    },
+    {
+      "path": "timer.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/timer.js",
+      "size": 359,
+      "sha256": "e2d423f2ed1d04c4d1acffe1f406b0e3a42dce3e51e2056100981cfb76843e96"
+    },
+    {
+      "path": "variable.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/variable.js",
+      "size": 6491,
+      "sha256": "1cd444a3b73869e358aee197deb2334a0da565b6f2dc66110de78212756db405"
+    },
+    {
+      "path": "variablescontainer.js",
+      "url": "https://raw.githubusercontent.com/RedEdge967/adventures-of-red/fd1538d6a5c5a5cb628932ae17c3443b8a5c98bd/variablescontainer.js",
+      "size": 2958,
+      "sha256": "542b0d85afea393f1fcb9720f6d11563564f44f3b82ce7c7f009e86e26e715b4"
+    }
+  ]
+}

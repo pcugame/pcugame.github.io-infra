@@ -1,0 +1,26 @@
+[Unit]
+After=pcu-garage.service gp-api.service
+[Container]
+Image=docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+ContainerName=pcu-assets
+Network=pcu-app.network:ip=10.89.40.22
+Network=pcu-storage.network:ip=10.89.41.22
+PublishPort=127.0.0.1:3904:8080
+EnvironmentFile=/srv/pcu/config/gateway.env
+Volume=/srv/pcu/config/public-origin.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro,z
+Volume=/srv/pcu/config/validate-data-plane-env.sh:/docker-entrypoint.d/05-validate-data-plane-env.sh:ro,z
+Volume=/srv/pcu/config/gateway-realip.conf:/etc/nginx/conf.d/realip.conf:ro,z
+Volume=/srv/pcu/config/ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro,z
+ReadOnly=true
+NoNewPrivileges=true
+Tmpfs=/etc/nginx/conf.d:rw,noexec,nosuid,size=1m
+Tmpfs=/var/cache/nginx:rw,noexec,nosuid,size=32m
+Tmpfs=/var/log/nginx:rw,noexec,nosuid,size=16m
+Tmpfs=/var/run:rw,noexec,nosuid,size=16m
+Tmpfs=/tmp:rw,noexec,nosuid,size=16m
+StopTimeout=60
+[Service]
+Restart=always
+TimeoutStopSec=75
+[Install]
+WantedBy=default.target

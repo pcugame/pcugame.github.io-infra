@@ -1,4 +1,6 @@
-import type { FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
+import { get } from 'node:http';
+import { createLifecycle } from '../lib/lifecycle.js';
 import { describe, expect, it, vi } from 'vitest';
 import type { Env } from '../config/env.js';
 import type { AppLogger } from '../application/ports.js';
@@ -178,6 +180,109 @@ describe('server startup and shutdown ownership boundary', () => {
 		await expect(first).resolves.toBe(0);
 		expect(app.close).toHaveBeenCalledOnce();
 		expect(events).toEqual(['s3', 'prisma']);
+	});
+
+	it.each([15_000, 60_000])('finishes an active HTTP response and cleanup within the shared %i ms budget', async (budget) => {
+		const { createServerRuntime } = await import('../server.js');
+		const { context } = contextHarness([]);
+		const lifecycle = createLifecycle();
+		context.lifecycle = {
+			...lifecycle,
+			state: lifecycle.getState,
+			inFlight: lifecycle.getInFlight,
+		};
+		const entered = deferred();
+		const releaseRequest = deferred();
+		const cleanupStarted = deferred();
+		const releaseCleanup = deferred();
+		let closePromise: Promise<void> | undefined;
+		const cleanup = vi.fn(async () => {
+			cleanupStarted.resolve();
+			await releaseCleanup.promise;
+		});
+		context.close = () => closePromise ??= cleanup();
+		const app = Fastify();
+		app.addHook('onRequest', async () => { lifecycle.requestStarted(); });
+		app.addHook('onResponse', async () => { lifecycle.requestFinished(); });
+		app.addHook('onClose', () => context.close());
+		app.get('/shutdown-fixture', async () => {
+			entered.resolve();
+			await releaseRequest.promise;
+			return { completed: true };
+		});
+		const signals = signalHarness();
+		const forceExit = vi.fn();
+		const setExitCode = vi.fn();
+		const runtime = createServerRuntime({
+			config: { ...config, PORT: 0, SHUTDOWN_DRAIN_MS: budget },
+			context, app, signals: signals.boundary, forceExit, setExitCode,
+		});
+		try {
+			await runtime.start();
+			const address = app.server.address();
+			if (!address || typeof address === 'string') throw new Error('missing test listener');
+			const response = new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
+				get(`http://127.0.0.1:${address.port}/shutdown-fixture`, { agent: false }, (reply) => {
+					let body = '';
+					reply.setEncoding('utf8');
+					reply.on('data', (chunk: string) => { body += chunk; });
+					reply.on('end', () => resolve({ status: reply.statusCode, body }));
+				}).on('error', reject);
+			});
+			await entered.promise;
+			vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+			const started = Date.now();
+			signals.emit('SIGTERM');
+			const shutdown = runtime.shutdown('duplicate');
+			expect(lifecycle.getState()).toBe('draining');
+			await vi.advanceTimersByTimeAsync(budget - 6000);
+			expect(cleanup).not.toHaveBeenCalled();
+			releaseRequest.resolve();
+			expect(await response).toEqual({ status: 200, body: '{"completed":true}' });
+			await vi.advanceTimersByTimeAsync(200);
+			await cleanupStarted.promise;
+			await vi.advanceTimersByTimeAsync(4000);
+			expect(setExitCode).not.toHaveBeenCalled();
+			releaseCleanup.resolve();
+			await expect(shutdown).resolves.toBe(0);
+			expect(cleanup).toHaveBeenCalledOnce();
+			expect(setExitCode).toHaveBeenCalledWith(0);
+			expect(forceExit).not.toHaveBeenCalled();
+			expect(Date.now() - started).toBeLessThan(budget);
+			expect(Date.now() - started).toBeGreaterThan(10_000);
+		} finally {
+			releaseRequest.resolve();
+			releaseCleanup.resolve();
+			vi.useRealTimers();
+			await app.close();
+		}
+	});
+
+	it('does not restart the total deadline after request drain consumes its share', async () => {
+		const { createServerRuntime } = await import('../server.js');
+		const { context } = contextHarness([]);
+		context.lifecycle.waitForDrain = async () => {
+			await new Promise((resolve) => setTimeout(resolve, 9000));
+			return 'drained';
+		};
+		context.close = vi.fn(() => new Promise<void>(() => {}));
+		const app = {
+			close: vi.fn(() => context.close()),
+		} as unknown as FastifyInstance;
+		const forceExit = vi.fn();
+		vi.useFakeTimers();
+		try {
+			const runtime = createServerRuntime({ config, context, app, forceExit });
+			const result = runtime.shutdown('shared-deadline');
+			await vi.advanceTimersByTimeAsync(14_999);
+			expect(app.close).toHaveBeenCalledOnce();
+			expect(forceExit).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			await expect(result).resolves.toBe(1);
+			expect(forceExit).toHaveBeenCalledWith(1);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('force-closes connections and invokes the injected exit boundary at the absolute deadline', async () => {

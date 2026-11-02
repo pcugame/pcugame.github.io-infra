@@ -1,3 +1,13 @@
+import { createAwardController } from '../modules/awards/controller.js';
+import { createAwardService } from '../modules/awards/service.js';
+import { createAwardRepository } from '../modules/awards/repository.js';
+import { createBuildReviewRepository } from '../modules/build-review/repository.js';
+import { createBuildReviewService } from '../modules/build-review/service.js';
+import { createBuildReviewController } from '../modules/build-review/controller.js';
+import { createVideoRetryRepository } from '../modules/video/retry.repository.js';
+import { createVideoRetryService } from '../modules/video/retry.service.js';
+import { createVideoRetryController } from '../modules/video/retry.controller.js';
+import type { SettingsStore } from '../application/ports.js';
 import { createDiagnosticRepository, createUnavailableDiagnosticRepository } from '../modules/webgl-play/diagnostic-repository.js';
 import { createDiagnosticService } from '../modules/webgl-play/diagnostic-service.js';
 import { createVotingController } from '../modules/voting/controller.js';
@@ -109,6 +119,7 @@ export function createBackendProjectMultipart({ prisma, config, uploadLifecycle,
 }
 
 export function createBackendDirectAssetUpload({
+	settings,
 	prisma,
 	directAssetUploadRepository,
 	s3,
@@ -120,6 +131,7 @@ export function createBackendDirectAssetUpload({
 	uploadLifecycle,
 }: {
 	prisma: PrismaClient | undefined;
+	settings: SettingsStore;
 	directAssetUploadRepository: ReturnType<typeof createAssetUploadRepository> | undefined;
 	s3: S3Client;
 	directSigningS3: S3Client;
@@ -141,8 +153,8 @@ export function createBackendDirectAssetUpload({
 			partSizeBytes: config.DIRECT_UPLOAD_PART_SIZE_MB * 1024 * 1024,
 			partUrlTtlSeconds: config.DIRECT_UPLOAD_PART_URL_TTL_SEC,
 			partUrlRefreshMax: config.DIRECT_UPLOAD_PART_URL_REFRESH_MAX,
-			maxBytesFor: (actor, kind) => {
-				const limits = resolveRoleUploadLimits(config, actor.role);
+			maxBytesFor: async (actor, kind) => {
+				const limits = resolveRoleUploadLimits(config, actor.role, await settings.get());
 				if (kind === 'DOCUMENT' || kind === 'ATTACHMENT') return 50 * 1024 * 1024;
 				if (kind === 'VIDEO') return limits.videoMaxBytes;
 				if (kind === 'IMAGE') return limits.imageMaxBytes;
@@ -212,6 +224,7 @@ export function composeBackendRoutes({
 			persistence.fileAccessRepository ?? (prisma && !hasSuppliedPersistence
 				? createFileAccessRepository(prisma) : createUnavailableFileAccessRepository()),
 			config,
+			assetsBanned!.assertDownloadIpAllowed,
 			() => clock.now(),
 			(bucket, key, options) => protectedDownloadPresigner.presign(bucket, key, { ttlSec: 60, ...options }),
 			assetsBanned!.authorizeDownload,
@@ -248,6 +261,13 @@ export function composeBackendRoutes({
 		};
 		routes.admin = async (app) => {
 			await app.register(baseRoutes.admin);
+			if (prisma && !hasSuppliedPersistence) await app.register(createAwardController(createAwardService(createAwardRepository(prisma), config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL, config.S3_BUCKET_PUBLIC)));
+			if (prisma && !hasSuppliedPersistence) await app.register(createBuildReviewController(createBuildReviewService(createBuildReviewRepository(prisma))));
+			await app.register(createVideoRetryController(createVideoRetryService(
+				prisma && !hasSuppliedPersistence ? createVideoRetryRepository(prisma) : {
+					retry: async () => { throw new Error('Video retry persistence unavailable'); },
+				},
+			)));
 			await app.register(createProjectChangeController(changes, 'admin'));
 			await app.register(createWebglNetworkController(network, 'admin'));
 		};

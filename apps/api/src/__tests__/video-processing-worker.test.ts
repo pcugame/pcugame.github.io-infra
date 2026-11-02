@@ -143,6 +143,25 @@ async function processorHarness(input: {
 }
 
 describe('direct VIDEO processor', () => {
+	it('accepts QuickService remux timestamp rounding while rejecting genuinely higher frame rates', async () => {
+		for (const [frameRate, expected] of [[120.000013186818983, 'READY'], [120.01, 'FAILED'], [121, 'FAILED']] as const) {
+			const h = await processorHarness({ inputProbe: probe({ fastStart: false, frameRate: 120 }), outputProbe: probe({ frameRate }) });
+			try {
+				expect((await h.processor.process(videoSession(), 'lease')).playbackState).toBe(expected);
+			} finally { await fs.rm(h.root, { recursive: true, force: true }); }
+		}
+	});
+
+	it('retains the generated playback identity when a repair source now passes browser policy', async () => {
+		const h = await processorHarness();
+		try {
+			const session = { ...videoSession(), resultAssetId: 20, resultRepresentationId: 'original', completionResult: { phase: 'PLAYBACK_REPAIR' } };
+			expect(await h.processor.process(session, 'lease')).toMatchObject({ strategy: 'remux', playbackState: 'READY' });
+			expect(h.repository.commitVideoOriginalReady).toHaveBeenCalledWith(expect.objectContaining({
+				playback: expect.objectContaining({ objectKey: expect.stringContaining('/playback.mp4') }),
+			}));
+		} finally { await fs.rm(h.root, { recursive: true, force: true }); }
+	});
 	// Opt-in: use a local file and real ffmpeg; storage and database remain test doubles.
 	it.runIf(Boolean(process.env['VIDEO_DIAGNOSTIC_FILE']))('processes the supplied local video with real ffprobe and ffmpeg', async () => {
 		const source = await fs.readFile(process.env['VIDEO_DIAGNOSTIC_FILE']!);
@@ -308,6 +327,21 @@ describe('VIDEO worker failure classification', () => {
 		};
 	}
 	beforeEach(() => { repository = workerRepository(); });
+	it('ends a failed repair without deleting the previously committed original', async () => {
+		const session = { ...videoSession(), resultAssetId: 20, resultRepresentationId: 'original', completionResult: { phase: 'PLAYBACK_REPAIR', playbackRepresentationId: 'playback' } };
+		repository.claimVideoVerifying.mockResolvedValue([session]);
+		repository.commitVideoPlaybackFailed.mockResolvedValue(true);
+		const wakeDeletionWorker = vi.fn();
+		const worker = createVideoProcessingWorker({
+			repository: repository as never,
+			processor: { process: async () => { throw new WorkerSourceObjectMissingError('Missing source'); } } as never,
+			ids: { next: () => 'token' }, logger: { error: vi.fn(), warn: vi.fn() }, wakeDeletionWorker,
+		});
+		expect(await worker.runPass()).toMatchObject({ rejected: 1, retried: 0 });
+		expect(repository.commitVideoPlaybackFailed).toHaveBeenCalledWith(expect.objectContaining({ assetId: 20, playbackRepresentationId: 'playback', reason: expect.stringContaining('SOURCE_OBJECT_MISSING') }));
+		expect(repository.rejectVideo).not.toHaveBeenCalled();
+		expect(wakeDeletionWorker).not.toHaveBeenCalled();
+	});
 
 	it('rejects deterministic corrupt media and queues source cleanup', async () => {
 		const processor = { process: vi.fn(async () => {

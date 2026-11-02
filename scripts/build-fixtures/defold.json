@@ -1,0 +1,164 @@
+{
+  "engine": "defold",
+  "source": "https://github.com/selimanac/modplayer-html5-example",
+  "revision": "54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb",
+  "license": "Not declared by repository; download for local verification only. Do not redistribute fixtures.",
+  "files": [
+    {
+      "path": "NanowarModPlayer.wasm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/NanowarModPlayer.wasm",
+      "size": 2451333,
+      "sha256": "15317756b7ae6470259f8802833d797eb01f0e7ad07c6077add25af0dc7a0831"
+    },
+    {
+      "path": "NanowarModPlayer_asmjs.js",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/NanowarModPlayer_asmjs.js",
+      "size": 5163440,
+      "sha256": "6911a1fb28900e025f63c24a1542fd78dbafdd9141ff5fd4b2e46caca327d7cf"
+    },
+    {
+      "path": "NanowarModPlayer_wasm.js",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/NanowarModPlayer_wasm.js",
+      "size": 358453,
+      "sha256": "cd6ae121e12c965a29a4c1ce5cf2f6b74a628dc8dc7924d740bbb371482b42d0"
+    },
+    {
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/README.md",
+      "size": 794,
+      "sha256": "8ba8a488cd6094702a94f196c4da35a67c8257cc7f1491d61cafda20499b4364"
+    },
+    {
+      "path": "archive/archive_files.json",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/archive/archive_files.json",
+      "size": 1617,
+      "sha256": "963e625ed1af113b67f8902ec9ba516ad4560fb35d0357eb37828e17b68773b6"
+    },
+    {
+      "path": "archive/game.arcd0",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/archive/game.arcd0",
+      "size": 248484,
+      "sha256": "274cb05e9c389090fc8a7b313c093b60b7fa1ef5ce117f17ab60071d11d42e06"
+    },
+    {
+      "path": "archive/game.arci0",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/archive/game.arci0",
+      "size": 20208,
+      "sha256": "56cf74c5ea79506683770f6e0c0e00b4eccf988a4cb4426901f43ba3b8c12020"
+    },
+    {
+      "path": "archive/game.dmanifest0",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/archive/game.dmanifest0",
+      "size": 102564,
+      "sha256": "17aa0ded1a4516de6d284ad339db6d8ed44f247cc8102904fb36b0415672a040"
+    },
+    {
+      "path": "archive/game.projectc0",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/archive/game.projectc0",
+      "size": 2413,
+      "sha256": "3b0db77418464071b4ddf3ff66fe4595b1d6952f56e5665f606448ae3f273a7b"
+    },
+    {
+      "path": "archive/game.public.der0",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/archive/game.public.der0",
+      "size": 162,
+      "sha256": "8b037b1eb1ae898770e6bfa1bf5136a45aef2bf4d4d64b9ff9a347125365868f"
+    },
+    {
+      "path": "assets/audio/level_1.xm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/assets/audio/level_1.xm",
+      "size": 42940,
+      "sha256": "69c77461c8d3b20c2c085cc3c22a1176249bf3b54e4a41417afc4b07517c7ac5"
+    },
+    {
+      "path": "assets/audio/level_10.xm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/assets/audio/level_10.xm",
+      "size": 70475,
+      "sha256": "16cdb3ae840d9bbd5549406ded24c971170b7a986a1186e8df3ab8cab068db94"
+    },
+    {
+      "path": "assets/audio/level_2.xm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/assets/audio/level_2.xm",
+      "size": 26190,
+      "sha256": "8ae5408b0c7fbc560c93d00e69ce3d7cc71bc4028a670d8944636597460f9687"
+    },
+    {
+      "path": "assets/audio/level_3.xm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/assets/audio/level_3.xm",
+      "size": 22917,
+      "sha256": "af1378a8cf384265206aea85d46f5ab90d7f522789cac431e7779ae027e41b90"
+    },
+    {
+      "path": "assets/audio/level_4.xm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/assets/audio/level_4.xm",
+      "size": 50784,
+      "sha256": "e266a94f2a466c9e6282697092c4f0832cade2fc1723beaf40bf54fe8554fefa"
+    },
+    {
+      "path": "assets/audio/level_5.xm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/assets/audio/level_5.xm",
+      "size": 92916,
+      "sha256": "67d0575a8350e5ec830b31bfca34a053193cf135f48411d31638640bfd5dcfab"
+    },
+    {
+      "path": "assets/audio/level_6.xm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/assets/audio/level_6.xm",
+      "size": 30408,
+      "sha256": "96bd8f5ceb721122bf2930f05347a118298e5520f651e73e2de45c3e74c481df"
+    },
+    {
+      "path": "assets/audio/level_7.xm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/assets/audio/level_7.xm",
+      "size": 51424,
+      "sha256": "e323b6eb4834c9e809685d7428af144494b98c9c6d03d4d47455c7e6e9171e29"
+    },
+    {
+      "path": "assets/audio/level_8.xm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/assets/audio/level_8.xm",
+      "size": 79966,
+      "sha256": "ef2ab6c82ae17c63b11344b0c62d1432b4a18ddb63c6fd17f9499348fd10b7c2"
+    },
+    {
+      "path": "assets/audio/level_9.xm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/assets/audio/level_9.xm",
+      "size": 93029,
+      "sha256": "693bba198a7136425c08cd0beac1fd2d545a5fe4425b391a8e8a899c56d6c2a0"
+    },
+    {
+      "path": "assets/audio/menu.xm",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/assets/audio/menu.xm",
+      "size": 59163,
+      "sha256": "64900379ea89c8b198a540c73150045e641c97bac386e49995b9d754a68e42e5"
+    },
+    {
+      "path": "defold_sound.swf",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/defold_sound.swf",
+      "size": 43076,
+      "sha256": "559e0aab595035a1cbb9f62c31208b79ba93ab46e36edc7e67ea4e2569ba2b26"
+    },
+    {
+      "path": "dmloader.js",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/dmloader.js",
+      "size": 25394,
+      "sha256": "f0cee4ad38a834151fe325cd142a67314a0fdf26ba6508b72a4c913b4e601ce2"
+    },
+    {
+      "path": "index.html",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/index.html",
+      "size": 3261,
+      "sha256": "3425a90f72f93c7324836a9ec564234e40791b6703c42ee4e9ef92b7d95aa5dd"
+    },
+    {
+      "path": "mod_file_parser.py",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/mod_file_parser.py",
+      "size": 1688,
+      "sha256": "3ce9bb68d4e53f65aa3642371ccef38410b7b76ae8c71d63bb9cc05014d52b2f"
+    },
+    {
+      "path": "splash.png",
+      "url": "https://raw.githubusercontent.com/selimanac/modplayer-html5-example/54a812ed62fcacdd778a1f2b7c0c4bf43b1091cb/splash.png",
+      "size": 2135,
+      "sha256": "289590bf917cf0b0b56e6485079281f9237182c0ba84b264e600bbf8fdc5ae2b"
+    }
+  ]
+}

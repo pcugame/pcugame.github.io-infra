@@ -67,7 +67,6 @@ const projectController = createProjectController({
 	} as ReturnType<typeof createProjectService>,
 	access: { loadProjectWithAccess: mocks.loadProjectWithAccess },
 	status: {
-		assertTransition: vi.fn(),
 		bulkUpdate: mocks.bulkUpdate,
 	},
 });

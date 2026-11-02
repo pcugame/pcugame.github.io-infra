@@ -143,7 +143,7 @@ export async function cancelDirectAssetUploadSession(sessionId: string): Promise
 /** Poll JSON control state only; Garage never passes archive bytes through the API. */
 export async function waitForDirectAssetReady(
 	sessionId: string,
-	options: { intervalMs?: number; maxIntervalMs?: number; timeoutMs?: number; signal?: AbortSignal } = {},
+	options: { onStatus?: (status: DirectAssetUploadStatus) => void; intervalMs?: number; maxIntervalMs?: number; timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<DirectAssetUploadStatus> {
 	const intervalMs = options.intervalMs ?? 1_500;
 	const maxIntervalMs = options.maxIntervalMs ?? 15_000;
@@ -164,6 +164,7 @@ export async function waitForDirectAssetReady(
 			await wait(Math.min(maxIntervalMs, intervalMs * (2 ** Math.min(transientFailures, 4))), options.signal);
 			continue;
 		}
+		options.onStatus?.(status);
 		if (status.state === 'READY') return status;
 		if (['REJECTED', 'CANCELLED', 'EXPIRED'].includes(status.state)) {
 			throw new Error(`Direct upload ${status.state.toLowerCase()}`);
@@ -311,8 +312,8 @@ export async function uploadDirectAssetFile(
 	const owner: DirectAssetUploadOwner = typeof ownerOrProjectId === 'number'
 		? { type: 'PROJECT', id: ownerOrProjectId }
 		: ownerOrProjectId;
-	if (owner.type === 'EXHIBITION' && kind !== 'POSTER') {
-		throw new Error('Only poster uploads may be owned by an exhibition');
+	if (owner.type === 'EXHIBITION' && kind !== 'POSTER' && kind !== 'IMAGE') {
+		throw new Error('Exhibitions support poster and image uploads');
 	}
 	throwIfAborted(options.signal);
 	const source = await createFileSourceIdentity(file, { signal: options.signal });

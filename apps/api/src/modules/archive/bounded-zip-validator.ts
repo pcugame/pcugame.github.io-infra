@@ -50,6 +50,8 @@ export interface ValidatedZipEntry {
 	crc32: number;
 	compressionMethod: 0 | 8;
 	isDirectory: boolean;
+	/** Resolved archive path; never a host filesystem link. */
+	linkTarget?: string;
 }
 
 export interface BoundedZipValidationSummary {
@@ -78,6 +80,8 @@ interface EndOfCentralDirectory {
 }
 
 interface StructuralEntry {
+	zip64: boolean;
+	linkTarget?: string;
 	path: string;
 	fileNameRaw: Buffer;
 	flags: number;
@@ -182,15 +186,44 @@ async function findEndOfCentralDirectory(
 
 		const diskNumber = tail.readUInt16LE(offset + 4);
 		const centralDirectoryDisk = tail.readUInt16LE(offset + 6);
-		const entriesOnDisk = tail.readUInt16LE(offset + 8);
-		const entryCount = tail.readUInt16LE(offset + 10);
-		const centralDirectorySize = tail.readUInt32LE(offset + 12);
-		const centralDirectoryOffset = tail.readUInt32LE(offset + 16);
-		if (entriesOnDisk === 0xffff
-			|| entryCount === 0xffff
-			|| centralDirectorySize === 0xffffffff
-			|| centralDirectoryOffset === 0xffffffff) {
-			throw new ZipValidationError('ZIP64 archives are not supported');
+		let entriesOnDisk = tail.readUInt16LE(offset + 8);
+		let entryCount = tail.readUInt16LE(offset + 10);
+		let centralDirectorySize = tail.readUInt32LE(offset + 12);
+		let centralDirectoryOffset = tail.readUInt32LE(offset + 16);
+		let directoryBoundary = tailOffset + offset;
+		const locatorOffset = directoryBoundary - 20;
+		const locator = locatorOffset >= 0 ? await readExact(handle, locatorOffset, 20) : Buffer.alloc(0);
+		const hasZip64 = locator.length === 20 && locator.readUInt32LE(0) === 0x07064b50;
+		if (hasZip64) {
+			if (locator.readUInt32LE(4) !== 0 || locator.readUInt32LE(16) !== 1) {
+				throw new ZipValidationError('Split ZIP64 archives are not supported');
+			}
+			const recordOffset = safeUint64(locator, 8);
+			if (recordOffset + 56 > locatorOffset) throw new ZipValidationError('ZIP64 record is outside archive bounds');
+			const record = await readExact(handle, recordOffset, 56);
+			const recordSize = safeUint64(record, 4);
+			if (record.readUInt32LE(0) !== 0x06064b50 || recordSize < 44
+				|| recordOffset + 12 + recordSize !== locatorOffset
+				|| record.readUInt32LE(16) !== 0 || record.readUInt32LE(20) !== 0) {
+				throw new ZipValidationError('ZIP64 end record is malformed');
+			}
+			const count = safeUint64(record, 32);
+			const size = safeUint64(record, 40);
+			const start = safeUint64(record, 48);
+			if (safeUint64(record, 24) !== count
+				|| (entriesOnDisk !== 0xffff && entriesOnDisk !== count)
+				|| (entryCount !== 0xffff && entryCount !== count)
+				|| (centralDirectorySize !== 0xffffffff && centralDirectorySize !== size)
+				|| (centralDirectoryOffset !== 0xffffffff && centralDirectoryOffset !== start)) {
+				throw new ZipValidationError('ZIP64 end records disagree');
+			}
+			entriesOnDisk = entryCount = count;
+			centralDirectorySize = size;
+			centralDirectoryOffset = start;
+			directoryBoundary = recordOffset;
+		} else if (entriesOnDisk === 0xffff || entryCount === 0xffff
+			|| centralDirectorySize === 0xffffffff || centralDirectoryOffset === 0xffffffff) {
+			throw new ZipValidationError('ZIP64 locator is missing');
 		}
 		if (diskNumber !== 0 || centralDirectoryDisk !== 0 || entriesOnDisk !== entryCount) {
 			throw new ZipValidationError('Split ZIP archives are not supported');
@@ -201,7 +234,7 @@ async function findEndOfCentralDirectory(
 			|| centralDirectorySize > policy.maxCentralDirectoryBytes) {
 			throw new ZipValidationError('ZIP archive central directory size is outside policy');
 		}
-		const eocdOffset = tailOffset + offset;
+		const eocdOffset = directoryBoundary;
 		const centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize;
 		if (!Number.isSafeInteger(centralDirectoryEnd)
 			|| centralDirectoryEnd > eocdOffset
@@ -239,7 +272,7 @@ function unixFileType(entry: Pick<StructuralEntry, 'versionMadeBy' | 'externalFi
 function assertFilesystemType(entry: Pick<StructuralEntry,
 	'versionMadeBy' | 'externalFileAttributes' | 'isDirectory'>): void {
 	const type = unixFileType(entry);
-	if (type === UNIX_SYMLINK) throw new ZipValidationError('Symbolic links are not allowed in ZIP archives');
+	if (type === UNIX_SYMLINK) return;
 	if (type !== 0 && type !== UNIX_REGULAR_FILE && type !== UNIX_DIRECTORY) {
 		throw new ZipValidationError('ZIP archive contains an unsupported filesystem entry');
 	}
@@ -267,12 +300,27 @@ function decodeFileName(flags: number, fileNameRaw: Buffer, extraRaw: Buffer): s
 	}
 }
 
-function containsZip64Extra(extraRaw: Buffer): boolean {
-	try {
-		return parseExtraFields(extraRaw).some((field) => field.id === ZIP64_EXTRA_FIELD_ID);
-	} catch (error) {
-		throw new ZipValidationError('ZIP extra field is malformed', { cause: error });
-	}
+function safeUint64(buffer: Buffer, offset: number): number {
+	if (offset + 8 > buffer.length) throw new ZipValidationError('ZIP64 field is truncated');
+	const value = buffer.readBigUInt64LE(offset);
+	if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new ZipValidationError('ZIP64 byte range exceeds safe integer bounds');
+	return Number(value);
+}
+
+function zip64Fields(extraRaw: Buffer, values: number[]): { values: number[]; present: boolean } {
+	let fields;
+	try { fields = parseExtraFields(extraRaw).filter(field => field.id === ZIP64_EXTRA_FIELD_ID); }
+	catch (error) { throw new ZipValidationError('ZIP extra field is malformed', { cause: error }); }
+	if (fields.length > 1) throw new ZipValidationError('Duplicate ZIP64 extra fields');
+	const data = fields[0]?.data;
+	let offset = 0;
+	return { present: !!data, values: values.map(value => {
+		if (value !== 0xffffffff) return value;
+		if (!data) throw new ZipValidationError('ZIP64 extra field is missing');
+		const result = safeUint64(data, offset);
+		offset += 8;
+		return result;
+	}) };
 }
 
 function parseCentralDirectory(
@@ -293,14 +341,14 @@ function parseCentralDirectory(
 		const flags = buffer.readUInt16LE(offset + 8);
 		const rawMethod = buffer.readUInt16LE(offset + 10);
 		const crc32 = buffer.readUInt32LE(offset + 16);
-		const compressedSize = buffer.readUInt32LE(offset + 20);
-		const uncompressedSize = buffer.readUInt32LE(offset + 24);
+		let compressedSize = buffer.readUInt32LE(offset + 20);
+		let uncompressedSize = buffer.readUInt32LE(offset + 24);
 		const fileNameLength = buffer.readUInt16LE(offset + 28);
 		const extraLength = buffer.readUInt16LE(offset + 30);
 		const commentLength = buffer.readUInt16LE(offset + 32);
 		const diskStart = buffer.readUInt16LE(offset + 34);
 		const externalFileAttributes = buffer.readUInt32LE(offset + 38);
-		const localHeaderOffset = buffer.readUInt32LE(offset + 42);
+		let localHeaderOffset = buffer.readUInt32LE(offset + 42);
 		const nameStart = offset + 46;
 		const nameEnd = nameStart + fileNameLength;
 		const extraEnd = nameEnd + extraLength;
@@ -313,14 +361,10 @@ function parseCentralDirectory(
 		if (rawMethod !== 0 && rawMethod !== 8) {
 			throw new ZipValidationError('ZIP entry uses an unsupported compression method');
 		}
-		if (compressedSize === 0xffffffff
-			|| uncompressedSize === 0xffffffff
-			|| localHeaderOffset === 0xffffffff) {
-			throw new ZipValidationError('ZIP64 archives are not supported');
-		}
 		const fileNameRaw = Buffer.from(buffer.subarray(nameStart, nameEnd));
 		const extraRaw = Buffer.from(buffer.subarray(nameEnd, extraEnd));
-		if (containsZip64Extra(extraRaw)) throw new ZipValidationError('ZIP64 archives are not supported');
+		const zip64 = zip64Fields(extraRaw, [uncompressedSize, compressedSize, localHeaderOffset]);
+		[uncompressedSize, compressedSize, localHeaderOffset] = zip64.values as [number, number, number];
 		const decoded = decodeFileName(flags, fileNameRaw, extraRaw);
 		if (isUnsafePath(decoded)) throw new ZipValidationError('ZIP entry has an unsafe or absolute path');
 		const path = normalizedPath(decoded);
@@ -336,6 +380,7 @@ function parseCentralDirectory(
 			|| (externalFileAttributes & 0x10) !== 0
 			|| fileType === UNIX_DIRECTORY;
 		const entry: StructuralEntry = {
+			zip64: zip64.present,
 			path,
 			fileNameRaw,
 			flags,
@@ -352,6 +397,9 @@ function parseCentralDirectory(
 			structureEnd: 0,
 		};
 		assertFilesystemType(entry);
+		if (unixFileType(entry) === UNIX_SYMLINK && (policy.profile === 'WEBGL' || uncompressedSize > 4096 || isDirectory)) {
+			throw new ZipValidationError('Symbolic links are not allowed in web archives or exceed link bounds');
+		}
 		if (isDirectory && (compressedSize !== 0 || uncompressedSize !== 0)) {
 			throw new ZipValidationError('ZIP directory entry contains file data');
 		}
@@ -369,19 +417,14 @@ function parseCentralDirectory(
 }
 
 function descriptorLength(buffer: Buffer, entry: StructuralEntry, boundary: number): number | null {
-	const candidates = buffer.length >= 16 && buffer.readUInt32LE(0) === DATA_DESCRIPTOR_SIGNATURE
-		? [
-			{ length: 16, crc: buffer.readUInt32LE(4), compressed: buffer.readUInt32LE(8), uncompressed: buffer.readUInt32LE(12) },
-			{ length: 12, crc: buffer.readUInt32LE(0), compressed: buffer.readUInt32LE(4), uncompressed: buffer.readUInt32LE(8) },
-		]
-		: [{ length: 12, crc: buffer.readUInt32LE(0), compressed: buffer.readUInt32LE(4), uncompressed: buffer.readUInt32LE(8) }];
-	for (const candidate of candidates) {
-		if (entry.dataEnd + candidate.length <= boundary
-			&& candidate.crc === entry.crc32
-			&& candidate.compressed === entry.compressedSize
-			&& candidate.uncompressed === entry.uncompressedSize) {
-			return candidate.length;
-		}
+	for (const prefix of [0, 4]) {
+		if (prefix === 4 && buffer.readUInt32LE(0) !== DATA_DESCRIPTOR_SIGNATURE) continue;
+		const length = prefix + (entry.zip64 ? 20 : 12);
+		if (buffer.length < length || entry.dataEnd + length > boundary) continue;
+		const compressed = entry.zip64 ? safeUint64(buffer, prefix + 4) : buffer.readUInt32LE(prefix + 4);
+		const uncompressed = entry.zip64 ? safeUint64(buffer, prefix + 12) : buffer.readUInt32LE(prefix + 8);
+		if (buffer.readUInt32LE(prefix) === entry.crc32 && compressed === entry.compressedSize
+			&& uncompressed === entry.uncompressedSize) return length;
 	}
 	return null;
 }
@@ -404,8 +447,8 @@ async function validateLocalHeaders(
 		const flags = fixed.readUInt16LE(6);
 		const method = fixed.readUInt16LE(8);
 		const localCrc32 = fixed.readUInt32LE(14);
-		const localCompressedSize = fixed.readUInt32LE(18);
-		const localUncompressedSize = fixed.readUInt32LE(22);
+		let localCompressedSize = fixed.readUInt32LE(18);
+		let localUncompressedSize = fixed.readUInt32LE(22);
 		const fileNameLength = fixed.readUInt16LE(26);
 		const extraLength = fixed.readUInt16LE(28);
 		if (flags !== entry.flags || method !== entry.compressionMethod) {
@@ -421,7 +464,9 @@ async function validateLocalHeaders(
 		if (!localName.equals(entry.fileNameRaw)) {
 			throw new ZipValidationError('ZIP local filename disagrees with the central directory');
 		}
-		if (containsZip64Extra(localExtra)) throw new ZipValidationError('ZIP64 archives are not supported');
+		const local64 = zip64Fields(localExtra, [localUncompressedSize, localCompressedSize]);
+		[localUncompressedSize, localCompressedSize] = local64.values as [number, number];
+		entry.zip64 ||= local64.present;
 		const usesDescriptor = (flags & DATA_DESCRIPTOR_FLAG) !== 0;
 		if (!usesDescriptor && (
 			localCrc32 !== entry.crc32
@@ -451,7 +496,7 @@ async function validateLocalHeaders(
 		const entry = sorted[index]!;
 		const boundary = sorted[index + 1]?.localHeaderOffset ?? eocd.centralDirectoryOffset;
 		if ((entry.flags & DATA_DESCRIPTOR_FLAG) !== 0) {
-			const available = Math.min(16, Math.max(0, boundary - entry.dataEnd));
+			const available = Math.min(24, Math.max(0, boundary - entry.dataEnd));
 			if (available < 12) throw new ZipValidationError('ZIP data descriptor is truncated or overlaps another entry');
 			const descriptor = await readExact(handle, entry.dataEnd, available);
 			const length = descriptorLength(descriptor, entry, boundary);
@@ -519,6 +564,7 @@ async function decodeEntry(
 	if (signal?.aborted) onAbort();
 	let decodedBytes = 0;
 	let crcState = 0xffffffff;
+	const linkChunks: Buffer[] = [];
 	try {
 		for await (const raw of stream) {
 			throwIfAborted(signal);
@@ -530,6 +576,7 @@ async function decodeEntry(
 				throw new ZipValidationError(`ZIP entry actual expansion exceeds its bound: ${expected.path}`);
 			}
 			crcState = updateCrc32(crcState, chunk);
+			if (unixFileType(expected) === UNIX_SYMLINK) linkChunks.push(chunk);
 		}
 	} catch (error) {
 		if (signal?.aborted) throw abortFailure ?? abortError(signal);
@@ -552,7 +599,48 @@ async function decodeEntry(
 	if (actualCrc32 !== expected.crc32) {
 		throw new ZipValidationError(`ZIP entry CRC32 mismatch: ${expected.path}`);
 	}
+	if (unixFileType(expected) === UNIX_SYMLINK) expected.linkTarget = Buffer.concat(linkChunks).toString('utf8');
 	return decodedBytes;
+}
+
+/** Resolve component links entirely in the archive namespace, including framework directory links. */
+function resolveArchiveLinks(entries: ValidatedZipEntry[]): void {
+	const byPath = new Map(entries.map(entry => [entry.path.replace(/\/$/, ''), entry]));
+	const directories = new Set<string>();
+	for (const entry of entries) {
+		const parts = entry.path.split('/');
+		for (let i = 1; i < parts.length; i++) directories.add(parts.slice(0, i).join('/'));
+	}
+	function resolve(initial: string): string {
+		let path = initial;
+		const seen = new Set<string>();
+		for (;;) {
+			const parts = path.split('/');
+			let replaced = false;
+			for (let i = 1; i <= parts.length; i++) {
+				const prefix = parts.slice(0, i).join('/');
+				const entry = byPath.get(prefix);
+				if (entry?.linkTarget === undefined) continue;
+				if (seen.has(prefix)) throw new ZipValidationError('Symbolic link cycle in ZIP archive');
+				seen.add(prefix);
+				const target = entry.linkTarget;
+				if (!target || target.includes('\0') || target.includes('\ufffd') || target.includes('\\')
+					|| target.startsWith('/') || /^[a-zA-Z]:/.test(target)) throw new ZipValidationError('Unsafe symbolic link target');
+				const joined = pathPosix.normalize(pathPosix.join(pathPosix.dirname(prefix), target));
+				if (joined === '..' || joined.startsWith('../')) throw new ZipValidationError('Symbolic link escapes archive');
+				path = pathPosix.normalize([joined, ...parts.slice(i)].join('/'));
+				replaced = true;
+				break;
+			}
+			if (replaced) continue;
+			if (path !== '.' && !byPath.has(path) && !directories.has(path)) throw new ZipValidationError('Symbolic link target is missing');
+			return path;
+		}
+	}
+
+	const resolved = new Map<ValidatedZipEntry, string>();
+	for (const entry of entries) if (entry.linkTarget !== undefined) resolved.set(entry, resolve(entry.path));
+	for (const [entry, target] of resolved) entry.linkTarget = target;
 }
 
 async function fullyDecode(
@@ -594,10 +682,12 @@ async function fullyDecode(
 				crc32: expected.crc32,
 				compressionMethod: expected.compressionMethod,
 				isDirectory: expected.isDirectory,
+				...(expected.linkTarget !== undefined ? { linkTarget: expected.linkTarget } : {}),
 			});
 			index += 1;
 		}
 		if (index !== structure.entries.length) throw new ZipValidationError('ZIP entry count changed during decode');
+		resolveArchiveLinks(validated);
 		return { decodedBytes, entries: validated };
 	} catch (error) {
 		if (signal?.aborted) throw abortError(signal);

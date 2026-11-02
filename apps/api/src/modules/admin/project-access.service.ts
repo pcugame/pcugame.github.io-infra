@@ -1,15 +1,8 @@
-import type { UserRole } from '@pcu/contracts';
+import { assertWriteAccess, ProjectUploadPolicyRejectedError } from './project-access.policy.js';
+export { assertWriteAccess, ProjectUploadPolicyRejectedError } from './project-access.policy.js';
 import type { Prisma } from '../../generated/prisma/client.js';
 import type { Actor } from '../../application/http-input.js';
-import { AppError, forbidden, notFound } from '../../shared/errors.js';
-
-/** Authoritative upload policy rejection; retains the existing HTTP contract. */
-export class ProjectUploadPolicyRejectedError extends AppError {
-	constructor(message: string) {
-		super(403, message, 'FORBIDDEN');
-		this.name = 'ProjectUploadPolicyRejectedError';
-	}
-}
+import { forbidden, notFound } from '../../shared/errors.js';
 
 export interface ProjectAccessRecord {
 	id: number;
@@ -31,22 +24,6 @@ export interface ProjectAccessRecord {
 export interface ProjectAccessRepository {
 	findProject(projectId: number): Promise<ProjectAccessRecord | null>;
 	isLinkedMember(projectId: number, userId: number): Promise<boolean>;
-}
-
-/** Pure permission check with no adapter dependency. */
-export function assertWriteAccess(
-	role: UserRole,
-	creatorId: number,
-	userId: number,
-	opts: { isMember?: boolean; isModificationEnabled?: boolean } = {},
-): void {
-	if (role === 'ADMIN' || role === 'OPERATOR') return;
-	if (creatorId !== userId && !opts.isMember) {
-		throw forbidden('Not project owner or member');
-	}
-	if (opts.isModificationEnabled === false) {
-		throw new ProjectUploadPolicyRejectedError('Project modifications are closed for this exhibition');
-	}
 }
 
 /**

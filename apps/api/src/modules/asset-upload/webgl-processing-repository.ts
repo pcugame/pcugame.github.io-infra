@@ -292,7 +292,7 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 					where: { id: session.projectId }, select: { currentWebglDeploymentId: true, status: true },
 				});
 				const staging = project.status === 'DRAFT'
-					? createCanonicalWebglStagingKeys(session.projectId, input.candidateDeploymentId)
+					? createCanonicalWebglStagingKeys(session.projectId, input.candidateDeploymentId, input.entryObjectKey.slice(input.publicPrefix.length))
 					: null;
 				const deployment = await tx.webglDeployment.create({
 					data: {

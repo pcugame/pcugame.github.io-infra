@@ -1,9 +1,11 @@
+import { awardTone, orderedAwards } from './awardTone';
+import { AwardBadge } from './AwardBadge';
 import { useEffect, useRef } from 'react';
 import type { PublicProjectCard } from '../../contracts';
 import { ResponsiveImage } from '../common';
 
 interface Props {
-  project: Pick<PublicProjectCard, 'slug' | 'title' | 'summary' | 'poster' | 'members'>;
+  project: Pick<PublicProjectCard, 'slug' | 'title' | 'summary' | 'poster' | 'members' | 'awards'>;
   localPoster?: File | null;
   year: number;
   onSelect?: (slug: string) => void;
@@ -23,7 +25,7 @@ export function ProjectCard({ project, onSelect, localPoster }: Props) {
   return (
     <button
       type="button"
-      className="archive-card"
+      className="archive-card" data-award-tone={project.awards?.length ? awardTone(orderedAwards(project.awards)[0]) : undefined}
       onClick={() => onSelect?.(project.slug)}
     >
       <div className="archive-card__image">
@@ -42,14 +44,17 @@ export function ProjectCard({ project, onSelect, localPoster }: Props) {
             <span>{project.title.charAt(0)}</span>
           </div>
         )}
+        {Boolean(project.awards?.length) && (
+          <span className="archive-card__awards" role="group" aria-label="수상 내역">
+            {orderedAwards(project.awards).map(award => <AwardBadge key={award.id} award={award} />)}
+          </span>
+        )}
       </div>
       <div className="archive-card__body">
         <div className="archive-card__title-wrap">
           <h3 className="archive-card__title">{project.title}</h3>
         </div>
-        {project.summary && (
-          <p className="archive-card__summary">{project.summary}</p>
-        )}
+        <p className="archive-card__summary">{project.summary}</p>
         <div className="archive-card__footer">
           <div className="archive-card__members">
             {project.members.slice(0, 2).map((m) => (

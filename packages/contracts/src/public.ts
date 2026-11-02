@@ -1,3 +1,5 @@
+import type { Award } from './awards.js';
+import type { VideoPlaybackQuality } from './video-playback.js';
 import type { ExternalLink } from './external-links.js';
 import type { Visibility } from './enums.js';
 import type { AssetPlaybackStatus, Platform } from './enums.js';
@@ -19,6 +21,7 @@ export type PublicYearListResponse = {
 
 /** GET /api/public/years/:year/projects */
 export type PublicProjectCard = {
+ awards?: Award[];
 	canChangeVisibility: boolean;
 	exhibitionVisibility: Visibility;
 	visibility: Visibility;
@@ -54,6 +57,8 @@ export type PublicExhibitionProjectsResponse = {
 
 /** Project video (locally uploaded) */
 export type ProjectVideo = {
+ playbacks?: { profile: 'native' | 'cap60' | 'cap30'; quality?: VideoPlaybackQuality; url: string; mimeType: string; frameRate: number; width: number; height: number; status: 'READY' }[];
+ playbackJob?: { id: string; status: 'PENDING' | 'RUNNING' | 'READY' | 'FAILED'; error?: string };
 	assetId: number;
 	sortOrder: number | null;
 	role: 'MAIN' | 'ADDITIONAL';
@@ -95,6 +100,7 @@ export type PublicUploadConfig = {
 };
 
 export type PublicProjectDetailResponse = {
+ awards?: Award[];
 	canChangeVisibility: boolean;
 	exhibitionVisibility: Visibility;
 	visibility: Visibility;

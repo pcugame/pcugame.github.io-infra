@@ -1,0 +1,23 @@
+[
+  {
+    "name": "tanks-linux", "source": "https://github.com/Ravbug/TanksUnreal/releases/tag/2.0",
+    "url": "https://github.com/Ravbug/TanksUnreal/releases/download/2.0/TanksUnreal5_Linux_x64.7z",
+    "release": "2.0", "engine": "5.0 (tagged .uproject)", "containers": ["Pak v11", "IoStore v5"],
+    "size": 195295885, "sha256": "b45047012b0f525af59c3a9861a2563603a5629d7f5a505f389ce22fb0f26651",
+    "expected": "REVIEW", "reason": "Container structure checked; package payload and executable project binding not certified"
+  },
+  {
+    "name": "tanks-windows", "source": "https://github.com/Ravbug/TanksUnreal/releases/tag/2.0",
+    "url": "https://github.com/Ravbug/TanksUnreal/releases/download/2.0/TanksUnreal5_Win_x64.7z",
+    "release": "2.0", "engine": "5.0 (tagged .uproject)", "containers": ["Pak v11", "IoStore v5"],
+    "size": 245941682, "sha256": "2989e95f24ceaed9e5aac9c1483560aa102538db64c6f6786594313e137191bb",
+    "expected": "REVIEW", "reason": "Container structure checked; package payload and executable project binding not certified"
+  },
+  {
+    "name": "shooter-windows", "source": "https://github.com/cqcallaw/shootergame/releases/tag/benchmark-v1.3",
+    "url": "https://github.com/cqcallaw/shootergame/releases/download/benchmark-v1.3/ShooterGameWindowsBenchmark-v1.3.zip",
+    "release": "benchmark-v1.3", "engine": "4.26.0 (release notes)", "containers": ["Pak v11 (encrypted index)"],
+    "size": 458958667, "sha256": "98d70d54492dbefcde8eeaa48a85a0504ccd07e4cd6118ccf1cbb6941b1d7c83",
+    "expected": "REVIEW", "reason": "Encrypted index observed through the actual GAME worker; decryption keys are not requested"
+  }
+]

@@ -1,3 +1,4 @@
+import { createWorkerControl } from './runtime/worker-control.js';
 import { pathToFileURL } from 'node:url';
 import { loadEnv } from './config/env.js';
 import { createCryptoIdGenerator, createSystemClock } from './infrastructure/production-ports.js';
@@ -19,6 +20,7 @@ export async function runImageWorker(): Promise<void> {
 	});
 	const s3 = createS3Client(config);
 	const storage = createObjectStorage(s3, { defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC });
+	const control = await createWorkerControl();
 	const abort = new AbortController();
 	const stop = () => abort.abort(new Error('IMAGE worker shutdown requested'));
 	process.once('SIGTERM', stop);
@@ -60,15 +62,17 @@ export async function runImageWorker(): Promise<void> {
 			logger,
 			limits: { maxTempBytes: config.IMAGE_WORKER_TEMP_MAX_MB * 1024 * 1024 },
 		});
-		const removed = await graph.cleanupStaleWorkspaces(new Date(Date.now() - 24 * 60 * 60_000));
+		const removed = await control.gate.run(() => graph.cleanupStaleWorkspaces(new Date(Date.now() - 24 * 60 * 60_000)), 0);
 		if (removed > 0) logger.warn({ removed }, 'Removed stale IMAGE worker temp directories');
 		await runImageWorkerLoop({
 			worker: graph.worker,
+			gate: control.gate,
 			signal: abort.signal,
 			idleMs: config.IMAGE_WORKER_POLL_MS,
 			onError: (error) => logger.error({ error }, 'IMAGE worker pass failed; retrying'),
 		});
 	} finally {
+		await control.close();
 		process.off('SIGTERM', stop);
 		process.off('SIGINT', stop);
 		await prisma.$disconnect().catch(() => undefined);

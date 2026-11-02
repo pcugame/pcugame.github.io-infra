@@ -17,14 +17,17 @@ import { createProjectController } from '../modules/admin/project/controller.js'
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
 import { createProjectService } from '../modules/admin/project/service.js';
 import { createProjectSerializer } from '../modules/admin/project/serializer.js';
-import { assertStatusTransition } from '../modules/admin/project/project-status.service.js';
+import { enrichExternalLinks } from '../modules/external-links/resolver.js';
 import { createProjectAccessService } from '../modules/admin/project-access.service.js';
 import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
+import { createProjectUpdateRepository } from '../modules/admin/project/update.repository.js';
+import { updateProject } from '../modules/admin/project/update.service.js';
 
 describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('year policy authenticated HTTP boundary', () => {
 	let db: PrismaClient;
 	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 	let app: FastifyInstance;
+	let service: ReturnType<typeof createProjectService>;
 	let exhibitionId: number;
 	let owner: Actor, member: Actor, stranger: Actor, operator: Actor, admin: Actor;
 	const users: number[] = [];
@@ -53,16 +56,16 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('year policy 
 			},
 		});
 		app.setErrorHandler((error, _request, reply) => {
-			reply.status(error instanceof AppError ? error.statusCode : 500).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error instanceof Error ? error.message : 'Error' } });
+			reply.status(error instanceof AppError ? error.statusCode : error instanceof Error && 'validation' in error ? 400 : 500).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error instanceof Error ? error.message : 'Error' } });
 		});
 		const repository = createProjectCrudRepository(db);
-		const service = createProjectService({
+		service = createProjectService({ loadProjectWithAccess: createProjectAccessService(createProjectAccessRepository(db)).loadProjectWithAccess, resolveExternalLinks: enrichExternalLinks,
 			repository, serializeProjectDetail: createProjectSerializer('http://localhost:3000', { publicAssetOrigin: 'http://assets.test', publicBucket: 'pcu-public' }).serializeProjectDetail,
 			deletionBuckets: { publicBucket: 'pcu-public', protectedBucket: 'pcu-protected' },
 			abortMultipart: async () => {}, wakeDeletionWorker() {}, wakeMaintenance() {}, logger: app.log,
 		});
 		registerRouteSchemas(app);
-		await app.register(createProjectController({ service, access: createProjectAccessService(createProjectAccessRepository(db)), status: { assertTransition: assertStatusTransition, bulkUpdate: async (ids, status) => ({ updated: (await repository.bulkUpdateStatus(ids, status)).count }) } }), { prefix: '/api/admin' });
+		await app.register(createProjectController({ service, access: createProjectAccessService(createProjectAccessRepository(db)), status: { bulkUpdate: async (ids, status) => ({ updated: (await repository.bulkUpdateStatus(ids, status)).count }) } }), { prefix: '/api/admin' });
 	});
 	afterAll(async () => {
 		await app?.close();
@@ -201,4 +204,80 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('year policy 
 		expect(exhibition?._count.projects).toBe(count);
 	});
 
+	it('enforces status permissions in direct service calls and the authenticated HTTP route', async () => {
+		await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: true } });
+		const p = await project();
+		for (const actor of [owner, member]) {
+			await expect(service.updateProject(p.id, { title: 'Denied', status: 'PUBLISHED' }, actor)).rejects.toMatchObject({ statusCode: 403 });
+			expect((await request(actor, 'PATCH', `/${p.id}`, { title: 'Denied', status: 'ARCHIVED' })).statusCode).toBe(403);
+		}
+		expect(await db.project.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ title: p.title, version: p.version });
+		await expect(service.updateProject(p.id, { status: 'ARCHIVED' }, operator)).resolves.toMatchObject({ status: 'ARCHIVED' });
+		expect((await db.project.findUniqueOrThrow({ where: { id: p.id } })).version).toBe(p.version + 1);
+	});
+
+	it('keeps HTTP input validation, cache headers, collections and no-op version behavior', async () => {
+		await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: true } });
+		const p = await project();
+		expect((await request(owner, 'PATCH', `/${p.id}`, { status: 'NOT_A_STATUS' })).statusCode).toBe(400);
+		expect((await db.project.findUniqueOrThrow({ where: { id: p.id } })).version).toBe(p.version);
+		await db.projectMember.deleteMany({ where: { projectId: p.id } });
+		const empty = await request(owner, 'PATCH', `/${p.id}`, {});
+		expect(empty.statusCode).toBe(200);
+		expect(empty.headers['cache-control']).toBe('private, no-store');
+		expect(AdminProjectDetailSchema.parse(empty.json().data)).toMatchObject({ members: [], assets: [] });
+		expect((await db.project.findUniqueOrThrow({ where: { id: p.id } })).version).toBe(p.version + 1);
+		await db.projectMember.create({ data: { projectId: p.id, userId: member.id, name: 'Member', studentId: '20260001' } });
+		const populated = await request(member, 'PATCH', `/${p.id}`, { title: 'Member edit' });
+		expect(populated.statusCode).toBe(200);
+		expect(AdminProjectDetailSchema.parse(populated.json().data).members).toHaveLength(1);
+		expect((await db.project.findUniqueOrThrow({ where: { id: p.id } })).version).toBe(p.version + 2);
+	});
+
+	it('rolls back the patch when the subsequent version write fails, through service and HTTP', async () => {
+		await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: true } });
+		const p = await project();
+		await db.$executeRawUnsafe(`CREATE FUNCTION reject_update_version() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN IF NEW.id = ${p.id} AND NEW.version <> OLD.version THEN RAISE EXCEPTION 'injected version write failure'; END IF;
+			RETURN NEW; END $$`);
+		await db.$executeRawUnsafe('CREATE TRIGGER reject_update_version BEFORE UPDATE ON projects FOR EACH ROW EXECUTE FUNCTION reject_update_version()');
+		try {
+			await expect(service.updateProject(p.id, { title: 'Must roll back', status: 'ARCHIVED' }, operator)).rejects.toThrow();
+			expect(await db.project.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ title: p.title, status: p.status, version: p.version });
+			expect((await request(operator, 'PATCH', `/${p.id}`, { title: 'Must roll back' })).statusCode).toBe(500);
+			expect(await db.project.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ title: p.title, status: p.status, version: p.version });
+		} finally {
+			await db.$executeRawUnsafe('DROP TRIGGER reject_update_version ON projects');
+			await db.$executeRawUnsafe('DROP FUNCTION reject_update_version()');
+		}
+	});
+
+	it('rejects direct and HTTP publication of a DRAFT before any patch or version write', async () => {
+		const p = await db.project.create({ data: { exhibitionId, creatorId: owner.id, title: 'Draft', slug: randomUUID(), status: 'DRAFT' } });
+		await expect(service.updateProject(p.id, { title: 'Denied', status: 'PUBLISHED' }, operator)).rejects.toMatchObject({ statusCode: 409 });
+		expect((await request(operator, 'PATCH', `/${p.id}`, { title: 'Denied', status: 'PUBLISHED' })).statusCode).toBe(409);
+		expect(await db.project.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ title: 'Draft', status: 'DRAFT', version: p.version });
+	});
+
+	it('rechecks removed membership after preflight/link resolution without writing stale policy', async () => {
+		await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: true } });
+		const p = await project();
+		let entered!: () => void, release!: () => void;
+		const resolving = new Promise<void>(resolve => { entered = resolve; });
+		const resume = new Promise<void>(resolve => { release = resolve; });
+		const result = updateProject({
+			repository: createProjectUpdateRepository(db),
+			loadProjectWithAccess: createProjectAccessService(createProjectAccessRepository(db)).loadProjectWithAccess,
+			resolveExternalLinks: async links => { entered(); await resume; return links; },
+			serializeProjectDetail: createProjectSerializer('http://api.test').serializeProjectDetail,
+		}, p.id, { title: 'Must not commit', externalLinks: [] }, member);
+		const settled = result.then(value => ({ value }), (error: unknown) => ({ error }));
+		let outcome: Awaited<typeof settled>;
+		await resolving;
+		try {
+			await db.projectMember.deleteMany({ where: { projectId: p.id, userId: member.id } });
+		} finally { release(); outcome = await settled; }
+		expect(outcome).toMatchObject({ error: { statusCode: 403 } });
+		expect(await db.project.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ title: p.title, version: p.version });
+	});
 });

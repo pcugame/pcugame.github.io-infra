@@ -18,10 +18,8 @@ Thumbs.db
 !.vscode/extensions.json
 .idea
 
-# Claude Code
+# Local AI settings (instruction file exclusions are below the shared paths)
 .claude/
-CLAUDE.md
-AGENTS.md
 
 # 디자인 미리보기 (로컬 전용)
 admin-preview.html
@@ -46,6 +44,26 @@ apps/web/src/pages/admin/AdminPreview.tsx
 !docs/adr/**/*.md
 !docs/history/2026-backend-audit/**/*.md
 
+# Manual operator guide and preserved README history
+!docs/guide/**/*.md
+!docs/history/repository-overview-20261016.md
+
+# Shared operations, test plans and WebGL documentation
+!docs/operations/**/*.md
+!docs/new_tests/**/*.md
+!docs/unity-webgl/**/*.md
+!docs/unity-decompression-fallback-acceptance.md
+
 # Reviewed Quadlet adoption policy
 !server/quadlet/ADOPTION.md
 !server/quadlet/COMPATIBILITY.md
+
+# Keep personal notes/instructions private even inside shared document paths.
+*.local.md
+*.private.md
+docs/**/private/
+docs/**/personal/
+AGENTS.md
+CLAUDE.md
+# New, reviewed team instructions only; the existing root AGENTS.md stays private.
+!/apps/api/AGENTS.md

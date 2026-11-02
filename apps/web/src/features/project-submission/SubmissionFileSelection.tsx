@@ -1,17 +1,12 @@
 import { StudioFileHeading } from '../../components/project/editor/StudioFileHeading';
 import { studioFileHint } from '../../components/project/editor/studioFileHint';
-import { ProjectFileLimits } from '../../components/project/editor/ProjectFileLimits';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useState } from 'react';
 import { ProjectPosterPreview } from '../../components/project/editor/ProjectPosterPreview';
 import { ProjectUploadDropZone } from '../../components/project/editor/ProjectUploadDropZone';
-import {
-	classifyProjectFile,
-	uploadKindLabels,
-	type ProjectUploadKind,
-} from '../../lib/upload/project-files';
-import type { ClientUploadLimits, MaterialUploadLimits } from '../../lib/upload-limits';
+import { classifyProjectFile } from '../../lib/upload/project-files';
+import type { ClientUploadLimits } from '../../lib/upload-limits';
 import type { SubmissionFilesState } from './useSubmissionFiles';
-import { SubmissionFilesHelp, SubmissionPosterHelp } from './SubmissionUploadHelp';
+import { SubmissionPosterHelp } from './SubmissionUploadHelp';
 
 export function SubmissionPosterSelection({
 	files,
@@ -74,118 +69,6 @@ export function SubmissionPosterSelection({
 			>
 				{!inlineErrors && <ProjectPosterPreview title={title} localFile={files.posterFile} />}
 			</ProjectUploadDropZone>
-		</fieldset>
-	);
-}
-
-export function SubmissionMixedFilesSelection({
-	files,
-	enabled,
-	onPendingZipChange,
-	limits,
-	materialLimits,
-	webglUploadHint,
-}: {
-	files: SubmissionFilesState;
-	enabled: boolean;
-	onPendingZipChange: (count: number) => void;
-	limits: ClientUploadLimits;
-	materialLimits?: MaterialUploadLimits;
-	webglUploadHint: string;
-}) {
-	const [zipFiles, setZipFiles] = useState<{ id: number; file: File }[]>([]);
-	const nextId = useRef(0);
-	useEffect(() => {
-		onPendingZipChange(zipFiles.length);
-	}, [onPendingZipChange, zipFiles.length]);
-	const selected: { kind: ProjectUploadKind; file: File }[] = [
-		...(files.gameFile ? [{ kind: 'GAME' as const, file: files.gameFile }] : []),
-		...(files.webglFile ? [{ kind: 'WEBGL' as const, file: files.webglFile }] : []),
-		...files.imageFiles.map((file) => ({ kind: 'IMAGE' as const, file })),
-		...files.videoFiles.map((file) => ({ kind: 'VIDEO' as const, file })),
-		...files.documentFiles.map((file) => ({ kind: 'DOCUMENT' as const, file })),
-		...files.attachmentFiles.map((file) => ({ kind: 'ATTACHMENT' as const, file })),
-	];
-	return (
-		<fieldset className="form-section submission-file-fieldset">
-			<legend className="submission-file-heading">
-				<span>게임·미디어·자료</span>
-				<SubmissionFilesHelp webglUploadHint={webglUploadHint} />
-			</legend>
-			<ProjectUploadDropZone
-				zone="files"
-				enabled={enabled}
-				hint="이미지·동영상·문서·첨부자료를 선택하세요. ZIP 파일은 게임·WebGL·첨부자료 중 용도를 선택하세요."
-				onFiles={(chosen) => {
-					const typed: { kind: Exclude<ProjectUploadKind, 'POSTER'>; file: File }[] = [];
-					const zips: File[] = [];
-					for (const file of chosen) {
-						const kind = classifyProjectFile(file, 'files');
-						if (kind === 'ZIP') zips.push(file);
-						else if (kind && kind !== 'POSTER') typed.push({ kind, file });
-					}
-					if (typed.length > 0 && !files.addFiles(typed)) return;
-					setZipFiles((previous) => [...previous, ...zips.map((file) => ({ id: ++nextId.current, file }))]);
-				}}
-				footer={
-					<>
-						{(selected.length > 0 || zipFiles.length > 0) && (
-							<ul className="project-upload-queue" aria-label="선택한 파일">
-								{selected.map(({ kind, file }, index) => (
-									<li key={`${kind}:${index}`}>
-										<p>
-											<strong>{file.name}</strong> · {uploadKindLabels[kind]}
-										</p>
-										<button
-											type="button"
-											className="btn btn--secondary btn--small"
-											disabled={!enabled}
-											onClick={() => files.removeFile(kind, file)}
-										>
-											선택 취소
-										</button>
-									</li>
-								))}
-								{zipFiles.map(({ id, file }) => (
-									<li key={`zip:${id}`}>
-										<p>
-											<strong>{file.name}</strong> · ZIP 용도 선택 대기
-										</p>
-										<div className="project-upload-queue__choices">
-											{(['GAME', 'WEBGL', 'ATTACHMENT'] as const).map((kind) => (
-												<button
-													key={kind}
-													type="button"
-													className="btn btn--secondary btn--small"
-													disabled={!enabled}
-													onClick={() => {
-														if (files.addFiles([{ kind, file }]))
-															setZipFiles((previous) => previous.filter((entry) => entry.id !== id));
-													}}
-												>
-													{uploadKindLabels[kind]}
-												</button>
-											))}
-										</div>
-										<button
-											type="button"
-											className="btn btn--secondary btn--small"
-											disabled={!enabled}
-											onClick={() => setZipFiles((previous) => previous.filter((entry) => entry.id !== id))}
-										>
-											선택 취소
-										</button>
-									</li>
-								))}
-							</ul>
-						)}
-						{zipFiles.length > 0 && (
-							<p className="field-hint">ZIP 용도를 선택하거나 선택을 취소한 뒤 등록·제출하세요.</p>
-						)}
-						<ProjectFileLimits limits={limits} materialLimits={materialLimits} />
-					</>
-				}
-			/>
 		</fieldset>
 	);
 }

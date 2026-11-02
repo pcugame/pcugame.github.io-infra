@@ -58,9 +58,23 @@ import { Button, FormSection, TextField } from '../../components/ui';
   Follow the existing feature class names and BEM modifiers.
 - `src/styles/index.css` orders foundation, layout, shared components, then
   features. New feature files must be imported there. Scope new rules under a
-  feature class; avoid global `label`, `input`, `button`, or heading overrides.
-- The global reset removes default margins and padding. Content sections need
-  explicit spacing and heading/list styles; semantic HTML alone supplies none.
+  feature class; keep global control baselines in shared component CSS and avoid
+  feature-level global `label`, `input`, `button`, or heading overrides.
+- Shared CSS now supplies neutral styles for ordinary native inputs, textareas,
+  selects, files, and buttons even without classes or form ancestors. These
+  `:where()` selectors have zero specificity; explicit UI/feature classes win.
+  Keep using the primitives above for labels, hints, errors, and semantic action
+  variants. The baseline does not infer layout or whether an action is dangerous.
+- Checkbox, radio, range, color, hidden, and input-button types are excluded from
+  text-field geometry. Put `data-ui="unstyled"` on a custom control or subtree to
+  opt out of native baselines; reset, theme tokens, and explicit classes still apply.
+  Custom controls must define all geometry/background properties they need.
+- The global reset removes default margins and padding. Use `.ui-stack` for
+  vertical groups (`--ui-stack-gap` customizes the gap), `.ui-panel` for a padded
+  themed panel, and `.ui-prose` for headings, paragraphs, and lists in content
+  sections. Wrap wide tables in `.ui-table-scroll`. These are opt-in structures,
+  not automatic global margins. `.prose` remains the existing preformatted project
+  description style and is distinct from `.ui-prose`.
 - Reuse tokens in `foundation/tokens.css`, including theme colors. Desktop root
   font size is 125% (normally 20px/rem); at `max-width: 50em` it is 100% (normally
   16px/rem). Media-query em boundaries use the browser's initial font size.
@@ -84,14 +98,19 @@ import { Button, FormSection, TextField } from '../../components/ui';
 - Check the actual screen at desktop and mobile widths in light and dark themes:
   spacing, text contrast, native select arrows, choice labels, focus, disabled and
   validation states, and horizontal overflow. DOM-only tests cannot verify CSS.
-- The optional `scripts/check-ui-styles.mjs` browser probe checks shared form CSS
-  without an API. Run against the local Vite mock server using external Playwright
-  tooling, as described in that script. Do not add a production preview route or
-  perform production writes for visual verification.
+- `scripts/check-ui-styles.mjs` checks classless controls, explicit overrides,
+  keyboard focus, disabled fieldsets, forced colors, and all route families at
+  desktop/mobile widths in both themes. Run a local Vite mock server on port 5178
+  and use external Playwright tooling, as described in that script. Set
+  `UI_ARTIFACT_DIR` to save screenshots and the route report. The script resets
+  only its isolated browser context's Mock data. It rejects non-local URLs.
+  Screenshots still require visual review; DOM-only checks cannot certify layout.
+  Dark CSS is checked by explicitly setting the theme attribute because the app's
+  current theme hook forces light mode.
 
-- `scripts/check-select-controls.mjs` verifies picker rendering, native keyboard
-  selection, required validation, FormData, reset, disabled fieldsets, listboxes,
-  and forced-colors mode. Use `EXPECT_ENHANCEMENT=1` for a supporting browser and
-  `EXPECT_ENHANCEMENT=0` for an actually unsupported engine (for example Firefox 141).
-  It accepts the same external Playwright and browser-path settings as the CSS probe.
-  See [customizable select progressive enhancement](https://developer.mozilla.org/en-US/docs/Learn_web_development/Extensions/Forms/Customizable_select).
+- Keep native select enhancement guarded by feature detection. Browser checks in
+  this repository cover basic native selection and forced colors; a dedicated
+  enhanced-picker compatibility suite is not currently present.
+
+See [the shared UI audit](../../../../../docs/architecture/ui-style-audit.md) for
+source inventory, route coverage, and verification limits.

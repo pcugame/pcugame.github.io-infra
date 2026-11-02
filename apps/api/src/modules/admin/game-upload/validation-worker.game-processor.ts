@@ -32,6 +32,7 @@ export async function materializeAndValidateGameSource(input: {
 	physicalByteLimit: number;
 	signal?: AbortSignal;
 	onBytes?(bytes: number): void;
+	inspect?(archivePath: string, summary: Awaited<ReturnType<typeof validateBoundedZipFile>>): Promise<void>;
 	zipPolicy?: Omit<BoundedZipValidationOptions, 'profile' | 'signal'>;
 }): Promise<Awaited<ReturnType<typeof validateBoundedZipFile>>> {
 	const root = resolve(input.tempRoot);
@@ -49,12 +50,14 @@ export async function materializeAndValidateGameSource(input: {
 			signal: input.signal,
 			onBytes: input.onBytes,
 		});
-		return await validateBoundedZipFile(archivePath, {
+		const summary = await validateBoundedZipFile(archivePath, {
 			profile: 'GAME',
 			signal: input.signal,
 			maxArchiveBytes: input.physicalByteLimit,
 			...input.zipPolicy,
 		});
+		await input.inspect?.(archivePath, summary);
+		return summary;
 	} finally {
 		// Metadata checks can fail before pipeline takes ownership of this stream.
 		destination.destroy();

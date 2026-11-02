@@ -9,6 +9,7 @@ export type DirectAssetUploadOwner =
 	| { type: 'EXHIBITION'; id: number };
 
 export interface AssetUploadSessionRecord {
+	buildReviews?: Array<{ id: string; reason: string | null; decision: string; inspection: unknown }>;
 	voteId?: string | null;
 	id: string;
 	projectId: number | null;
@@ -79,7 +80,7 @@ export interface DirectPartSigner {
 }
 
 export interface AssetUploadRepository {
-	createAllocating(input: Omit<AssetUploadSessionRecord, 'state' | 'uploadId' | 'completionLeaseToken' | 'completionLeaseUntil' | 'completionResult' | 'validationLeaseToken' | 'validationLeaseUntil' | 'validationAttemptCount' | 'expectedTargetAssetId' | 'expectedTargetAssetUpdatedAt' | 'resultAssetId' | 'resultRepresentationId' | 'submissionItemId' | 'project' | 'exhibition'> & {
+	createAllocating(input: Omit<AssetUploadSessionRecord, 'buildReviews' | 'state' | 'uploadId' | 'completionLeaseToken' | 'completionLeaseUntil' | 'completionResult' | 'validationLeaseToken' | 'validationLeaseUntil' | 'validationAttemptCount' | 'expectedTargetAssetId' | 'expectedTargetAssetUpdatedAt' | 'resultAssetId' | 'resultRepresentationId' | 'submissionItemId' | 'project' | 'exhibition'> & {
 		submissionItemId?: string | null;
 		submissionClientToken?: string;
 		/** Request actor role for the transaction-local project policy recheck. */

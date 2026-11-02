@@ -38,7 +38,7 @@ export function createScriptedBackendPersistence(
 			findProjectsForUser: async () => ({ items: [], totalItems: 0 }),
 			findProjectById: async () => null,
 			isMemberOfProject: async () => null,
-			updateProject: async () => unscripted('project.updateProject'),
+			runProjectUpdate: async () => unscripted('project.runProjectUpdate'),
 			deleteProjectReturningAssets: async () => unscripted('project.deleteProjectReturningAssets'),
 			clearWebglDeployment: async () => unscripted('project.clearWebglDeployment'),
 			findAssetById: async () => null,

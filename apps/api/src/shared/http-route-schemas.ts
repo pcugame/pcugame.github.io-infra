@@ -1,3 +1,7 @@
+import { AwardStateSchema, AwardEditSchema, AwardOrderSchema, AwardRecipientsSchema, AwardVersionSchema } from '@pcu/contracts';
+import { BuildReviewSchema, BuildReviewSummarySchema, BuildReviewDecisionSchema } from '@pcu/contracts';
+import { VideoRetryResponseSchema } from '@pcu/contracts';
+import { AllowWebglNetworkBatchSchema, CreateWebglNetworkBatchSchema, WebglNetworkBatchResponseSchema } from '@pcu/contracts';
 import { WebglDiagnosticDataSchema } from '@pcu/contracts';
 import * as Voting from '@pcu/contracts';
 import { ExternalLinkSchema, ExternalLinkServiceSchema } from '@pcu/contracts';
@@ -147,9 +151,9 @@ const DirectOwnerSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal('EXHIBITION'), id: z.number().int().positive() }),
 ]);
 const DirectSessionResponseSchema = z.object({ sessionId: z.string(), owner: DirectOwnerSchema, generation: z.number().int().positive(), partSizeBytes: z.number().int().positive(), totalParts: z.number().int().positive(), expiresAt: z.string(), sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string(), sourceIdentityBlockSizeBytes: z.literal(1_048_576) });
-const DirectStatusResponseSchema = z.object({ sessionId: z.string(), projectId: z.number().int().positive().optional(), exhibitionId: z.number().int().positive().optional(), owner: DirectOwnerSchema, kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER', 'DOCUMENT', 'ATTACHMENT']), state: z.string(), generation: z.number().int().positive(), originalName: z.string(), totalBytes: z.number().int().positive(), partSizeBytes: z.number().int().positive(), totalParts: z.number().int().positive(), expiresAt: z.string(), sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/), parts: z.array(z.object({ partNumber: z.number().int().positive(), etag: z.string(), sizeBytes: z.number().int().positive() })) });
+const DirectStatusResponseSchema = z.object({ review: z.object({ id: z.string(), decision: z.string(), reason: z.string() }).optional(), sessionId: z.string(), projectId: z.number().int().positive().optional(), exhibitionId: z.number().int().positive().optional(), owner: DirectOwnerSchema, kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER', 'DOCUMENT', 'ATTACHMENT']), state: z.string(), generation: z.number().int().positive(), originalName: z.string(), totalBytes: z.number().int().positive(), partSizeBytes: z.number().int().positive(), totalParts: z.number().int().positive(), expiresAt: z.string(), sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/), parts: z.array(z.object({ partNumber: z.number().int().positive(), etag: z.string(), sizeBytes: z.number().int().positive() })) });
 const DirectPartUrlsResponseSchema = z.object({ generation: z.number().int().positive(), expiresAt: z.string(), parts: z.array(z.object({ partNumber: z.number().int().positive(), url: z.string().url(), requiredHeaders: z.record(z.string(), z.string()) })) });
-const DirectCompletionResponseSchema = z.object({ status: z.enum(['VERIFYING', 'READY']), sessionId: z.string(), generation: z.number().int().positive(), sizeBytes: z.number().int().positive() });
+const DirectCompletionResponseSchema = z.object({ status: z.enum(['AWAITING_REVIEW', 'VERIFYING', 'READY']), sessionId: z.string(), generation: z.number().int().positive(), sizeBytes: z.number().int().positive() });
 
 const ExportBodySchema = z.union([
 	z.object({
@@ -240,6 +244,9 @@ const changeRouteContracts: RouteRuntimeContract[] = [];
 const networkRouteContracts: RouteRuntimeContract[] = [
  contract({ method: 'GET', url: '/api/me/projects/:id/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(WebglNetworkRequestListSchema) }),
  contract({ method: 'POST', url: '/api/me/projects/:id/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: CreateWebglNetworkRequestSchema, response: jsonResponse(WebglNetworkRequestSchema, 201) }),
+ contract({ method: 'POST', url: '/api/me/projects/:id/webgl-network-requests/batch', family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: CreateWebglNetworkBatchSchema, response: jsonResponse(WebglNetworkBatchResponseSchema, 201) }),
+ contract({ method: 'POST', url: '/api/admin/projects/:id/webgl-network-requests/allow', family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: AllowWebglNetworkBatchSchema, response: jsonResponse(WebglNetworkBatchResponseSchema, 201) }),
+ contract({ method: 'GET', url: '/api/admin/projects/:id/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(WebglNetworkRequestListSchema) }),
  contract({ method: 'GET', url: '/api/admin/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'none', responseBoundary: 'json', params: EmptyObjectSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(WebglNetworkRequestListSchema) }),
  ...(['approve', 'reject', 'revoke'] as const).map(action => contract({ method: 'POST', url: `/api/admin/webgl-network-requests/:id/${action}`, family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: ChangeIdParamsSchema, querystring: EmptyObjectSchema, body: ReviewWebglNetworkRequestSchema, response: jsonResponse(WebglNetworkRequestSchema) })),
 ];
@@ -470,6 +477,14 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 	contract({ method: 'GET', url: '/api/me/projects/:id/submission', family: 'me-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
 	contract({ method: 'POST', url: '/api/me/projects/:id/submission/finalize', family: 'me-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
 	contract({ method: 'DELETE', url: '/api/me/projects/:id/submission', family: 'me-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
+	contract({ method: 'GET', url: '/api/admin/exhibitions/:id/awards', family: 'awards', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(AwardStateSchema) }),
+	contract({ method: 'POST', url: '/api/admin/exhibitions/:id/awards', family: 'awards', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: AwardEditSchema, response: jsonResponse(AwardStateSchema) }),
+	contract({ method: 'PATCH', url: '/api/admin/exhibitions/:id/awards/:awardId', family: 'awards', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema.extend({ awardId: z.coerce.number().int().positive() }), querystring: EmptyObjectSchema, body: AwardEditSchema, response: jsonResponse(AwardStateSchema) }),
+	contract({ method: 'DELETE', url: '/api/admin/exhibitions/:id/awards/:awardId', family: 'awards', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema.extend({ awardId: z.coerce.number().int().positive() }), querystring: EmptyObjectSchema, body: AwardVersionSchema, response: jsonResponse(AwardStateSchema) }),
+	contract({ method: 'PUT', url: '/api/admin/exhibitions/:id/awards/order', family: 'awards', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: AwardOrderSchema, response: jsonResponse(AwardStateSchema) }),
+	contract({ method: 'PATCH', url: '/api/admin/exhibitions/:id/awards/:awardId/recipients', family: 'awards', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema.extend({ awardId: z.coerce.number().int().positive() }), querystring: EmptyObjectSchema, body: AwardRecipientsSchema, response: jsonResponse(AwardStateSchema) }),
+	contract({ method: 'PUT', url: '/api/admin/projects/:id/awards', family: 'awards', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: AwardOrderSchema, response: jsonResponse(AwardStateSchema) }),
+	contract({ method: 'DELETE', url: '/api/admin/exhibitions/:id/award-images/:assetId', family: 'awards', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema.extend({ assetId: z.coerce.number().int().positive() }), querystring: EmptyObjectSchema, body: AwardVersionSchema, response: jsonResponse(AwardStateSchema) }),
 	contract({
 		method: 'GET',
 		url: '/api/admin/exhibitions',
@@ -606,6 +621,11 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 	contract({ method: 'GET', url: '/api/admin/project-submissions/audit', family: 'admin-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: EmptyObjectSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionAuditResponseSchema) }),
 	contract({ method: 'POST', url: '/api/admin/projects/:id/submission/finalize', family: 'admin-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
 	contract({ method: 'DELETE', url: '/api/admin/projects/:id/submission', family: 'admin-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
+	contract({ method: 'POST', url: '/api/admin/projects/:id/videos/:assetId/retry', family: 'admin-projects',
+		bodyBoundary: 'none', responseBoundary: 'json',
+		params: z.object({ id: IdParamsSchema.shape.id, assetId: IdParamsSchema.shape.id }),
+		querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(VideoRetryResponseSchema, 202),
+	}),
 	contract({
 		method: 'PUT',
 		url: '/api/admin/projects/:id/videos/order',
@@ -708,6 +728,12 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
 		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
 	}),
+	contract({ method: 'GET', url: '/api/admin/build-reviews', family: 'build-review', bodyBoundary: 'none', responseBoundary: 'json',
+		params: EmptyObjectSchema, querystring: z.object({ projectId: z.coerce.number().int().positive().optional() }), body: NoBodySchema, response: jsonResponse(z.array(BuildReviewSummarySchema)) }),
+	contract({ method: 'GET', url: '/api/admin/build-reviews/:id', family: 'build-review', bodyBoundary: 'none', responseBoundary: 'json',
+		params: z.object({ id: z.string().uuid() }), querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(BuildReviewSchema) }),
+	contract({ method: 'POST', url: '/api/admin/build-reviews/:id/decision', family: 'build-review', bodyBoundary: 'json', responseBoundary: 'json',
+		params: z.object({ id: z.string().uuid() }), querystring: EmptyObjectSchema, body: BuildReviewDecisionSchema, response: jsonResponse(BuildReviewSchema) }),
 	contract({
 		method: 'POST', url: '/api/admin/projects/:id/direct-image-upload-sessions', family: 'direct-asset-upload',
 		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
@@ -715,6 +741,11 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 	}),
 	contract({
 		method: 'POST', url: '/api/admin/projects/:id/direct-poster-upload-sessions', family: 'direct-asset-upload',
+		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
+		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
+	}),
+	contract({
+		method: 'POST', url: '/api/admin/exhibitions/:id/direct-image-upload-sessions', family: 'direct-asset-upload',
 		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
 		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
 	}),

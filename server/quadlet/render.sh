@@ -8,7 +8,7 @@ renderer_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 python_bin="$(command -v python3)"
 env_bin="$(command -v env)"
 settings=()
-for name in API_IMAGE DEPLOY_DIR API_BIND_HOST API_PORT NAS_EXPORT_HOST_PATH NAS_EXPORT_PATH S3_TLS_CA_HOST_PATH APP_RUNTIME_ENV_FILE API_RUNTIME_ENV_FILE POSTGRES_RUNTIME_ENV_FILE; do
+for name in API_SLOTS API_IMAGE DEPLOY_DIR API_BIND_HOST API_PORT NAS_EXPORT_HOST_PATH NAS_EXPORT_PATH S3_TLS_CA_HOST_PATH APP_RUNTIME_ENV_FILE API_RUNTIME_ENV_FILE POSTGRES_RUNTIME_ENV_FILE; do
   if [[ -v "$name" ]]; then settings+=("$name=${!name}"); fi
 done
 exec "$env_bin" -i "${settings[@]}" "$python_bin" "$renderer_dir/render.py" "$1"

@@ -1,3 +1,5 @@
+import { createPlaybackRepository } from './playback.repository.js';
+import { createPlaybackWorker } from './playback.worker.js';
 import type { ObjectStorage, AppLogger, IdGenerator } from '../../application/ports.js';
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { createBoundedCommandRunner } from './command-runner.js';
@@ -54,10 +56,11 @@ export function createVideoWorkerGraph(input: {
 	tempRoot: string;
 	tempDiskBudgetBytes: number;
 	limits?: VideoLimits;
+	renditionsEnabled?: boolean;
 	clock?: { now(): Date };
 }) {
 	const limits = input.limits ?? DEFAULT_VIDEO_LIMITS;
-	const repository = createVideoWorkerRepository(input.prisma);
+	const repository = createVideoWorkerRepository(input.prisma, input.renditionsEnabled);
 	const processor = createVideoProcessor({
 		repository,
 		storage: createVideoWorkerStorage(input.storage),
@@ -69,15 +72,23 @@ export function createVideoWorkerGraph(input: {
 		clock: input.clock ?? { now: () => new Date() },
 		logger: input.logger,
 	});
-	return {
-		repository,
+
+    const originalWorker = createVideoProcessingWorker({ repository, processor, ids: input.ids, logger: input.logger, claimLimit: 1 });
+    const playbackWorker = createPlaybackWorker({ repository: createPlaybackRepository(input.prisma),
+        storage: createVideoWorkerStorage(input.storage), operations: createFfmpegVideoOperations(createBoundedCommandRunner(), limits),
+        limits, tempRoot: input.tempRoot, tempDiskBudgetBytes: input.tempDiskBudgetBytes, logger: input.logger });
+    return {
+        repository,
 		processor,
-		worker: createVideoProcessingWorker({
-			repository,
-			processor,
-			ids: input.ids,
-			logger: input.logger,
-		}),
+        worker: {
+            async runPass(signal?: AbortSignal) {
+                const uploads = await originalWorker.runPass(signal);
+                if (!input.renditionsEnabled || signal?.aborted) return uploads;
+                const jobs = await playbackWorker.runPass(signal);
+                return { claimed: uploads.claimed + jobs.claimed, ready: uploads.ready + jobs.ready,
+                    rejected: uploads.rejected + jobs.rejected, retried: uploads.retried + jobs.retried };
+            },
+        },
 		cleanupStaleWorkspaces: (cutoff: Date) => cleanupStaleVideoWorkspaces(input.tempRoot, cutoff),
 	};
 }

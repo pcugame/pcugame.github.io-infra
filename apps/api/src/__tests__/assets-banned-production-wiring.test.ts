@@ -1,3 +1,9 @@
+import cookie from '@fastify/cookie';
+import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
+import { registerAuth } from '../plugins/auth.js';
+import { registerRouteSchemas } from '../shared/http-route-schemas.js';
+import { createFileAccessController } from '../modules/file-access/controller.js';
+import type { FileAccessRepository } from '../modules/file-access/repository.js';
 import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -182,11 +188,13 @@ async function routeApp(plugin: FastifyPluginAsync, prefix: string, asAdmin = fa
 	return app;
 }
 
-function graphHarness(initialBans: string[] = [], maxHits = 30) {
+function graphHarness(initialBans: string[] = [], maxHits = 30, autoIpBanEnabled = false) {
 	const ports = portHarness(initialBans);
 	const storage = storageHarness();
 	const scheduler = schedulerHarness();
 	const limiter = createProtectedDownloadLimiter({
+		autoIpBanEnabled,
+		maxIpHits: 2,
 		maxHits,
 		clock: { now: () => new Date('2026-07-22T00:00:00.000Z') },
 		scheduler: scheduler.scheduler,
@@ -414,4 +422,150 @@ describe('assets/banned-IP production vertical slice', () => {
 		expect(recovered.protectedDownloads.isBanned('203.0.113.60')).toBe(true);
 		await recovered.close();
 	});
+});
+
+// Real services, startup gate and limiter; only persistence and storage are scripted.
+async function fileGatewayHarness(options: { warm?: boolean; visibility?: 'PUBLIC' | 'PRIVATE' } = {}) {
+ const h = graphHarness([], 1, true);
+ const config = { ...testConfig, API_PUBLIC_URL: 'http://api.test', PUBLIC_ASSET_ORIGIN: 'http://public.test',
+  S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: 'http://protected.test', S3_BUCKET_PROTECTED: 'pcu-protected',
+  S3_BUCKET_PUBLIC: 'pcu-public', SESSION_COOKIE_NAME: 'sid', FILE_GATEWAY_SECRET: 'gateway-test-secret' };
+ const asset = { ...protectedAsset(), project: { ...protectedAsset().project,
+  visibility: options.visibility ?? 'PUBLIC', exhibition: { visibility: 'PUBLIC' }, currentWebglDeploymentId: null } };
+ h.calls.assetFindFirst.mockResolvedValue(asset);
+ const actor = { id: 1, role: 'USER' as const, googleSub: 'owner', email: 'owner@test.invalid', name: 'Owner' };
+ const time = new Date('2026-07-22T00:00:00.000Z');
+ const session = { id: 'owner', user: actor, lastSeenAt: time, expiresAt: new Date(time.getTime() + 3600000) };
+ const tokens = new Map<string, { id: string; sessionId: string | null; bucket: string; objectKey: string; deploymentId: string | null; expiresAt: Date }>();
+ const representation = { ...asset.representations[0]!, asset };
+ const repository = {
+  asset: vi.fn(async () => asset),
+  findRepresentation: vi.fn(async (bucket: string, key: string) => key === representation.objectKey && ['pcu-protected', 'pcu-public'].includes(bucket) ? representation : null),
+  findDeployment: vi.fn(async () => null), deployment: vi.fn(async () => null),
+  session: vi.fn(async (id: string) => id === 'owner' ? session : null),
+  token: vi.fn(async (id: string) => tokens.get(id) ?? null),
+  purgeExpired: vi.fn(async () => undefined), reusable: vi.fn(async () => null), activeCount: vi.fn(async () => tokens.size),
+  createToken: vi.fn(async (token: Parameters<FileAccessRepository['createToken']>[0]) => { tokens.set(token.id, token); return token; }),
+  renew: vi.fn(async (id: string, expiresAt: Date) => { const token = tokens.get(id)!; token.expiresAt = expiresAt; return token; }),
+ } as unknown as FileAccessRepository;
+ const presign = vi.fn(async (bucket: string, key: string) => `http://protected.test/${bucket}/${key}?signature=test`);
+ const app = Fastify({ trustProxy: false });
+ apps.push(app);
+ app.addHook('onClose', async () => h.limiter.close());
+ app.setValidatorCompiler(validatorCompiler);
+ app.setSerializerCompiler(serializerCompiler);
+ registerRouteSchemas(app);
+ app.setErrorHandler((error, _request, reply) => {
+  const failure = error as { statusCode?: number; code?: string; message: string };
+  reply.status(failure.statusCode ?? 500).send({ ok: false, error: { code: failure.code ?? 'INTERNAL_ERROR', message: failure.message } });
+ });
+ await app.register(cookie);
+ await registerAuth(app, { config, clock: { now: () => time }, logger: testLogger,
+  sessions: { find: repository.session, touch: vi.fn(), delete: vi.fn() } });
+ await app.register(h.graph.assetsController, { prefix: '/api' });
+ await app.register(createFileAccessController(repository, config, h.graph.assertDownloadIpAllowed,
+  () => time, presign, h.graph.authorizeDownload), { prefix: '/api' });
+ if (options.warm !== false) await h.graph.warmup.start();
+ const ip = '203.0.113.42';
+ const legacy = '/pcu-protected/' + representation.objectKey;
+ const normal = (headers: Record<string, string> = {}) => app.inject({ url: '/api/assets/1/download', remoteAddress: ip, headers });
+ const gateway = (uri = legacy, headers: Record<string, string> = {}, address = ip) => app.inject({
+  url: '/api/internal/file-access', remoteAddress: address, headers: {
+   'x-pcu-gateway-secret': config.FILE_GATEWAY_SECRET, 'x-pcu-file-kind': 'protected', 'x-pcu-file-uri': uri, ...headers,
+  },
+ });
+ const issue = (authenticated = false) => app.inject({ method: 'POST', url: '/api/file-access', remoteAddress: ip,
+  headers: authenticated ? { cookie: 'sid=owner', origin: testConfig.CORS_ALLOWED_ORIGINS[0]! } : {},
+  payload: { url: 'http://protected.test' + legacy } });
+ return { ...h, app, config, repository, presign, ip, legacy, normal, gateway, issue };
+}
+
+describe('gateway download IP policy with the production assets/banned-IP graph', () => {
+ it('denies the same banned public file through normal and legacy requests before signing', async () => {
+  const h = await fileGatewayHarness();
+  h.limiter.addBan('203.0.113.0/24');
+  for (const response of [await h.normal(), await h.gateway()]) {
+   expect(response.statusCode).toBe(403);
+   expect(response.json().error.code).toBe('IP_BANNED');
+   expect(response.headers['x-pcu-object-path']).toBeUndefined();
+  }
+  expect(h.calls.presign).not.toHaveBeenCalled();
+  expect(h.presign).not.toHaveBeenCalled();
+  expect(h.limiter._bucketSize()).toBe(0);
+  expect((await h.gateway(h.legacy, {}, '198.51.100.2')).statusCode).toBe(204);
+ });
+
+ it('keeps GET, HEAD, Range and retries out of grant accounting while preserving upstream contracts', async () => {
+  const h = await fileGatewayHarness();
+  for (let index = 0; index < 5; index++) {
+   const method = index % 2 ? 'HEAD' : 'GET';
+   const response = await h.gateway(h.legacy, { 'x-pcu-file-method': method, range: 'bytes=0-99' });
+   expect(response.statusCode).toBe(204);
+   expect(response.headers['x-pcu-object-path']).toBe(h.legacy + '?signature=test');
+   expect(response.headers['x-pcu-upstream-host']).toBe('protected.test');
+   expect(response.headers['cache-control']).toBe('private, no-store');
+   expect(h.presign).toHaveBeenLastCalledWith('pcu-protected', 'assets/1/original/g1.zip',
+    { method, responseContentDisposition: expect.stringContaining('attachment;') });
+  }
+  expect(h.limiter._bucketSize()).toBe(0);
+  expect(h.limiter._ipBucketSize()).toBe(0);
+  expect((await h.normal()).statusCode).toBe(302);
+  expect((await h.normal()).statusCode).toBe(429);
+  expect((await h.gateway()).statusCode).toBe(204);
+  expect(h.calls.bannedUpsert).not.toHaveBeenCalled();
+ });
+
+ it('rechecks a ban added after token issuance and observes removal without consuming another grant', async () => {
+  const h = await fileGatewayHarness();
+  const issued = await h.issue();
+  expect(issued.statusCode).toBe(200);
+  const grant = issued.json().data;
+  expect(grant.token).toMatch(/^[a-f0-9]{64}$/);
+  expect(grant.url).toBe('http://protected.test/file/' + grant.token);
+  const uri = new URL(grant.url).pathname;
+  expect((await h.gateway(uri)).statusCode).toBe(204);
+  h.limiter.addBan(h.ip);
+  h.presign.mockClear();
+  expect((await h.gateway(uri)).json().error.code).toBe('IP_BANNED');
+  expect(h.presign).not.toHaveBeenCalled();
+  h.limiter.removeBan(h.ip);
+  expect((await h.gateway(uri)).statusCode).toBe(204);
+  expect((await h.normal()).statusCode).toBe(429);
+ });
+
+ it('keeps private object authorization ahead of IP enforcement and accepts an owner capability', async () => {
+  const h = await fileGatewayHarness({ visibility: 'PRIVATE' });
+  expect((await h.normal()).statusCode).toBe(401);
+  expect((await h.gateway()).statusCode).toBe(403);
+  expect((await h.issue()).statusCode).toBe(403);
+  const issued = await h.issue(true);
+  expect(issued.statusCode).toBe(200);
+  const uri = new URL(issued.json().data.url).pathname;
+  expect((await h.gateway(uri)).statusCode).toBe(204);
+  h.limiter.addBan(h.ip);
+  h.presign.mockClear();
+  expect((await h.gateway()).json().error.code).toBe('FORBIDDEN');
+  expect((await h.gateway(uri)).json().error.code).toBe('IP_BANNED');
+  expect(h.presign).not.toHaveBeenCalled();
+ });
+
+ it('fails closed before warmup but authenticates the gateway before checking IPs', async () => {
+  const h = await fileGatewayHarness({ warm: false });
+  expect((await h.gateway(h.legacy, { 'x-pcu-gateway-secret': 'wrong' })).statusCode).toBe(403);
+  expect((await h.gateway()).json().error.code).toBe('BANNED_IP_CACHE_UNAVAILABLE');
+  expect((await h.normal()).statusCode).toBe(503);
+  expect(h.presign).not.toHaveBeenCalled();
+  await h.graph.warmup.start();
+  expect((await h.gateway()).statusCode).toBe(204);
+ });
+
+ it('uses request.ip and leaves public-origin delivery outside protected download limits', async () => {
+  const h = await fileGatewayHarness();
+  h.limiter.addBan(h.ip);
+  expect((await h.gateway(h.legacy, { 'x-forwarded-for': '198.51.100.2', 'x-real-ip': '198.51.100.2' })).json().error.code).toBe('IP_BANNED');
+  expect((await h.gateway(h.legacy, { 'x-forwarded-for': h.ip }, '198.51.100.2')).statusCode).toBe(204);
+  const publicResponse = await h.gateway('/assets/1/original/g1.zip', { 'x-pcu-file-kind': 'public' });
+  expect(publicResponse.statusCode).toBe(204);
+  expect(publicResponse.headers['x-pcu-object-path']).toBe('/assets/1/original/g1.zip');
+ });
 });

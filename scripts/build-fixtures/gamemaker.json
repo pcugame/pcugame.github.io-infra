@@ -1,0 +1,470 @@
+{
+  "engine": "gamemaker",
+  "source": "https://github.com/Verdini/celeste-classic-web",
+  "revision": "31ea1e41efd63910e730136a14c33910ae643fca",
+  "license": "Upstream licenses apply; download for local verification only. Do not redistribute fixtures.",
+  "files": [
+    {
+      "path": "celeste/Celeste Classic.js",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/Celeste%20Classic.js",
+      "size": 1570500,
+      "sha256": "4be3cac3778d4f78576a69849806d800224ea89310ea37e80699e9e02cc82b76"
+    },
+    {
+      "path": "celeste/Celeste Classic_texture_0.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/Celeste%20Classic_texture_0.png",
+      "size": 55928,
+      "sha256": "46393286a48790bbc40d2578677ce579c20a7971029aea98c31cfb53b3a6dbd9"
+    },
+    {
+      "path": "celeste/builtinfonts/FONT_builtin.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/builtinfonts/FONT_builtin.png",
+      "size": 9771,
+      "sha256": "1045123f6e48ad950171f4bbc906a70062f02a1b85adfb56708e681edb013f35"
+    },
+    {
+      "path": "celeste/builtinfonts/FONT_builtin.yy",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/builtinfonts/FONT_builtin.yy",
+      "size": 39386,
+      "sha256": "2a4716aefd2cd9721384be4861b4fab5732d8b707447bad405555262b07de90e"
+    },
+    {
+      "path": "celeste/musArea1.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/musArea1.mp3",
+      "size": 747748,
+      "sha256": "6f50174fbcb68688aac1b95480e81e2aaf948a483f2fedeaf5ff4bda6c5d4b36"
+    },
+    {
+      "path": "celeste/musArea1.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/musArea1.ogg",
+      "size": 604398,
+      "sha256": "225ab7881b94cfa23951f960d997bddaa8b82b3ebcb495cbf6cdb55acfbce887"
+    },
+    {
+      "path": "celeste/musArea2.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/musArea2.mp3",
+      "size": 611911,
+      "sha256": "3d6eab7ff7dc0132a012ab3fabe3158b056f7031bb117d45136cb36c5c1988c2"
+    },
+    {
+      "path": "celeste/musArea2.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/musArea2.ogg",
+      "size": 537957,
+      "sha256": "d3f082ce5f14dc1d5311dbea3676468f28417dcf49224cf986f825866ead9b64"
+    },
+    {
+      "path": "celeste/musArea3.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/musArea3.mp3",
+      "size": 951294,
+      "sha256": "4659374cd04190d2c09ca9e5b512ab5c5dffe74d4c6458fa9e8faa3f408385ce"
+    },
+    {
+      "path": "celeste/musArea3.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/musArea3.ogg",
+      "size": 1016362,
+      "sha256": "c2e4de8d19810bcb5d12ac5886a7c726c38c1ae3813adbace728de3f794052ec"
+    },
+    {
+      "path": "celeste/musTitle.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/musTitle.mp3",
+      "size": 136691,
+      "sha256": "f1de6f4eb325c13f0fc34aa0b5c2573ffbf3a21326d04c78dea4bf99c291000c"
+    },
+    {
+      "path": "celeste/musTitle.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/musTitle.ogg",
+      "size": 120439,
+      "sha256": "4ae16d07dd232a58e29668944a6af3123cf7e636912ba65f9188e5195783176a"
+    },
+    {
+      "path": "celeste/musWind.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/musWind.mp3",
+      "size": 524557,
+      "sha256": "ab26f1c751c8e0ca3b22d2ac40e17b9b879eb930e4229e911fdb01bfc7828fd3"
+    },
+    {
+      "path": "celeste/musWind.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/musWind.ogg",
+      "size": 423406,
+      "sha256": "13be77b049db0970f7afa01fc30ff144a5a6b9c1432f2f2846a89f0688e2cda6"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF1.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF1.png",
+      "size": 301,
+      "sha256": "ed2e5aa62ee8ce13637d7ce7d064bf6fe6869b0e197ca989bfec85f879895d11"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF10.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF10.png",
+      "size": 2761,
+      "sha256": "e7fd6462f01fa6621a2cf567a4c9c22422e3b16a19958f39bd90f56b10ce9529"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF11.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF11.png",
+      "size": 3475,
+      "sha256": "6e3df19b82e07ff18236138ff77c3b211cb0a8d8dc1e0071f641c1ff2bae03d4"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF12.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF12.png",
+      "size": 3526,
+      "sha256": "a4821edb2d01bb18aa3f5ab4bbd40c229ecb252e160b8c42f123a6bf4f000538"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF13.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF13.png",
+      "size": 2470,
+      "sha256": "d45beaceadae53b074ca410e20b838a4f38640f1bebe70e0024b1c8ffb5d67fe"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF14.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF14.png",
+      "size": 3662,
+      "sha256": "d2a42ac85c8dec85005ee2c0557d183430805852070f4f9c2d5c6cc680064852"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF15.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF15.png",
+      "size": 3491,
+      "sha256": "a3562aece7bad69e3e657b315a0e4ed9fb4a76981b4ec4a96e7273b84ce0a1ef"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF2.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF2.png",
+      "size": 266,
+      "sha256": "c92ae7f4a00fe225c63f16e038ad90d4429365df4a1faa1fce45f2a7d00d0772"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF3.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF3.png",
+      "size": 930,
+      "sha256": "1be677c71ff767673a7d2f0f90a4ced9d1cd04b4c93dbab2c5ab7a18ae733a79"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF4.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF4.png",
+      "size": 301,
+      "sha256": "ed2e5aa62ee8ce13637d7ce7d064bf6fe6869b0e197ca989bfec85f879895d11"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF5.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF5.png",
+      "size": 301,
+      "sha256": "bda261b5c3cc50d7395da90f2f54838bc1d2ecae959124621940ab4252a6d9ec"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF6.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF6.png",
+      "size": 1090,
+      "sha256": "69b923bb2c222744fdad06e28ca97a4d0206d70036d9594d7298a6dd060da237"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF7.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF7.png",
+      "size": 1288,
+      "sha256": "064cda06c0af0c896325bfe0cff56f686c6a1a56da5e3c0f27b7a5eb9e27c95d"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF8.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF8.png",
+      "size": 2155,
+      "sha256": "252e030f1c49224018dfcf9f70626dfa4e5c7bc39c6e3fd77b590278a4dd9729"
+    },
+    {
+      "path": "celeste/particles/IDR_GIF9.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/particles/IDR_GIF9.png",
+      "size": 1630,
+      "sha256": "edb29fe3842f978a6b380c295fbff4c384c2e35f9505f0bcd22ee606868a2764"
+    },
+    {
+      "path": "celeste/sndBalloonTouch.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndBalloonTouch.mp3",
+      "size": 13811,
+      "sha256": "c503baa126b17b7e2296de0bd525430735519dd058868704c23dc134502e9887"
+    },
+    {
+      "path": "celeste/sndBalloonTouch.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndBalloonTouch.ogg",
+      "size": 6461,
+      "sha256": "c721e1bc8b1883c24d37e393016de5b9d14e59e1ef0638259833c9a5d1549c39"
+    },
+    {
+      "path": "celeste/sndBigChest.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndBigChest.mp3",
+      "size": 68982,
+      "sha256": "c1c8f5a9ccb9c2278b381310ce9570a4aede6f958bf4861e3210223763e994b6"
+    },
+    {
+      "path": "celeste/sndBigChest.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndBigChest.ogg",
+      "size": 24275,
+      "sha256": "fe4913a0bb8132a785741c295944f20b2d1c0659069f73129766e81fe124c85b"
+    },
+    {
+      "path": "celeste/sndChest.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndChest.mp3",
+      "size": 68982,
+      "sha256": "95284d7bc284d904f362ac5aa0d89d6853625055e69618d0a2cbe797474f4d9e"
+    },
+    {
+      "path": "celeste/sndChest.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndChest.ogg",
+      "size": 7019,
+      "sha256": "91d00b1fdbabfafe3fcaa17badadfcff2cae2b47be859387e06fe4942e3614bc"
+    },
+    {
+      "path": "celeste/sndDash.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndDash.mp3",
+      "size": 9632,
+      "sha256": "b79f9261ef423c500c8133b7bba108b80cf360b8aa79c7f477e3c513372d68b7"
+    },
+    {
+      "path": "celeste/sndDash.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndDash.ogg",
+      "size": 6751,
+      "sha256": "bb0f56c8c4f29cd8e5e6ef74abb6460a9c414fc33d21a61c15a92c8e43be950d"
+    },
+    {
+      "path": "celeste/sndDeath.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndDeath.mp3",
+      "size": 9632,
+      "sha256": "84f57bb32af0e698b37673dd50f990c5b996affc718f24eb1eb884ae6a6ea240"
+    },
+    {
+      "path": "celeste/sndDeath.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndDeath.ogg",
+      "size": 6117,
+      "sha256": "a85c4b31485cf59636a6544edd549d5a437c3cd265324fbf3cf251c23b737c3e"
+    },
+    {
+      "path": "celeste/sndFallFloor.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndFallFloor.mp3",
+      "size": 13811,
+      "sha256": "84efd8538ddf96f0eec5a9b7b054e85011cba806015360c1a544feb9ce624913"
+    },
+    {
+      "path": "celeste/sndFallFloor.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndFallFloor.ogg",
+      "size": 5918,
+      "sha256": "d5c83297755026e24cd5e2cfaa0e07ec1fdc85603595c33517fd9ed69667e489"
+    },
+    {
+      "path": "celeste/sndFalling.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndFalling.mp3",
+      "size": 13811,
+      "sha256": "c48521b3041a08f517317249a84465fd9dfe40da407f944c23211d4ec6056eed"
+    },
+    {
+      "path": "celeste/sndFalling.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndFalling.ogg",
+      "size": 4559,
+      "sha256": "2a848f0bd7fbee528de5ecb17b5e54da2014d8d5db3b822abb7abfeba3bdd9d6"
+    },
+    {
+      "path": "celeste/sndFlag.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndFlag.mp3",
+      "size": 47666,
+      "sha256": "38a99a1255f47eb1e594414b17cb31df1596a6baaac58863308e8a920c2234be"
+    },
+    {
+      "path": "celeste/sndFlag.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndFlag.ogg",
+      "size": 7650,
+      "sha256": "dff9506cd2f763d04e0a2d319c46fe883dfd2aeb95c43955d3cc988654bdff35"
+    },
+    {
+      "path": "celeste/sndFruit.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndFruit.mp3",
+      "size": 17991,
+      "sha256": "3122cff56cf152bc42d27b4a3236492b420019b77b6b9e7e776b4369a6fad086"
+    },
+    {
+      "path": "celeste/sndFruit.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndFruit.ogg",
+      "size": 10834,
+      "sha256": "542c8e95961695c0979f962a5ab1d06ff914cad09ea787feaf00cf7a2c4747c4"
+    },
+    {
+      "path": "celeste/sndFruitFlyAway.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndFruitFlyAway.mp3",
+      "size": 17991,
+      "sha256": "f78aa91780a8fd8f51fd86ca1f3375e4c5f3701a2a99972db3991082654f95d4"
+    },
+    {
+      "path": "celeste/sndFruitFlyAway.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndFruitFlyAway.ogg",
+      "size": 5601,
+      "sha256": "16404b9a34dd4851dbf4d0d22486927270898bed8c59420f50ff24a1bc559549"
+    },
+    {
+      "path": "celeste/sndHitFakeWall.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndHitFakeWall.mp3",
+      "size": 68982,
+      "sha256": "95284d7bc284d904f362ac5aa0d89d6853625055e69618d0a2cbe797474f4d9e"
+    },
+    {
+      "path": "celeste/sndHitFakeWall.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndHitFakeWall.ogg",
+      "size": 7019,
+      "sha256": "91d00b1fdbabfafe3fcaa17badadfcff2cae2b47be859387e06fe4942e3614bc"
+    },
+    {
+      "path": "celeste/sndJump.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndJump.mp3",
+      "size": 9632,
+      "sha256": "0476b7b719fa0606393a3d693127fd21175874e395f5e14f25b66cc74dd7108c"
+    },
+    {
+      "path": "celeste/sndJump.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndJump.ogg",
+      "size": 3979,
+      "sha256": "fc963974cf8dd1aa5b5b967761bfde4c1c673260a6d4c308a46a3dafcd02dde6"
+    },
+    {
+      "path": "celeste/sndKey.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndKey.mp3",
+      "size": 26350,
+      "sha256": "c174021b68e18912525217198ae44e9837182b98672b310e761c6326a7b82f10"
+    },
+    {
+      "path": "celeste/sndKey.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndKey.ogg",
+      "size": 5926,
+      "sha256": "d1e74c118dbac4b95d1e8563cd711075ca11232e4d4989f625aa833cd32d39e3"
+    },
+    {
+      "path": "celeste/sndMessage.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndMessage.mp3",
+      "size": 17991,
+      "sha256": "b6e7556bc6862daa69ad96f82295b69fc44a512902d2680e49be791eef347596"
+    },
+    {
+      "path": "celeste/sndMessage.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndMessage.ogg",
+      "size": 3780,
+      "sha256": "07ae2c475394474a747c7f9caac55f57f497c63c1e3cd1b4d24e7e533b8a9d05"
+    },
+    {
+      "path": "celeste/sndNoDash.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndNoDash.mp3",
+      "size": 13811,
+      "sha256": "1aa51e149bce7314ca32a7622727eeaae4e736cccff7e6001ca7cb640a8593a2"
+    },
+    {
+      "path": "celeste/sndNoDash.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndNoDash.ogg",
+      "size": 5093,
+      "sha256": "1e06c5995bca3adacbc54e729bbbf3261b484309d19f1419fdaae5612974503e"
+    },
+    {
+      "path": "celeste/sndOrb.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndOrb.mp3",
+      "size": 22170,
+      "sha256": "1da64e707221b83a049c6c4ecb14a69f1ac1f5db2393d2b1ee2b3f47120ad1b0"
+    },
+    {
+      "path": "celeste/sndOrb.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndOrb.ogg",
+      "size": 13595,
+      "sha256": "1f3abe5aef9a003f4cf7af72d6819c7f22f02c13707332d49eae9655cbe719c2"
+    },
+    {
+      "path": "celeste/sndPlayerSpawn.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndPlayerSpawn.mp3",
+      "size": 17991,
+      "sha256": "9ab9e861e0b59b84af6ebada9b08b14c32e2ba4d088c9cbf8d776609b90ae303"
+    },
+    {
+      "path": "celeste/sndPlayerSpawn.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndPlayerSpawn.ogg",
+      "size": 7168,
+      "sha256": "63e38e0c5541f194b0912045cd724005e520bea6356c0e382c535d8ac08fd0a6"
+    },
+    {
+      "path": "celeste/sndResetDash.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndResetDash.mp3",
+      "size": 13811,
+      "sha256": "2ea5596fadae464bfd0d6fec69598388526a41adafb87616813ddd4cd776a598"
+    },
+    {
+      "path": "celeste/sndResetDash.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndResetDash.ogg",
+      "size": 5983,
+      "sha256": "4391422eb7288a4d7bb741016a3bf22b0b984f41850e7c870d6dabc8869acf0b"
+    },
+    {
+      "path": "celeste/sndRestore.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndRestore.mp3",
+      "size": 9632,
+      "sha256": "171a5ac9f5f626a06cf29d1b317400f914e7555cfccb429080a5fdcff4133d92"
+    },
+    {
+      "path": "celeste/sndRestore.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndRestore.ogg",
+      "size": 4587,
+      "sha256": "ef31d7e8e2fd0723cdc69dfdf478b62b999a0933fb2018aa67c7f9c2922a0f8c"
+    },
+    {
+      "path": "celeste/sndSpring.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndSpring.mp3",
+      "size": 13811,
+      "sha256": "0b3942ad5163742d445ac1719b6bdc7c844e09894982fff740ed5e4b0fe2eef8"
+    },
+    {
+      "path": "celeste/sndSpring.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndSpring.ogg",
+      "size": 6053,
+      "sha256": "7bd495dc554dd9cd42d665b5cd333839689185e6d7a53e27a6d3e714b3d75c12"
+    },
+    {
+      "path": "celeste/sndStartGame.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndStartGame.mp3",
+      "size": 51846,
+      "sha256": "c9ade8dd5c09329fd87c4494c6deceeb9ff96c707db6927d97f503568e99991b"
+    },
+    {
+      "path": "celeste/sndStartGame.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndStartGame.ogg",
+      "size": 19771,
+      "sha256": "52358b4d452b39670e5398755d44620d026b357d3e68bfdeee8bbbca87a7ddb3"
+    },
+    {
+      "path": "celeste/sndWallJump.mp3",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndWallJump.mp3",
+      "size": 13811,
+      "sha256": "dfcc0b6b48d04dece1c543b5ac4b435a10d09c952fb01ff0c1cf13949bbd5197"
+    },
+    {
+      "path": "celeste/sndWallJump.ogg",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/sndWallJump.ogg",
+      "size": 4118,
+      "sha256": "6bf55f826609eec70bd2ae73c925d700ff29b17884ef46be66a50b40030f6530"
+    },
+    {
+      "path": "celeste/splash.png",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/celeste/splash.png",
+      "size": 350,
+      "sha256": "8e8bb9b4a5b0681c8353d284022a4a1ede6b737406f2a2c4d59b11a8721cb39b"
+    },
+    {
+      "path": "favicon.ico",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/favicon.ico",
+      "size": 350,
+      "sha256": "8e8bb9b4a5b0681c8353d284022a4a1ede6b737406f2a2c4d59b11a8721cb39b"
+    },
+    {
+      "path": "index.html",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/index.html",
+      "size": 2956,
+      "sha256": "057f7aac96f70104c2e991575c7c8eda396ac6d81ce477586b671b0c0f619635"
+    },
+    {
+      "path": "options.ini",
+      "url": "https://raw.githubusercontent.com/Verdini/celeste-classic-web/31ea1e41efd63910e730136a14c33910ae643fca/docs/options.ini",
+      "size": 105,
+      "sha256": "de0723573f104f509142654b7c15cf0ac4a4595864426222cc5ac8ec5839528b"
+    }
+  ]
+}

@@ -12,6 +12,8 @@ const MIME_TYPES: Record<string, string> = {
 	'.js': 'text/javascript; charset=utf-8',
 	'.mjs': 'text/javascript; charset=utf-8',
 	'.css': 'text/css; charset=utf-8',
+	'.webmanifest': 'application/manifest+json',
+	'.zip': 'application/zip',
 	'.json': 'application/json; charset=utf-8',
 	'.wasm': 'application/wasm',
 	'.data': 'application/octet-stream',
@@ -41,10 +43,10 @@ export function webglContentMetadata(pathname: string): WebglContentMetadata {
 	const lower = pathname.toLowerCase();
 	let decodedName = lower;
 	let contentEncoding: WebglContentMetadata['contentEncoding'];
-	if (lower.endsWith('.br')) {
+	if (/\.(?:js|mjs|wasm|data|json|symbols|css)\.br$/.test(lower)) {
 		decodedName = lower.slice(0, -3);
 		contentEncoding = 'br';
-	} else if (lower.endsWith('.gz')) {
+	} else if (/\.(?:js|mjs|wasm|data|json|symbols|css)\.gz$/.test(lower)) {
 		decodedName = lower.slice(0, -3);
 		contentEncoding = 'gzip';
 	}

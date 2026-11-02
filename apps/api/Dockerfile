@@ -1,8 +1,20 @@
 # Build context: repo root (npm workspaces).
 # Built via .github/workflows/deploy-api.yml with context=. file=apps/api/Dockerfile
 
+# Pinned local-only metadata parser. Directory publish avoids native extraction on noexec /tmp.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.402-noble AS ue-inspector
+WORKDIR /src
+RUN apt-get update && apt-get install -y --no-install-recommends python3 ca-certificates && rm -rf /var/lib/apt/lists/*
+ARG TARGETARCH
+COPY tools/ue-inspector ./
+RUN case "$TARGETARCH" in amd64) ue_rid=linux-x64 ;; arm64) ue_rid=linux-arm64 ;; *) exit 1 ;; esac && \
+    python3 prepare.py && \
+    dotnet restore UeInspector.csproj --locked-mode -p:RestorePackagesWithLockFile=true -p:CUE4PARSE_SKIP_NATIVE=true && \
+    dotnet publish UeInspector.csproj --no-restore -c Release -r "$ue_rid" --self-contained true -p:CUE4PARSE_SKIP_NATIVE=true -o /out && \
+    cp CUE4Parse.LICENSE CUE4Parse.NOTICE /out/
+
 # ── Stage 1: Install dependencies ──
-FROM node:22-bookworm-slim AS deps
+FROM node:26.12.1-bookworm-slim AS deps
 WORKDIR /app
 # openssl CLI is required at install time so @prisma/engines' postinstall
 # detects OpenSSL 3.0.x and downloads the matching engines. Without it,
@@ -27,11 +39,11 @@ RUN npm ci
 # directly so they land in /app/node_modules/@img/, where the hoisted sharp
 # module will find the matching binary and libvips at runtime.
 RUN npm install --no-save \
-      @img/sharp-linux-x64@0.35.4 \
-      @img/sharp-libvips-linux-x64@1.3.3
+      @img/sharp-linux-x64@0.35.5 \
+      @img/sharp-libvips-linux-x64@1.3.4
 
 # ── Stage 2: Build TypeScript ──
-FROM node:22-bookworm-slim AS builder
+FROM node:26.12.1-bookworm-slim AS builder
 WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends openssl && \
@@ -50,7 +62,7 @@ RUN npm run build --workspace=@pcu/contracts && \
 # command may apply it; starting the runtime never migrates the database.
 
 # ── Stage 3: Production image ──
-FROM node:22-bookworm-slim AS runner
+FROM node:26.12.1-bookworm-slim AS runner
 ARG RELEASE_SOURCE_SHA
 LABEL org.opencontainers.image.revision="${RELEASE_SOURCE_SHA}"
 WORKDIR /app
@@ -62,6 +74,7 @@ RUN apt-get update && \
     groupadd --system --gid 1001 appgroup && \
     useradd --system --uid 1001 --gid appgroup --no-create-home --shell /usr/sbin/nologin appuser
 
+COPY --from=ue-inspector /out /opt/ue-inspector
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/packages/contracts ./packages/contracts
@@ -82,7 +95,7 @@ WORKDIR /app/apps/api
 EXPOSE 4000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:4000/api/health || exit 1
+  CMD wget -qO- http://localhost:${PORT:-4000}/api/health || exit 1
 
 # Schema transition is an explicit, fenced release operation. Runtime
 # startup never applies pending migrations as a side effect.

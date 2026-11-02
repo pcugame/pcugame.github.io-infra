@@ -1,3 +1,4 @@
+import { DownloadRateLimiter } from '../shared/download-rate-limit.js';
 import { createAssetUploadRepository } from '../modules/asset-upload/repository.js';
 import type { AssetUploadSessionRecord } from '../modules/asset-upload/ports.js';
 import { createFileAccessController } from '../modules/file-access/controller.js';
@@ -30,9 +31,12 @@ import { createProjectService } from '../modules/admin/project/service.js';
 import { createProjectSerializer } from '../modules/admin/project/serializer.js';
 import { createProjectAccessService } from '../modules/admin/project-access.service.js';
 import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
-import { assertStatusTransition } from '../modules/admin/project/project-status.service.js';
+import { enrichExternalLinks } from '../modules/external-links/resolver.js';
 
 const visibilities: Visibility[] = ['PUBLIC', 'AUTHENTICATED', 'STAFF'];
+const downloadIpLimiter = new DownloadRateLimiter();
+const allowDownloadIp = (ip: string) => downloadIpLimiter.assertIpAllowed(ip);
+
 describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility authenticated HTTP boundary', () => {
 	let db: PrismaClient, app: FastifyInstance;
 	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
@@ -59,12 +63,12 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility a
 			S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: 'http://localhost:3906', S3_BUCKET_PUBLIC: 'pcu-public',
 			S3_BUCKET_PROTECTED: 'pcu-protected', SESSION_COOKIE_NAME: 'sid',
 			FILE_GATEWAY_SECRET: 'visibility-upload-race-secret-32chars',
-		}), { prefix: '/api' });
+		}, allowDownloadIp), { prefix: '/api' });
 		await app.register(createProjectChangeController(createProjectChangeService(createProjectChangeRepository(db)), 'me'), { prefix: '/api/me' });
 		await app.register(createPublicController({ service: createPublicService({ apiPublicUrl: 'http://localhost:3000', repository: createPublicRepository(db) }) }), { prefix: '/api/public' });
 		await app.register(createYearController({ service: createExhibitionService({ posterBucket: 'pcu-public', repository: createExhibitionRepository(db), wakeDeletionWorker() {} }) }), { prefix: '/api/admin' });
 		const repository = createProjectCrudRepository(db);
-		await app.register(createProjectController({ service: createProjectService({ repository, serializeProjectDetail: createProjectSerializer('http://localhost:3000').serializeProjectDetail, deletionBuckets: { publicBucket: 'pcu-public', protectedBucket: 'pcu-protected' }, abortMultipart: async () => {}, wakeDeletionWorker() {}, wakeMaintenance() {}, logger: app.log }), access: createProjectAccessService(createProjectAccessRepository(db)), status: { assertTransition: assertStatusTransition, bulkUpdate: async (ids, status) => ({ updated: (await repository.bulkUpdateStatus(ids, status)).count }) } }), { prefix: '/api/admin' });
+		await app.register(createProjectController({ service: createProjectService({ loadProjectWithAccess: createProjectAccessService(createProjectAccessRepository(db)).loadProjectWithAccess, resolveExternalLinks: enrichExternalLinks, repository, serializeProjectDetail: createProjectSerializer('http://localhost:3000').serializeProjectDetail, deletionBuckets: { publicBucket: 'pcu-public', protectedBucket: 'pcu-protected' }, abortMultipart: async () => {}, wakeDeletionWorker() {}, wakeMaintenance() {}, logger: app.log }), access: createProjectAccessService(createProjectAccessRepository(db)), status: { bulkUpdate: async (ids, status) => ({ updated: (await repository.bulkUpdateStatus(ids, status)).count }) } }), { prefix: '/api/admin' });
 	});
 	afterAll(async () => { await app?.close(); await database?.close(); });
 	function request(actor: Actor | null, url: string, method: 'GET' | 'PATCH' | 'POST' = 'GET', payload?: Record<string, unknown>) {

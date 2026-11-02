@@ -48,6 +48,7 @@ function sessionResult(session: AssetUploadSessionRecord, parts: Awaited<ReturnT
 		owner,
 		kind: session.kind,
 		state: session.state,
+		...(session.buildReviews?.[0] ? { review: { id: session.buildReviews[0].id, decision: session.buildReviews[0].decision, reason: session.buildReviews[0].reason ?? '빌드 구조 확인이 필요합니다.' } } : {}),
 		generation: session.generation,
 		originalName: session.originalName,
 		totalBytes: Number(session.totalBytes),
@@ -78,7 +79,7 @@ export function createAssetUploadService(deps: {
 		partUrlTtlSeconds: number;
 		/** Extra session-lifetime capabilities allowed after the first totalParts. */
 		partUrlRefreshMax: number;
-		maxBytesFor(actor: { id: number; role: string }, kind: DirectAssetUploadKind): number;
+		maxBytesFor(actor: { id: number; role: string }, kind: DirectAssetUploadKind): number | Promise<number>;
 	};
 	authorizeProjectWrite(actor: { id: number; role: string }, projectId: number): Promise<{ exhibitionId: number; status: string }>;
 	authorizeExhibitionWrite?(actor: { id: number; role: string }, exhibitionId: number): Promise<void>;
@@ -112,7 +113,7 @@ export function createAssetUploadService(deps: {
 		if (!durable || durable.generation !== generation) {
 			throw conflict('Upload completion lease was lost');
 		}
-		if (!['VERIFYING', 'READY', 'REJECTED', 'CANCELLED', 'EXPIRED'].includes(durable.state)) {
+		if (!['AWAITING_REVIEW', 'VERIFYING', 'READY', 'REJECTED', 'CANCELLED', 'EXPIRED'].includes(durable.state)) {
 			throw conflict('Upload completion lease was lost');
 		}
 		return {
@@ -133,7 +134,7 @@ export function createAssetUploadService(deps: {
 		await authorizeOwnerWrite(actor, owner);
 		if (body.voteId && (kind !== 'POSTER' || owner.type !== 'EXHIBITION' || !['ADMIN', 'OPERATOR'].includes(actor.role))) throw badRequest('Invalid voting poster upload');
 		await deps.repository.expireStaleAllocations(owner);
-		const maxBytes = deps.config.maxBytesFor(actor, kind);
+		const maxBytes = await deps.config.maxBytesFor(actor, kind);
 		if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error(`Direct ${kind} upload policy is invalid`);
 		if (!Number.isSafeInteger(body.totalBytes) || body.totalBytes < 1 || body.totalBytes > maxBytes) throw badRequest(`Invalid ${kind} upload size`);
 		assertValidUploadFilename(body.originalName);
@@ -227,6 +228,11 @@ export function createAssetUploadService(deps: {
 			return createSession('POSTER', actor, { type: 'PROJECT', id: projectId }, body);
 		},
 
+  async createExhibitionImageSession(actor: { id: number; role: string }, exhibitionId: number, body: DirectCreateBody) {
+   if (!['image/png', 'image/webp', 'image/jpeg'].includes(body.declaredMimeType ?? '')) throw badRequest('PNG, WebP, JPEG 이미지만 지원합니다.');
+   return createSession('IMAGE', actor, { type: 'EXHIBITION', id: exhibitionId }, body);
+  },
+
 		async createExhibitionPosterSession(actor: { id: number; role: string }, exhibitionId: number, body: DirectCreateBody) {
 			return createSession('POSTER', actor, { type: 'EXHIBITION', id: exhibitionId }, body);
 		},
@@ -283,7 +289,7 @@ export function createAssetUploadService(deps: {
 		async complete(actor: { id: number; role: string }, sessionId: string, body: DirectGameUploadCompleteRequest) {
 			const session = await loadOwned(sessionId, actor);
 			if (session.generation !== body.generation) throw conflict('Upload generation is stale');
-			if (session.state === 'VERIFYING' || session.state === 'READY') return { status: session.state, sessionId: session.id, generation: session.generation, sizeBytes: Number(session.totalBytes) };
+			if (session.state === 'AWAITING_REVIEW' || session.state === 'VERIFYING' || session.state === 'READY') return { status: session.state, sessionId: session.id, generation: session.generation, sizeBytes: Number(session.totalBytes) };
 			if (session.state === 'COMPLETING') throw operationInProgress('Upload completion is already in progress');
 			if (session.state !== 'UPLOADING' || !session.uploadId) throw conflict('Upload session cannot be completed');
 			const submitted = validateSubmittedCompletionParts(body, session.totalParts);
@@ -333,7 +339,7 @@ export function createAssetUploadService(deps: {
 				);
 				throw error;
 			} finally {
-				completionLease.stop();
+				await completionLease.stop();
 			}
 		},
 	};

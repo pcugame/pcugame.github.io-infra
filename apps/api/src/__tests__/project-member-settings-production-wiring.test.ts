@@ -195,7 +195,12 @@ function portHarness() {
 		findProjectsForUser: calls.projectList,
 		findProjectById: calls.projectFindUnique,
 		isMemberOfProject: async (projectId, userId) => calls.projectMemberFindFirst({ projectId, userId }),
-		updateProject: async (_id, data) => calls.projectUpdate(data),
+		runProjectUpdate: async (_id, actor, operation) => operation({
+			snapshot: { creatorId: project.creatorId, status: project.status,
+				isChangeRequestDraft: false, isModificationEnabled: true,
+				isMember: project.members.some(member => member.userId === actor.id) },
+			apply: data => calls.projectUpdate({ ...data }),
+		}),
 		async deleteProjectReturningAssets(_id, outbox) {
 			await calls.orphanUpsert(outbox);
 			const assets = [...project.assets];

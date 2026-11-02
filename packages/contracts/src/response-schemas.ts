@@ -1,3 +1,5 @@
+import { AwardSchema } from './awards.js';
+import { VIDEO_PLAYBACK_QUALITIES } from './video-playback.js';
 import { WebglDisplayDimensionSchema, WebglDisplayKindSchema, WebglDisplayModeSchema } from './webgl-display.js';
 import { VisibilitySchema } from './schemas.js';
 import { z } from 'zod';
@@ -142,6 +144,7 @@ export const PublicYearListResponseSchema = z.object({
 }).strict();
 
 export const PublicProjectCardSchema = z.object({
+ awards: z.array(AwardSchema).default([]),
 	canChangeVisibility: z.boolean(),
 	exhibitionVisibility: VisibilitySchema,
 	visibility: VisibilitySchema,
@@ -182,7 +185,14 @@ export const PublicExhibitionProjectsResponseSchema = z.object({
 	empty: z.boolean(),
 }).strict();
 
+export const VideoPlaybackSchema = z.object({
+ profile: z.enum(['native', 'cap60', 'cap30']), quality: z.enum(VIDEO_PLAYBACK_QUALITIES).optional(), url: UrlSchema, mimeType: z.string().min(1),
+ frameRate: z.number().finite().nonnegative(), width: PositiveIntegerSchema, height: PositiveIntegerSchema,
+ status: z.literal('READY'),
+}).strict();
 export const ProjectVideoSchema = z.object({
+ playbacks: z.array(VideoPlaybackSchema).optional(),
+ playbackJob: z.object({ id: z.string(), status: z.enum(['PENDING', 'RUNNING', 'READY', 'FAILED']), error: z.string().optional() }).strict().optional(),
 	assetId: PositiveIntegerSchema,
 	sortOrder: z.number().int().min(0).max(4).nullable(),
 	role: z.enum(['MAIN', 'ADDITIONAL']),
@@ -228,6 +238,7 @@ export const PublicUploadConfigSchema = z.object({
 }).strict();
 
 export const PublicProjectDetailResponseSchema = z.object({
+ awards: z.array(AwardSchema).default([]),
 	canChangeVisibility: z.boolean(),
 	exhibitionVisibility: VisibilitySchema,
 	visibility: VisibilitySchema,
@@ -293,6 +304,7 @@ export const ProjectRequiredAssetsSchema = z.object({
 }).strict();
 
 export const AdminProjectItemSchema = z.object({
+ awards: z.array(AwardSchema).default([]),
 	requiredAssets: ProjectRequiredAssetsSchema.optional(),
 	canChangeVisibility: z.boolean(),
 	exhibitionVisibility: VisibilitySchema,
@@ -328,6 +340,8 @@ export const AdminProjectListResponseSchema = z.object({
 }).strict();
 
 export const AdminProjectDetailSchema = z.object({
+ exhibitionId: z.number().int().optional(),
+ awards: z.array(AwardSchema).default([]),
 	requiredAssets: ProjectRequiredAssetsSchema.optional(),
 	canChangeVisibility: z.boolean(),
 	exhibitionVisibility: VisibilitySchema,
@@ -415,6 +429,7 @@ export const SubmitProjectResponseSchema = z.object({
 		clientToken: z.string(),
 		required: z.literal(true),
 		state: z.enum(['EXPECTED', 'UPLOADING', 'VERIFYING', 'READY', 'FAILED', 'CANCELLED']),
+		awaitingReview: z.boolean().optional(),
 		sessionId: z.string().uuid().optional(),
 		generation: PositiveIntegerSchema.optional(),
 		failureReason: z.string().optional(),

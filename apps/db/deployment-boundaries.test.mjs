@@ -157,7 +157,7 @@ for (const proxy of [publicOrigin, protectedDownload]) {
  assert.ok(proxy.includes('X-PCU-File-Uri $request_uri'));
  assert.ok(proxy.includes('proxy_set_header Cookie ""'));
  assert.ok(proxy.includes('proxy_set_header Authorization ""'));
- assert.ok(proxy.includes('resolver 127.0.0.11'));
+ assert.ok(proxy.includes('resolver ${NGINX_RESOLVER}'));
  assert.doesNotMatch(proxy.match(/log_format[^;]+;/s)?.[0] ?? '', /\$uri|\$request_uri|\$args/);
 }
 assert.match(compose, /FILE_GATEWAY_SECRET: \$\{FILE_GATEWAY_SECRET:-\}/);

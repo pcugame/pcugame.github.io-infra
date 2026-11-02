@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
-# Generate and apply an sshd policy that keeps pubkey auth global, while
-# allowing password auth only from KR, JP, and the Tailscale CGNAT range.
+# Permit operator password access, while deployment accounts remain key-only.
+# The legacy filename replaces the former country-specific policy in place.
 set -euo pipefail
 
 SSHD_CONFIG_DIR="${SSHD_CONFIG_DIR:-/etc/ssh/sshd_config.d}"
 SSHD_MAIN_CONFIG="${SSHD_MAIN_CONFIG:-/etc/ssh/sshd_config}"
 OUTPUT_FILE="${OUTPUT_FILE:-${SSHD_CONFIG_DIR}/99-password-geo.conf}"
-CIDR_SOURCE_BASE="${CIDR_SOURCE_BASE:-https://www.ipdeny.com/ipblocks/data/aggregated}"
-PASSWORD_COUNTRIES="${PASSWORD_COUNTRIES:-kr jp}"
-TAILSCALE_CIDR="${TAILSCALE_CIDR:-100.64.0.0/10}"
+PASSWORD_COUNTRIES="${PASSWORD_COUNTRIES:-}"
+PASSWORD_LOGIN_USER="${PASSWORD_LOGIN_USER:-song}"
 SSH_ALLOW_USERS="${SSH_ALLOW_USERS:-song gh-deploy}"
-MATCH_CHUNK_SIZE="${MATCH_CHUNK_SIZE:-80}"
 RELOAD_SERVICE="${RELOAD_SERVICE:-true}"
 DRY_RUN="false"
 
@@ -20,11 +18,10 @@ Usage: sudo bash install-ssh-password-geo.sh [--dry-run] [--no-reload]
 
 Environment:
   SSH_ALLOW_USERS      Space-separated users allowed to SSH. Default: "song gh-deploy"
-  PASSWORD_COUNTRIES  Space-separated ISO country codes. Default: "kr jp"
-  TAILSCALE_CIDR      Tailscale password-allowed CIDR. Default: "100.64.0.0/10"
+  PASSWORD_COUNTRIES  Retired. Nonempty values are rejected.
+  PASSWORD_LOGIN_USER  User allowed password login from any source. Default: "song"
   OUTPUT_FILE         sshd drop-in path. Default: /etc/ssh/sshd_config.d/99-password-geo.conf
   SSHD_MAIN_CONFIG    Main sshd config path. Default: /etc/ssh/sshd_config
-  CIDR_SOURCE_BASE    Country CIDR source base URL.
 EOF
 }
 
@@ -49,6 +46,11 @@ while (($#)); do
   shift
 done
 
+if [[ -n "$PASSWORD_COUNTRIES" ]]; then
+  echo "ERROR: country-based access is retired; set PASSWORD_LOGIN_USER instead." >&2
+  exit 2
+fi
+
 if [[ "$DRY_RUN" != "true" && "${EUID}" -ne 0 ]]; then
   echo "ERROR: run as root, or use --dry-run to print the generated config." >&2
   exit 1
@@ -62,62 +64,27 @@ find_sshd() {
   return 1
 }
 
-fetch_country_cidrs() {
-  local country="$1"
-  local url="${CIDR_SOURCE_BASE}/${country}-aggregated.zone"
-
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO- "$url"
-  else
-    echo "ERROR: curl or wget is required to fetch ${url}" >&2
-    return 1
-  fi
-}
-
 generate_config() {
-  local cidr_file="$1"
   local generated_at
   generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
   cat <<EOF
 # Managed by server/hardening/install-ssh-password-geo.sh
 # Generated: ${generated_at}
-# Source: ${CIDR_SOURCE_BASE}/{kr,jp}-aggregated.zone plus ${TAILSCALE_CIDR}
+# Password access: ${PASSWORD_LOGIN_USER}; all other allowed users are key-only
 PubkeyAuthentication yes
+AuthenticationMethods publickey
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no
 AllowUsers ${SSH_ALLOW_USERS}
 
-EOF
-
-  local chunk=()
-  local cidr
-  while IFS= read -r cidr; do
-    [[ -z "$cidr" ]] && continue
-    chunk+=("$cidr")
-    if ((${#chunk[@]} >= MATCH_CHUNK_SIZE)); then
-      emit_match_chunk "${chunk[@]}"
-      chunk=()
-    fi
-  done < "$cidr_file"
-
-  if ((${#chunk[@]} > 0)); then
-    emit_match_chunk "${chunk[@]}"
-  fi
-}
-
-emit_match_chunk() {
-  local joined
-  local IFS=,
-  joined="$*"
-  cat <<EOF
-Match Address ${joined}
+Match User ${PASSWORD_LOGIN_USER}
+    AuthenticationMethods any
     PasswordAuthentication yes
     KbdInteractiveAuthentication yes
 
+Match all
 EOF
 }
 
@@ -127,25 +94,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cidr_file="${tmp_dir}/password-cidrs.txt"
-raw_cidr_file="${tmp_dir}/raw-cidrs.txt"
 config_file="${tmp_dir}/99-password-geo.conf"
 
-printf '%s\n' "$TAILSCALE_CIDR" > "$raw_cidr_file"
-for country in $PASSWORD_COUNTRIES; do
-  echo "Fetching ${country^^} CIDRs from ${CIDR_SOURCE_BASE}/${country}-aggregated.zone..." >&2
-  fetch_country_cidrs "$country" >> "$raw_cidr_file"
-done
-
-grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' "$raw_cidr_file" | sort -u > "$cidr_file"
-
-if [[ ! -s "$cidr_file" ]]; then
-  echo "ERROR: no valid IPv4 CIDRs were generated." >&2
-  exit 1
-fi
-
-generate_config "$cidr_file" > "$config_file"
-echo "Generated $(wc -l < "$cidr_file") password-allowed CIDRs." >&2
+generate_config > "$config_file"
 
 if [[ "$DRY_RUN" == "true" ]]; then
   cat "$config_file"

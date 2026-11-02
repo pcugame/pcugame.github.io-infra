@@ -205,12 +205,13 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 		},
 		async cancel(sessionId, actorId) {
 			return client.$transaction(async (tx) => {
+				await tx.$queryRaw`SELECT id FROM asset_upload_sessions WHERE id = ${sessionId} FOR UPDATE`;
 				const session = await tx.assetUploadSession.findUnique({ where: { id: sessionId } });
 				if (!session || session.userId !== actorId) return { cancelled: false };
 				if (session.state === 'CANCELLED') return { cancelled: true };
-				if (!['ALLOCATING', 'UPLOADING'].includes(session.state)) return { cancelled: false };
+				if (!['ALLOCATING', 'UPLOADING', 'AWAITING_REVIEW'].includes(session.state)) return { cancelled: false };
 				const updated = await tx.assetUploadSession.updateMany({
-					where: { id: sessionId, userId: actorId, state: { in: ['ALLOCATING', 'UPLOADING'] } },
+					where: { id: sessionId, userId: actorId, state: { in: ['ALLOCATING', 'UPLOADING', 'AWAITING_REVIEW'] } },
 					data: { state: 'CANCELLED', uploadId: null, completionLeaseToken: null, completionLeaseUntil: null },
 				});
 				if (!updated.count) {
@@ -224,6 +225,12 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 					});
 					return { cancelled: durable?.userId === actorId && durable.state === 'CANCELLED' };
 				}
+				if (session.state === 'AWAITING_REVIEW') {
+					await tx.buildReview.updateMany({ where: { sessionId, decision: 'PENDING' }, data: { decision: 'CANCELLED', version: { increment: 1 }, decidedAt: new Date() } });
+					if (session.resultRepresentationId) await tx.assetRepresentation.update({ where: { id: session.resultRepresentationId }, data: { state: 'DELETED', error: 'upload cancelled' } });
+					if (session.resultAssetId) await tx.asset.update({ where: { id: session.resultAssetId }, data: { status: 'DELETED' } });
+					await queueDurableDeletions(tx, [{ bucket: session.bucket, storageKey: session.objectKey, reason: 'build-review-cancelled' }]);
+				}
 				if (session.uploadId) {
 					await queueMultipartAbortTask(tx, { bucket: session.bucket, storageKey: session.objectKey, uploadId: session.uploadId, reason: 'direct-asset-upload-cancelled', uploadSessionId: session.id });
 					return { cancelled: true, abort: { bucket: session.bucket, objectKey: session.objectKey, uploadId: session.uploadId } };
@@ -232,7 +239,7 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 			});
 		},
 		async findById(sessionId) {
-			const value = await client.assetUploadSession.findUnique({ where: { id: sessionId } });
+			const value = await client.assetUploadSession.findUnique({ where: { id: sessionId }, include: { buildReviews: { orderBy: { createdAt: 'desc' }, take: 1 } } });
 			return value ? asRecord(value) : null;
 		},
 		async reservePartCapabilities(input) {

@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '26.12.1'
 
       - name: Test CI classification and required check wiring
         run: node --test scripts/classify-ci-changes.test.mjs scripts/pr-checks-workflow.test.mjs
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.changes.outputs.install == 'true'
         with:
-          node-version: 22
+          node-version: '26.12.1'
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -73,6 +73,19 @@ jobs:
       - name: Test shared contracts
         if: steps.changes.outputs.contracts == 'true' && steps.changes.outputs.full != 'true'
         run: npm test --workspace=@pcu/contracts
+
+      - uses: actions/setup-dotnet@v4
+        if: steps.changes.outputs.api == 'true'
+        with:
+          dotnet-version: '10.0.402'
+
+      - name: Build and test pinned UE inspector
+        if: steps.changes.outputs.api == 'true'
+        run: |
+          python3 tools/ue-inspector/prepare.py
+          dotnet restore tools/ue-inspector/UeInspector.csproj --locked-mode -p:RestorePackagesWithLockFile=true -p:CUE4PARSE_SKIP_NATIVE=true
+          dotnet publish tools/ue-inspector/UeInspector.csproj --no-restore -c Release -r linux-x64 --self-contained true -p:CUE4PARSE_SKIP_NATIVE=true -o tools/ue-inspector/publish
+          python3 tools/ue-inspector/test.py tools/ue-inspector/publish/UeInspector
 
       - name: Generate Prisma client
         if: steps.changes.outputs.api == 'true'
@@ -151,7 +164,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: needs.verify.outputs.integration == 'true'
         with:
-          node-version: 22
+          node-version: '26.12.1'
 
       - name: Install dependencies
         if: needs.verify.outputs.integration == 'true'
@@ -161,9 +174,17 @@ jobs:
         if: needs.verify.outputs.integration == 'true'
         run: npm run db:generate --workspace=apps/api
 
+      - name: Install FFmpeg for video timing checks
+        if: needs.verify.outputs.integration == 'true'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
       - name: PostgreSQL + Garage integration smoke
         if: needs.verify.outputs.integration == 'true'
         run: npm run test:integration
+
+      - name: Nginx API slot handoff with PostgreSQL and Garage
+        if: needs.verify.outputs.integration == 'true'
+        run: node scripts/test-rolling-release.mjs
 
       - name: File gateway TLS verification
         if: needs.verify.outputs.integration == 'true'

@@ -38,31 +38,34 @@ export interface CanonicalWebglStagingKeys {
 export function createCanonicalWebglPublicKeys(
 	projectId: number,
 	deploymentId: string,
+	entryPath = 'index.html',
 ): CanonicalWebglPublicKeys {
 	if (!Number.isSafeInteger(projectId) || projectId < 1
 		|| !new RegExp(`^${UUID_RE}$`, 'i').test(deploymentId)) {
 		throw new Error('Invalid canonical WebGL deployment identity');
 	}
+	if (!entryPath || entryPath.startsWith('/') || /[\\\x00-\x1f]/.test(entryPath) || entryPath.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Invalid web entry path');
 	const publicPrefix = `public/webgl/${projectId}/${deploymentId}/`;
 	return {
 		projectId,
 		deploymentId,
 		publicPrefix,
-		entryObjectKey: `${publicPrefix}index.html`,
+		entryObjectKey: `${publicPrefix}${entryPath}`,
 	};
 }
 
 export function createCanonicalWebglStagingKeys(
 	projectId: number,
 	deploymentId: string,
+	entryPath = 'index.html',
 ): CanonicalWebglStagingKeys {
-	createCanonicalWebglPublicKeys(projectId, deploymentId);
+	createCanonicalWebglPublicKeys(projectId, deploymentId, entryPath);
 	const stagingPrefix = `protected/publication-staging/projects/${projectId}/webgl/${deploymentId}/`;
 	return {
 		projectId,
 		deploymentId,
 		stagingPrefix,
-		stagingEntryObjectKey: `${stagingPrefix}index.html`,
+		stagingEntryObjectKey: `${stagingPrefix}${entryPath}`,
 	};
 }
 

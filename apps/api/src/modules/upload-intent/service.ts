@@ -146,7 +146,7 @@ export function createUploadIntentService(deps: {
 						);
 					});
 				} finally {
-					claim.stop();
+					await claim.stop();
 				}
 			}
 			deps.logger.info(

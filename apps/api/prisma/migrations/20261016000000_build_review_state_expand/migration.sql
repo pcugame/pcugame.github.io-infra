@@ -1,0 +1,1 @@
+ALTER TYPE "AssetUploadSessionState" ADD VALUE 'AWAITING_REVIEW';

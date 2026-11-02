@@ -24,6 +24,8 @@ export function createAssetsController(deps: AssetsControllerDependencies): Fast
 						query.variant ?? 'original',
 						request.ip,
 						request.currentUser,
+						query.profile,
+						query.quality,
 					),
 				);
 			},

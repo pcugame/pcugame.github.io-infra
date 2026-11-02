@@ -1,0 +1,4 @@
+# Install as /etc/fail2ban/fail2ban.d/99-pcu-retention.local.
+# Keep repeat-offender history longer than the maximum SSH ban.
+[Definition]
+dbpurgeage = 691200

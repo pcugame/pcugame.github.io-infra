@@ -1,3 +1,4 @@
+import type { ProjectUpdateTransaction } from '../modules/admin/project/update.ports.js';
 import Fastify, { type FastifyInstance, type FastifyError } from 'fastify';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
@@ -23,7 +24,7 @@ import { createProjectSerializer } from '../modules/admin/project/serializer.js'
 import { createSubmitProjectService } from '../modules/admin/project/project-submit.service.js';
 import { createMeProjectController } from '../modules/me/project/controller.js';
 import { createAdminProjectMetadataController } from '../modules/admin/project/metadata.controller.js';
-import type { ProjectSubmissionRecord, SubmitProjectRepository, ProjectCrudRepository } from '../modules/admin/project/ports.js';
+import type { ProjectSubmissionRecord, SubmitProjectRepository } from '../modules/admin/project/ports.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
 
 const logger: AppLogger = { child: () => logger, trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() };
@@ -37,7 +38,7 @@ let app: FastifyInstance;
 let resolve: Mock<ResolveExternalLink>;
 let savedLinks: ExternalLink[] | undefined;
 let create: Mock<SubmitProjectRepository['createProjectWithAssets']>;
-let update: Mock<ProjectCrudRepository['updateProject']>;
+let update: Mock<ProjectUpdateTransaction['apply']>;
 let time: number;
 beforeEach(async () => {
  time = Date.now(); savedLinks = undefined;
@@ -54,9 +55,9 @@ beforeEach(async () => {
  await registerCsrf(app, defaultTestEnv as unknown as Env); registerRouteSchemas(app);
  await app.register(createExternalLinkController(createExternalLinkService(resolve, () => time)), { prefix: '/api/me' });
  const project = { id: 1, visibility: 'PUBLIC' as const, creatorId: 7, title: 'Game', slug: 'game', summary: '', description: '', githubUrl: '', platforms: [], isIncomplete: false, status: 'DRAFT' as const, sortOrder: 0, posterAssetId: null, poster: null, members: [], assets: [], exhibition: { visibility: 'PUBLIC' as const, year: 2026 } };
- update = vi.fn(async (_id, patch) => { if (patch.externalLinks !== undefined) savedLinks = patch.externalLinks; return { ...project, externalLinks: savedLinks }; });
- const service = createProjectService({ repository: { findProjectsForUser: vi.fn(), findProjectById: vi.fn(), isMemberOfProject: vi.fn(), updateProject: update, deleteProjectReturningAssets: vi.fn(), clearWebglDeployment: vi.fn(), findAssetById: vi.fn(), setProjectVideoOrder: vi.fn(), setProjectPoster: vi.fn(), bulkDeleteProjectsReturningAssets: vi.fn() }, serializeProjectDetail: createProjectSerializer('http://localhost:4000').serializeProjectDetail, resolveExternalLinks: resolveLinks, deletionBuckets: { publicBucket: 'public', protectedBucket: 'protected' }, abortMultipart: vi.fn(), wakeDeletionWorker: vi.fn(), wakeMaintenance: vi.fn(), logger });
- await app.register(createProjectController({ service, access: { loadProjectWithAccess: vi.fn(async () => project) }, status: { assertTransition: vi.fn(), bulkUpdate: vi.fn() } }), { prefix: '/api/admin' });
+ update = vi.fn(async (patch) => { if (patch.externalLinks !== undefined) savedLinks = patch.externalLinks; return { ...project, externalLinks: savedLinks }; });
+ const service = createProjectService({ loadProjectWithAccess: async () => project, repository: { findProjectsForUser: vi.fn(), findProjectById: vi.fn(), isMemberOfProject: vi.fn(), runProjectUpdate: async (_id, _actor, operation) => operation({ snapshot: { creatorId: project.creatorId, status: project.status, isChangeRequestDraft: false, isModificationEnabled: true, isMember: false }, apply: update }), deleteProjectReturningAssets: vi.fn(), clearWebglDeployment: vi.fn(), findAssetById: vi.fn(), setProjectVideoOrder: vi.fn(), setProjectPoster: vi.fn(), bulkDeleteProjectsReturningAssets: vi.fn() }, serializeProjectDetail: createProjectSerializer('http://localhost:4000').serializeProjectDetail, resolveExternalLinks: resolveLinks, deletionBuckets: { publicBucket: 'public', protectedBucket: 'protected' }, abortMultipart: vi.fn(), wakeDeletionWorker: vi.fn(), wakeMaintenance: vi.fn(), logger });
+ await app.register(createProjectController({ service, access: { loadProjectWithAccess: vi.fn(async () => project) }, status: { bulkUpdate: vi.fn() } }), { prefix: '/api/admin' });
  const submission: ProjectSubmissionRecord = { id: '11111111-1111-4111-8111-111111111111', projectId: 1, actorId: 7, state: 'PENDING', project: { id: 1, status: 'DRAFT' }, items: [], publicationJob: null };
  create = vi.fn(async (data) => { savedLinks = data.externalLinks; return { id: 1, slug: 'game', submission }; });
  const repository: SubmitProjectRepository = { findExhibitionById: vi.fn(async () => ({ id: 1, year: 2026, title: '2026', visibility: 'PUBLIC' as const, isModificationEnabled: true })), findProjectByExhibitionAndSlug: vi.fn(async () => null), createProjectWithAssets: create, findSubmissionForActor: vi.fn(), finalizeSubmission: vi.fn(), cancelSubmission: vi.fn(), auditActiveSubmissions: vi.fn() };
@@ -89,7 +90,7 @@ describe('authenticated external link HTTP boundary', () => {
 describe('server-derived links through authenticated saves', () => {
  it('patches services, preserves user text and omitted values, and supports removal', async () => {
   const response = await app.inject({ method: 'PATCH', url: '/api/admin/projects/1', headers, payload: { externalLinks: linkInput } }); expect(response.statusCode, response.body).toBe(200); expect(savedLinks).toEqual(expectedLinks); expect(response.json().data.externalLinks).toEqual(expectedLinks);
-  const omitted = await app.inject({ method: 'PATCH', url: '/api/admin/projects/1', headers, payload: { summary: 'Updated' } }); expect(omitted.statusCode).toBe(200); expect(savedLinks).toEqual(expectedLinks); expect(update.mock.calls[1]?.[1]).not.toHaveProperty('externalLinks');
+  const omitted = await app.inject({ method: 'PATCH', url: '/api/admin/projects/1', headers, payload: { summary: 'Updated' } }); expect(omitted.statusCode).toBe(200); expect(savedLinks).toEqual(expectedLinks); expect(update.mock.calls[1]?.[0]).not.toHaveProperty('externalLinks');
   const removed = await app.inject({ method: 'PATCH', url: '/api/admin/projects/1', headers, payload: { externalLinks: [] } }); expect(removed.statusCode).toBe(200); expect(savedLinks).toEqual([]);
  });
  it('derives draft change services and rejects a nonauthor before resolution', async () => {

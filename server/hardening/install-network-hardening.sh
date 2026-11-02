@@ -55,7 +55,7 @@ if [[ "$DRY_RUN" != "true" && "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
-if [[ "$INSTALL_PACKAGES" == "true" ]]; then
+if [[ "$INSTALL_PACKAGES" == "true" && "$DRY_RUN" != "true" ]]; then
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban nftables

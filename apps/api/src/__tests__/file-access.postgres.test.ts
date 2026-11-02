@@ -1,3 +1,4 @@
+import { DownloadRateLimiter } from '../shared/download-rate-limit.js';
 import { randomUUID } from 'node:crypto';
 import Fastify, {type FastifyInstance} from 'fastify';
 import cookie from '@fastify/cookie';
@@ -11,6 +12,9 @@ import {createFileAccessRepository} from '../modules/file-access/repository.js';
 import {registerAuth} from '../plugins/auth.js';
 import {AppError} from '../shared/errors.js';
 import type {Env} from '../config/env.js';
+
+const downloadIpLimiter = new DownloadRateLimiter();
+const allowDownloadIp = (ip: string) => downloadIpLimiter.assertIpAllowed(ip);
 
 describe.runIf(process.env['RUN_POSTGRES_INTEGRATION']==='true')('live file capability HTTP boundary',()=>{
  let db:PrismaClient, app:FastifyInstance, database:Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
@@ -40,7 +44,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION']==='true')('live file capa
   await registerAuth(app,{config:{...config,SESSION_TOUCH_MIN_INTERVAL_MS:3600000,COOKIE_SECURE:false,COOKIE_SAME_SITE:'lax',CORS_ALLOWED_ORIGINS:[origin]},clock:{now:()=>time},logger:app.log,sessions:{find:id=>db.authSession.findUnique({where:{id},include:{user:true}}),touch:async()=>{},delete:async id=>{await db.authSession.delete({where:{id}});}}});
   app.setErrorHandler((error,_request,reply)=>reply.status(error instanceof AppError?error.statusCode:500).send({ok:false,error:{code:error instanceof AppError?error.code:'INTERNAL_ERROR',message:error instanceof Error?error.message:'Unknown error'}}));
   registerRouteSchemas(app);
-  await app.register(createFileAccessController(createFileAccessRepository(db),config,()=>time,async(bucket,key)=>`http://protected.test/${bucket}/${key}?signedAt=${time.getTime()}`),{prefix:'/api'});
+  await app.register(createFileAccessController(createFileAccessRepository(db),config,allowDownloadIp,()=>time,async(bucket,key)=>`http://protected.test/${bucket}/${key}?signedAt=${time.getTime()}`),{prefix:'/api'});
  });
  afterAll(async()=>{await app?.close();await database?.close();});
  const issue=(url:string,session=sid)=>app.inject({method:'POST',url:'/api/file-access',headers:{origin,cookie:'sid='+session},payload:{url}});

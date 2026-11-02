@@ -45,6 +45,7 @@ export function createUploadLifecycleRuntime(
 	const closeController = new AbortController();
 	let started = false;
 	let closing = false;
+	let paused = false;
 	let startPromise: Promise<void> | undefined;
 	let closePromise: Promise<void> | undefined;
 	let deletionPending = false;
@@ -55,6 +56,7 @@ export function createUploadLifecycleRuntime(
 	function ensureDeletionWorker(signal?: AbortSignal): Promise<void> {
 		deletionPending = true;
 		if (deletionFlight) return deletionFlight;
+		if (paused) return Promise.resolve();
 		if (closing) return Promise.reject(new Error('Upload lifecycle runtime is closing'));
 		const operationSignal = combinedSignal(closeController.signal, signal);
 		deletionFlight = (async () => {
@@ -65,18 +67,18 @@ export function createUploadLifecycleRuntime(
 				if (result.tried === ORPHAN_BATCH_SIZE && !operationSignal.aborted) {
 					deletionPending = true;
 				}
-			} while (deletionPending && !closing);
+			} while (deletionPending && !closing && !paused);
 		})().finally(() => {
 			deletionFlight = undefined;
-			if (deletionPending && started && !closing) scheduleDeletionWorker();
+			if (deletionPending && started && !closing && !paused) scheduleDeletionWorker();
 		});
 		return deletionFlight;
 	}
 
 	function scheduleDeletionWorker(): void {
-		if (!started || closing) return;
+		if (!started || paused || closing) return;
 		queueMicrotask(() => {
-			if (!started || closing || !deletionPending) return;
+			if (!started || paused || closing || !deletionPending) return;
 			void ensureDeletionWorker().catch((error) => {
 				services.logger.error(
 					{ error },
@@ -89,29 +91,32 @@ export function createUploadLifecycleRuntime(
 	function ensureMaintenance(signal?: AbortSignal): Promise<void> {
 		maintenancePending = true;
 		if (maintenanceFlight) return maintenanceFlight;
+		if (paused) return Promise.resolve();
 		if (closing) return Promise.reject(new Error('Upload lifecycle runtime is closing'));
 		const operationSignal = combinedSignal(closeController.signal, signal);
 		maintenanceFlight = (async () => {
 			do {
 				maintenancePending = false;
 				if (operationSignal.aborted) return;
-				await Promise.all([
+				const results = await Promise.allSettled([
 					services.multipartAborts.run(operationSignal),
 					services.uploadIntents.sweep(operationSignal),
 					services.idempotency.purgeExpired(services.clock.now()),
 				]);
-			} while (maintenancePending && !closing);
+				const failed = results.find(result => result.status === 'rejected');
+				if (failed?.status === 'rejected') throw failed.reason;
+			} while (maintenancePending && !closing && !paused);
 		})().finally(() => {
 			maintenanceFlight = undefined;
-			if (maintenancePending && started && !closing) scheduleMaintenance();
+			if (maintenancePending && started && !closing && !paused) scheduleMaintenance();
 		});
 		return maintenanceFlight;
 	}
 
 	function scheduleMaintenance(): void {
-		if (!started || closing) return;
+		if (!started || paused || closing) return;
 		queueMicrotask(() => {
-			if (!started || closing || !maintenancePending) return;
+			if (!started || paused || closing || !maintenancePending) return;
 			void ensureMaintenance().catch((error) => {
 				services.logger.error(
 					{ error },
@@ -146,6 +151,13 @@ export function createUploadLifecycleRuntime(
 				ensureMaintenance(signal),
 			]);
 		},
+		quiesce() { paused = true; },
+		async resume() {
+			paused = false;
+			started = true;
+			await runtime.recover();
+		},
+		activity: () => Number(!!deletionFlight) + Number(!!maintenanceFlight) + (services.background?.active() ?? 0),
 		start() {
 			startPromise ??= (async () => {
 				if (closing) throw new Error('Upload lifecycle runtime is closed');
@@ -164,6 +176,7 @@ export function createUploadLifecycleRuntime(
 					...(deletionFlight ? [deletionFlight] : []),
 					...(maintenanceFlight ? [maintenanceFlight] : []),
 				]);
+				await services.background?.settled();
 			})();
 			return closePromise;
 		},
@@ -189,10 +202,25 @@ export function createProductionUploadLifecycleRuntime(deps: {
 		},
 		deps.logger,
 	);
+	// A renewal deadline may return before the database promise settles. Preserve
+	// the existing cancellation deadline while retaining deployment visibility.
+	const renewalFlights = new Set<Promise<unknown>>();
+	const orphanRepository = createOrphanRepository(deps.prisma);
+	const background = {
+		active: () => renewalFlights.size,
+		async settled() { await Promise.allSettled([...renewalFlights]); },
+	};
 	const orphans = createOrphanService({
 		clock: deps.clock,
 		storage: deps.storage,
-		repository: createOrphanRepository(deps.prisma),
+		repository: {
+			...orphanRepository,
+			renewActiveClaim(...args) {
+				const operation = orphanRepository.renewActiveClaim(...args);
+				renewalFlights.add(operation);
+				return operation.finally(() => { renewalFlights.delete(operation); });
+			},
+		},
 		references,
 		ids: deps.ids,
 		logger: deps.logger,
@@ -231,5 +259,6 @@ export function createProductionUploadLifecycleRuntime(deps: {
 		clock: deps.clock,
 		logger: deps.logger,
 		metrics: deps.metrics,
+		background,
 	});
 }

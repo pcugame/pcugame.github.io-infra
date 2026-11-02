@@ -7,3 +7,9 @@
 !.env.example
 *.log
 coverage
+
+# UE dependencies are fetched and verified inside the build stage.
+tools/ue-inspector/.vendor
+tools/ue-inspector/bin
+tools/ue-inspector/obj
+tools/ue-inspector/publish

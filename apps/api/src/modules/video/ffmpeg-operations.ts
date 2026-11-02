@@ -1,6 +1,6 @@
 import { open, stat } from 'node:fs/promises';
 import type { BoundedCommandRunner, VideoOperations, VideoProbe } from './ports.js';
-import type { VideoLimits } from './policy.js';
+import { playbackBitRate, playbackQualityBounds, type VideoLimits } from './policy.js';
 import { VideoInfrastructureError, VideoRejectedError } from './errors.js';
 
 interface ProbeJson {
@@ -16,6 +16,7 @@ interface ProbeJson {
 	}>;
 	format?: {
 		format_name?: string;
+		tags?: { major_brand?: string };
 		bit_rate?: string;
 		duration?: string;
 	};
@@ -81,12 +82,14 @@ function parseProbe(stdout: string): Omit<VideoProbe, 'fastStart'> {
 	return {
 		formatNames: (parsed.format?.format_name ?? '')
 			.toLowerCase().split(',').map((name) => name.trim()).filter(Boolean),
+		containerMajorBrand: parsed.format?.tags?.major_brand,
 		videoCodec: video.codec_name.toLowerCase(),
 		audioCodec: (audios[0]?.codec_name ?? '').toLowerCase(),
 		pixelFormat: (video.pix_fmt ?? '').toLowerCase(),
 		width: finiteNumber(video.width),
 		height: finiteNumber(video.height),
 		frameRate: ratio(video.avg_frame_rate) || ratio(video.r_frame_rate),
+		nominalFrameRate: ratio(video.r_frame_rate),
 		bitRate: finiteNumber(parsed.format?.bit_rate ?? video.bit_rate),
 		durationSeconds: finiteNumber(parsed.format?.duration),
 		streamCount: streams.length,
@@ -118,7 +121,7 @@ export function createFfmpegVideoOperations(
 					args: [
 						...probeCommon,
 						'-show_entries',
-						'format=format_name,bit_rate,duration:stream=codec_type,codec_name,pix_fmt,width,height,avg_frame_rate,r_frame_rate,bit_rate',
+						'format=format_name,bit_rate,duration:format_tags=major_brand:stream=codec_type,codec_name,pix_fmt,width,height,avg_frame_rate,r_frame_rate,bit_rate',
 						'-of', 'json',
 						filePath,
 					],
@@ -167,16 +170,24 @@ export function createFfmpegVideoOperations(
 				throw rejectedCommand('Video remux failed', error, signal);
 			}
 		},
-		async reencode(inputPath, outputPath, maxOutputBytes, signal) {
+		async reencode(inputPath, outputPath, maxOutputBytes, signal, divisor = 1, quality = 'max') {
+            const bounds = playbackQualityBounds(quality, limits);
+            const source = await this.probe(inputPath, signal);
+            const rate = Math.floor(Math.min(playbackBitRate(source.frameRate / divisor),
+                (maxOutputBytes * 8 * 0.92 / source.durationSeconds) - 160_000));
+            if (rate < 64_000) throw new VideoRejectedError('Insufficient playback budget', 'RESOURCE_LIMIT');
 			try {
 				await runner.run({
 					file: 'ffmpeg',
 					args: [
 						...ffmpegCommon, '-xerror', '-i', inputPath,
 						'-map', '0:v:0', '-map', '0:a:0?',
-						'-vf', `scale=${limits.maxPlaybackWidth}:${limits.maxPlaybackHeight}:force_original_aspect_ratio=decrease:force_divisible_by=2,fps=${limits.maxPlaybackFrameRate}`,
-						'-c:v', 'libx264', '-preset', 'medium', '-b:v', '4800k',
-						'-maxrate', '5000k', '-bufsize', '10000k', '-pix_fmt', 'yuv420p',
+						'-vf', `scale=w='min(iw,${bounds.width})':h='min(ih,${bounds.height})':force_original_aspect_ratio=decrease:force_divisible_by=2${divisor > 1 ? `,select='not(mod(n,${divisor}))'` : ''}`,
+						'-fps_mode', 'passthrough', '-enc_time_base', '-1',
+                        '-c:v', 'libx264', '-preset', 'medium', '-crf', '20',
+                        '-maxrate', String(rate), '-bufsize', String(rate * 2), '-pix_fmt', 'yuv420p',
+                        '-force_key_frames', 'expr:gte(t,n_forced*2)',
+                        ...(divisor > 1 ? ['-bsf:v', `setts=pts=PTS:dts=DTS:duration=DURATION*${divisor}`] : []),
 						'-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart',
 						'-fs', String(maxOutputBytes), '-y', outputPath,
 					],
@@ -187,8 +198,28 @@ export function createFfmpegVideoOperations(
 			} catch (error) {
 				throw rejectedCommand('Video transcode failed', error, signal);
 			}
-		},
-	};
+        },
+        async verifyPlayback(inputPath, outputPath, divisor, signal) {
+            const frames = async (path: string) => {
+                const result = await runner.run({ file: 'ffprobe', args: ['-v', 'error', '-select_streams', 'v:0',
+                    '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'csv=p=0', path],
+                    timeoutMs: limits.decodeTimeoutMs, maxOutputBytes: 16 * 1024 * 1024, signal });
+                return result.stdout.split('\n').map(line => line.split(',')[0]!.trim()).filter(Boolean).map(Number);
+            };
+            const source = await frames(inputPath);
+            const output = await frames(outputPath);
+            const expected = source.filter((_, index) => index % divisor === 0);
+            if (!expected.length || output.length !== expected.length || output.some((time, index) =>
+                !Number.isFinite(time) || Math.abs((time - output[0]!) - (expected[index]! - expected[0]!)) > 0.002)) {
+                throw new VideoRejectedError('Playback frame count or timestamps changed', 'CORRUPT_MEDIA');
+            }
+            const [before, after] = await Promise.all([this.probe(inputPath, signal), this.probe(outputPath, signal)]);
+            if (Math.abs(before.durationSeconds - after.durationSeconds) > Math.max(0.15, 2 * divisor / (before.frameRate || 1))) {
+                throw new VideoRejectedError('Playback duration changed or output was truncated', 'CORRUPT_MEDIA');
+            }
+            await this.verifyDecode(outputPath, signal);
+        },
+    };
 }
 
 export const videoProbeInternals = { parseProbe };

@@ -20,6 +20,7 @@ function normalizedEntryName(fileName: string): string {
 
 export interface WebglArchiveLayout {
 	wrapperPrefix: string;
+	entryPath?: string;
 	/** Validated archive path -> public path. */
 	files: Map<string, string>;
 }
@@ -41,7 +42,18 @@ function assertRequiredUnityArtifacts(hostedPaths: Iterable<string>): void {
 }
 
 /** Apply Unity layout rules after the common validator fully decoded every entry. */
-export function analyzeWebglArchive(summary: BoundedZipValidationSummary): WebglArchiveLayout {
+export function analyzeWebglArchive(summary: BoundedZipValidationSummary, selectedEntry?: string): WebglArchiveLayout {
+	if (selectedEntry !== undefined) {
+		const files = summary.entries.filter(entry => !entry.isDirectory && entry.linkTarget === undefined);
+		if (!files.some(entry => entry.path === selectedEntry) || !/\.html?$/i.test(selectedEntry)) throw badRequest('Invalid web entry');
+		// Strip only common ancestor directories. Every relative link keeps its meaning.
+		const common = files[0]!.path.split('/').slice(0, -1);
+		for (const file of files) {
+			while (common.length && !file.path.startsWith(common.join('/') + '/')) common.pop();
+		}
+		const wrapperPrefix = common.length ? common.join('/') + '/' : '';
+		return { wrapperPrefix, entryPath: selectedEntry.slice(wrapperPrefix.length), files: new Map(files.map(entry => [entry.path, entry.path.slice(wrapperPrefix.length)])) };
+	}
 	if (summary.profile !== 'WEBGL') {
 		throw new Error('WebGL layout requires the WEBGL ZIP policy');
 	}

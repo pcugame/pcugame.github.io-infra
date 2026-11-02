@@ -1,3 +1,4 @@
+import type { BuildReviewWorkerPort } from '../build-review/ports.js';
 import type { AppLogger, Clock, IdGenerator, ObjectStorage } from '../../application/ports.js';
 import { createWebglProcessingProcessor, type WebglProcessingRepository } from './processing.js';
 import {
@@ -41,6 +42,7 @@ export function createWebglTempDiskBudget(maxBytes: number) {
 
 /** Processing-only graph. Fastify and BackendContext must never import it. */
 export function createWebglProcessingGraph(deps: {
+	reviews?: BuildReviewWorkerPort;
 	publicBucket: string;
 	protectedBucket: string;
 	storage: Pick<ObjectStorage, 'stream' | 'upload' | 'head'>;
@@ -52,6 +54,7 @@ export function createWebglProcessingGraph(deps: {
 }) {
 	const diskBudget = createWebglTempDiskBudget(deps.options.tempDiskBudgetBytes);
 	const processor = createWebglProcessingProcessor({
+		reviews: deps.reviews,
 		publicBucket: deps.publicBucket,
 		protectedBucket: deps.protectedBucket,
 		tempRoot: deps.options.tempRoot,

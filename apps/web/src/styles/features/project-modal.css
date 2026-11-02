@@ -65,6 +65,14 @@
   background: #fff;
 }
 
+/* Overlay dismissal stays reachable while the project content scrolls. */
+.modal-panel--project > .modal-close {
+  width: max(2.25rem, 44px);
+  height: max(2.25rem, 44px);
+  padding: 0;
+  z-index: 40;
+}
+
 .modal-loading {
   display: flex;
   align-items: center;
@@ -369,6 +377,8 @@
 .modal-panel--project {
   display: flex;
   flex-direction: column;
+  border: 0;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.2);
   max-height: calc(100dvh - 4rem);
   overflow: hidden;
 }
@@ -532,3 +542,14 @@
 }
 
 .modal-video-label { margin: .5rem 0; font-size: .8rem; color: var(--color-text-muted); text-align: center; }
+
+/* Notes and downloads must not consume the video's 16:9 playback area. */
+.modal-visual__frame--video {
+  height: auto;
+  padding-bottom: 0;
+}
+
+.modal-visual__frame--video .project-video {
+  position: relative;
+  height: auto;
+}

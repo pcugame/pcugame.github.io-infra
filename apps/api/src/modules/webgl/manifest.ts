@@ -34,5 +34,5 @@ export function assertWebglPublishedObjectManifest(
 		}
 		keys.add(object.objectKey);
 	}
-	if (!keys.has(entryObjectKey)) throw new Error('WebGL published object manifest omits index.html');
+	if (!keys.has(entryObjectKey)) throw new Error('WebGL published object manifest omits the selected entry');
 }

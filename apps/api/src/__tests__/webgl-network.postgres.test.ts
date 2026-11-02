@@ -1,3 +1,4 @@
+import { DownloadRateLimiter } from '../shared/download-rate-limit.js';
 import { createAuthController } from '../modules/auth/controller.js';
 import { browserWebOrigin, verifyNetworkFormBrowser } from './helpers/webgl-network-form-browser.js';
 import { createDiagnosticRepository } from '../modules/webgl-play/diagnostic-repository.js';
@@ -7,7 +8,7 @@ import Fastify, { type FastifyInstance, type FastifyError } from 'fastify';
 import cookie from '@fastify/cookie';
 import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WebglNetworkRequestSchema, WebglNetworkRequestListSchema } from '@pcu/contracts';
+import { WebglNetworkBatchResponseSchema, WebglNetworkRequestSchema, WebglNetworkRequestListSchema } from '@pcu/contracts';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import type { Env } from '../config/env.js';
 import { AppError } from '../shared/errors.js';
@@ -25,6 +26,9 @@ import { createFileAccessRepository } from '../modules/file-access/repository.js
 import { createFileAccessController } from '../modules/file-access/controller.js';
 
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
+const downloadIpLimiter = new DownloadRateLimiter();
+const allowDownloadIp = (ip: string) => downloadIpLimiter.assertIpAllowed(ip);
+
 describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary', () => {
  let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>, db: PrismaClient, app: FastifyInstance;
  let logs = '';
@@ -80,7 +84,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
    delete: id => db.authSession.deleteMany({ where: { id } }),
   } });
   await registerCsrf(app, config);
-  app.setErrorHandler((error: FastifyError, _request, reply) => reply.status(error instanceof AppError ? error.statusCode : error.validation ? 400 : error.statusCode ?? 500).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error.message } }));
+  app.setErrorHandler((error: FastifyError, _request, reply) => reply.status(error instanceof AppError ? error.statusCode : error.validation ? 400 : error.statusCode ?? 500).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error.message, ...(error instanceof AppError ? { details: error.details } : {}) } }));
   await app.register(createAuthController({ config, clock: { now: () => new Date() }, service: { loginWithGoogle: async () => { throw new Error('OAuth is outside this fixture'); }, logout: async () => {} } }), { prefix: '/api' });
   const network = createWebglNetworkService(createWebglNetworkRepository(db), config);
   await app.register(createWebglNetworkController(network, 'me'), { prefix: '/api/me' });
@@ -88,7 +92,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   playRepository = createWebglPlayRepository(db);
   const play = createWebglPlayService(playRepository, config, createDiagnosticService(createDiagnosticRepository(db)));
   await app.register(createWebglPlayController(play, config));
-  await app.register(createFileAccessController(createFileAccessRepository(db), config, undefined, undefined, undefined, play.resolveRuntime), { prefix: '/api' });
+  await app.register(createFileAccessController(createFileAccessRepository(db), config, allowDownloadIp, undefined, undefined, undefined, play.resolveRuntime), { prefix: '/api' });
  });
  beforeEach(async () => {
   config.WEBGL_EXTERNAL_CONNECTIONS_ENABLED = true;
@@ -112,6 +116,108 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   const reviewed = WebglNetworkRequestSchema.parse(response.json().data); expect(reviewed.state).toBe('APPROVED'); expect(reviewed.events[0]).toMatchObject({ action: 'APPROVE', actorId: admin, policyVersion: 1 });
   const ownerList = WebglNetworkRequestListSchema.parse((await list()).json().data); expect(ownerList.policyVersion).toBe(1); expect(ownerList.items[0]).toEqual(reviewed);
   const adminList = await request('GET', '/api/admin/webgl-network-requests', adminSid); expect(adminList.statusCode).toBe(200); expect(WebglNetworkRequestListSchema.parse(adminList.json().data).policyVersion).toBeNull();
+ });
+ const batch = (items = [body('https://first.example.com:*'), body('wss://second.example.com:*')], session = sid) => request('POST', `/api/me/projects/${projectId}/webgl-network-requests/batch`, session, { items });
+ const direct = (items = [body('https://direct.example.com:*'), body('wss://direct.example.com:*')], session = adminSid, id = projectId) => request('POST', `/api/admin/projects/${id}/webgl-network-requests/allow`, session, { items, reason: 'Operator configured and verified these game services' });
+ it('lets unrelated staff directly allow a closed project with atomic audit and new-play policy', async () => {
+  await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: false } });
+  const empty = await request('GET', `/api/admin/projects/${projectId}/webgl-network-requests`, adminSid);
+  expect(WebglNetworkRequestListSchema.parse(empty.json().data).items).toEqual([]);
+  const old = await grant();
+  const response = await direct(undefined, operatorSid); expect(response.statusCode, response.body).toBe(201);
+  const rows = WebglNetworkBatchResponseSchema.parse(response.json().data).items;
+  expect(rows.map(row => row.state)).toEqual(['APPROVED', 'APPROVED']);
+  expect(rows.map(row => row.policyVersion)).toEqual([1, 2]);
+  for (const row of rows) { expect(row.reviewerId).toBe(row.requesterId); expect(row.events).toHaveLength(1); expect(row.events[0]).toMatchObject({ action: 'APPROVE', actorId: row.requesterId }); }
+  const populated = WebglNetworkRequestListSchema.parse((await request('GET', `/api/admin/projects/${projectId}/webgl-network-requests`, adminSid)).json().data);
+  expect(populated.items).toHaveLength(2); expect(populated.policyVersion).toBe(2);
+  expect((await db.webglPlaySession.findUniqueOrThrow({ where: { id: old.id } })).approvedOrigins).toEqual([]);
+  const fresh = await grant(); expect((await db.webglPlaySession.findUniqueOrThrow({ where: { id: fresh.id } })).approvedOrigins.sort()).toEqual(rows.map(row => row.origin).sort());
+  expect((await review(rows[0]!.id, 'revoke')).statusCode).toBe(200);
+  expect((await db.webglNetworkRequest.findUniqueOrThrow({ where: { id: rows[1]!.id } })).state).toBe('APPROVED');
+ });
+ it('denies direct grants and project policy reads to owners and unauthenticated users', async () => {
+  expect((await direct(undefined, sid)).statusCode).toBe(403);
+  expect((await direct(undefined, '')).statusCode).toBe(401);
+  expect((await request('GET', `/api/admin/projects/${projectId}/webgl-network-requests`, sid)).statusCode).toBe(403);
+  expect((await direct(undefined, adminSid, 2147483647)).statusCode).toBe(404);
+  expect((await list()).json().data.items).toHaveLength(0);
+ });
+ it('rolls back all direct approvals on protected host, overlap, pending duplicate or invalid reason', async () => {
+  const denied = await direct([body('https://direct.example.com'), body('https://games.fixture.example')]);
+  expect(denied.statusCode).toBe(400); expect(denied.json().error.details).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1, field: 'origin' })]));
+  expect((await direct([body('https://*.example.com:*'), body('https://inside.example.com')])).statusCode).toBe(400);
+  expect((await request('POST', `/api/admin/projects/${projectId}/webgl-network-requests/allow`, adminSid, { items: [body()], reason: '' })).statusCode).toBe(400);
+  expect((await list()).json().data.items).toHaveLength(0);
+  await create(); expect((await direct([body('https://new.example.com'), body()])).statusCode).toBe(409);
+  expect((await list()).json().data.items).toHaveLength(1);
+  expect((await list()).json().data.policyVersion).toBe(0);
+  await approved('https://*.example.net:*');
+  expect((await direct([body('https://new.example.com'), body('https://overlap.example.net')])).statusCode).toBe(409);
+  expect((await list()).json().data.items).toHaveLength(2);
+ });
+ it('serializes simultaneous direct approvals at the sixteen-rule limit', async () => {
+  expect((await direct(Array.from({ length: 15 }, (_, i) => body(`https://direct${i}.example.com`)))).statusCode).toBe(201);
+  const results = await Promise.all([direct([body('https://race1.example.com')]), direct([body('https://race2.example.com')])]);
+  expect(results.map(r => r.statusCode).sort()).toEqual([201, 409]);
+  expect((await list()).json().data.items).toHaveLength(16); expect((await list()).json().data.policyVersion).toBe(16);
+ });
+ it('creates an ordered batch and independently approves/revokes its runtime policy', async () => {
+  const response = await batch(); expect(response.statusCode, response.body).toBe(201);
+  const rows = WebglNetworkBatchResponseSchema.parse(response.json().data).items;
+  expect(rows.map(row => row.origin)).toEqual(['https://first.example.com:*', 'wss://second.example.com:*']);
+  expect(WebglNetworkRequestListSchema.parse((await list()).json().data).items).toHaveLength(2);
+  for (const row of rows) expect((await review(row.id, 'approve')).statusCode).toBe(200);
+  const session = await grant();
+  expect((await db.webglPlaySession.findUniqueOrThrow({ where: { id: session.id } })).approvedOrigins.sort()).toEqual(rows.map(row => row.origin).sort());
+  expect((await review(rows[0]!.id, 'revoke')).statusCode).toBe(200);
+  const fresh = await grant();
+  expect((await db.webglPlaySession.findUniqueOrThrow({ where: { id: fresh.id } })).approvedOrigins).toEqual([rows[1]!.origin]);
+  expect((await gate(session)).statusCode).toBe(403);
+  expect((await gate(fresh)).statusCode).toBe(204);
+ });
+ it('rejects every invalid/protected/overlapping batch without saving its valid prefix', async () => {
+  for (const invalid of [body('https://localhost'), body(gameOrigin), { ...body('https://next.example.com'), purpose: '' }]) {
+   const result = await batch([body(), invalid]); expect(result.statusCode).toBe(400);
+   expect(result.json().error.details).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1 })]));
+   expect((await list()).json().data.items).toHaveLength(0);
+  }
+  expect((await batch([body('https://*.example.com:*'), body()])).statusCode).toBe(400);
+  expect((await batch([])).statusCode).toBe(400);
+  expect((await batch(Array.from({ length: 17 }, (_, i) => body(`https://host${i}.example.com`)))).statusCode).toBe(400);
+  expect((await list()).json().data.items).toHaveLength(0);
+ });
+ it('checks batch authentication, relationship and modification closure', async () => {
+  expect((await batch(undefined, '')).statusCode).toBe(401);
+  expect((await batch(undefined, outsiderSid)).statusCode).toBe(403);
+  expect((await batch(undefined, adminSid)).statusCode).toBe(403);
+  expect((await batch(undefined, memberSid)).statusCode).toBe(201);
+  await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: false } });
+  expect((await batch([body()])).statusCode).toBe(403);
+  expect((await list()).json().data.items).toHaveLength(2);
+ });
+ it.each(['request', 'direct grant'])('rolls back saved rows, events and policy when a later %s write fails', async mode => {
+  await db.$executeRawUnsafe("ALTER TABLE webgl_network_requests ADD CONSTRAINT batch_fixture_failure CHECK (purpose <> 'batch-storage-failure')");
+  try {
+   expect((await (mode === 'request' ? batch : direct)([body(), { ...body('https://next.example.com'), purpose: 'batch-storage-failure' }])).statusCode).toBe(500);
+   expect((await list()).json().data.policyVersion).toBe(0);
+   expect(await db.webglNetworkReviewEvent.count({ where: { originalProjectId: projectId } })).toBe(0);
+   expect((await list()).json().data.items).toHaveLength(0);
+  } finally { await db.$executeRawUnsafe('ALTER TABLE webgl_network_requests DROP CONSTRAINT batch_fixture_failure'); }
+ });
+ it('serializes concurrent batches and rejects active duplicates without a partial write', async () => {
+  const responses = await Promise.all([batch(), batch()]);
+  expect(responses.map(result => result.statusCode).sort()).toEqual([201, 409]);
+  const conflict = await batch([body(), body('https://first.example.com:*')]);
+  expect(conflict.statusCode).toBe(409);
+  expect(conflict.json().error.details).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1, field: 'origin' })]));
+  expect((await list()).json().data.items).toHaveLength(2);
+ });
+ it('permits overlap with existing approvals at submission and enforces the batch size boundary', async () => {
+  await approved();
+  expect((await batch([body(external + ':*')])).statusCode).toBe(201);
+  const result = await batch(Array.from({ length: 16 }, (_, i) => body(`https://batch${i}.example.com`)));
+  expect(result.statusCode).toBe(201); expect(result.json().data.items).toHaveLength(16);
  });
  it('checks ownership, linked membership, exhibition closure, authentication and review role', async () => {
   expect((await list(outsiderSid)).statusCode).toBe(403); expect((await create(external, outsiderSid)).statusCode).toBe(403);

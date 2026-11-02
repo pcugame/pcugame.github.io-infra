@@ -103,7 +103,7 @@ for (const status of ['HEAD', '304', '206', '416']) assert.ok(smoke.includes(sta
 assert.doesNotMatch(cutover, /podman (?:stop|start) gp-api/);
 assert.doesNotMatch(cutover, /API-down data-plane smoke/);
 assert.match(smoke, /full\.headers\.get\('cache-control'\), 'private, no-store'/);
-assert.match(orchestration, /podman exec gp-api wget[^\n]+api\/health[^\n]+ok[^\n]+true/);
+assert.match(orchestration, /podman exec "\$api_container" wget[^\n]+api\/health[^\n]+ok[^\n]+true/);
 assert.match(orchestration, /smoke-data-plane\.mjs/);
 assert.ok(orchestration.includes('[ "$actual_source" = "$RELEASE_SOURCE_SHA" ]'));
 assert.ok(orchestration.includes('[ "$actual_digest" = "${FINAL_IMAGE##*@}" ]'));

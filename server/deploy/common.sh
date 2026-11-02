@@ -7,6 +7,16 @@ ENV_FILE="${DEPLOY_DIR}/.env"
 POD_NAME="graduationproject"
 PG_CONTAINER="gp-postgres"
 API_CONTAINER="gp-api"
+API_HEALTH_PORT=4000
+API_SLOTS=false
+if [[ -f "${DEPLOY_DIR}/cutover-state/active-slot" ]]; then
+  active_slot="$(cat "${DEPLOY_DIR}/cutover-state/active-slot")"
+  [[ "$active_slot" == a || "$active_slot" == b ]] || { echo 'Invalid active slot' >&2; exit 1; }
+  API_SLOTS=true
+  API_CONTAINER="gp-api-${active_slot}"
+  [[ "$active_slot" == a ]] || API_HEALTH_PORT=4001
+fi
+export API_SLOTS
 GAME_WORKER_CONTAINER="gp-worker-game-validation"
 WEBGL_WORKER_CONTAINER="gp-worker-webgl"
 VIDEO_WORKER_CONTAINER="gp-worker-video"
@@ -40,9 +50,12 @@ load_env() {
   fi
   # The caller owns the selected source/artifact; a stale host .env cannot change it.
   local selected_api="$API_IMAGE" selected_migration="$MIGRATION_IMAGE" selected_source="${RELEASE_SOURCE_SHA:-}"
+  local selected_slots="$API_SLOTS" selected_port="$API_HEALTH_PORT"
   set -a
   # shellcheck disable=SC1090
   source "$ENV_FILE"
+  API_SLOTS="$selected_slots"
+  API_HEALTH_PORT="$selected_port"
   API_IMAGE="$selected_api"
   MIGRATION_IMAGE="$selected_migration"
   RELEASE_SOURCE_SHA="$selected_source"

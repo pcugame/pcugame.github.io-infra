@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "quadlet_dir": "/home/deploy/.config/containers/systemd",
+  "upstream_file": "/etc/nginx/pcu/api-upstream.conf",
+  "nginx_pid_file": "/run/nginx.pid",
+  "nginx_dump": ["sudo", "-n", "nginx", "-T"],
+  "nginx_test": ["sudo", "-n", "nginx", "-t"],
+  "nginx_reload": ["sudo", "-n", "nginx", "-s", "reload"],
+  "nginx_config_sha256": "REPLACE_WITH_REVIEWED_EFFECTIVE_CONFIG_FINGERPRINT"
+}

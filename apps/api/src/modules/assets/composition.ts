@@ -18,6 +18,7 @@ import { createAssetsController } from './controller.js';
 import type { UploadLifecycleRuntime } from '../upload-lifecycle/ports.js';
 
 export interface AssetsBannedProductionGraph {
+	assertDownloadIpAllowed(ip: string): void;
 	assetsController: FastifyPluginAsync;
  authorizeDownload: ReturnType<typeof createAssetsService>['downloadAssetById'];
 	bannedIpController: FastifyPluginAsync;
@@ -67,6 +68,7 @@ export function createAssetsBannedProductionGraph(
 	});
 
 	return {
+		assertDownloadIpAllowed: gate.assertIpAllowed,
 		assetsController: createAssetsController({ service: assetsService }),
   authorizeDownload: assetsService.downloadAssetById,
 		bannedIpController: createBannedIpController({ service: bannedIpService }),

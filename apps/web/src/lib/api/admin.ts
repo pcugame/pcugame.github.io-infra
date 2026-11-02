@@ -28,6 +28,7 @@ import type {
   ExportStatusResponse,
 } from '../../contracts';
 import { api, uploadFormData } from './client';
+import type { VideoRetryResponse } from '@pcu/contracts';
 
 // ── Exhibition ──────────────────────────────────────────────
 
@@ -91,6 +92,10 @@ export const adminProjectApi = {
 
   reorderVideos(id: number, body: SetProjectVideoOrderRequest) {
     return api.put<void>(`/api/admin/projects/${id}/videos/order`, body);
+  },
+
+  retryVideo(projectId: number, assetId: number) {
+    return api.post<VideoRetryResponse>(`/api/admin/projects/${projectId}/videos/${assetId}/retry`);
   },
 
   /** 작품 + 파일 일괄 등록 (multipart/form-data) */

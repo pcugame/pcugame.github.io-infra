@@ -18,7 +18,7 @@ export function createMaintenanceSchedule(
 	clock: Clock,
 	maintenance: BackgroundMaintenance,
 	logger: AppLogger,
-): { start(): void; close(): Promise<void> } {
+): { start(): void; quiesce(): void; active(): number; close(): Promise<void> } {
 	const tasks: Array<{ cancel(): void }> = [];
 	const inFlight = new Set<Promise<void>>();
 	let started = false;
@@ -27,6 +27,7 @@ export function createMaintenanceSchedule(
 	const abortController = new AbortController();
 
 	async function runTracked(work: () => Promise<void>): Promise<void> {
+		if (!started || closed) return;
 		const operation = work();
 		inFlight.add(operation);
 		try {
@@ -77,6 +78,12 @@ export function createMaintenanceSchedule(
 				}
 			});
 		},
+		quiesce() {
+			started = false;
+			for (const task of tasks) task.cancel();
+			tasks.length = 0;
+		},
+		active: () => inFlight.size,
 		close() {
 			closePromise ??= (async () => {
 				closed = true;

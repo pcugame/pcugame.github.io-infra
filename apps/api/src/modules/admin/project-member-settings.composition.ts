@@ -14,7 +14,8 @@ import { createProjectController } from './project/controller.js';
 import type { ProjectApplicationRepository } from './project/ports.js';
 import { createProjectSerializer } from './project/serializer.js';
 import { createProjectService } from './project/service.js';
-import { assertStatusTransition, bulkUpdateStatus } from './project/project-status.service.js';
+import { bulkUpdateStatus } from './project/project-status.service.js';
+import { enrichExternalLinks } from '../external-links/resolver.js';
 import { createSettingsController } from './settings/controller.js';
 import { createSettingsService } from './settings/service.js';
 import type { UploadLifecycleRuntime } from '../upload-lifecycle/ports.js';
@@ -62,7 +63,10 @@ export function createProjectMemberSettingsProductionGraph(
 			: undefined,
 	);
 	const projectService = createProjectService({
+ publicAssetOrigin: deps.config.PUBLIC_ASSET_ORIGIN ?? deps.config.API_PUBLIC_URL,
 		repository: deps.projectRepository,
+		loadProjectWithAccess: deps.projectAccess.loadProjectWithAccess,
+		resolveExternalLinks: enrichExternalLinks,
 		serializeProjectDetail: serializer.serializeProjectDetail,
 		deletionBuckets: {
 			publicBucket: deps.config.S3_BUCKET_PUBLIC,
@@ -96,7 +100,6 @@ export function createProjectMemberSettingsProductionGraph(
 			service: projectService,
 			access: deps.projectAccess,
 			status: {
-				assertTransition: assertStatusTransition,
 				bulkUpdate: (ids, status) => bulkUpdateStatus(deps.projectRepository, ids, status),
 			},
 		}),

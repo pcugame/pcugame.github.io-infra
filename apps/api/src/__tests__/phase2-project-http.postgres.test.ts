@@ -15,7 +15,7 @@ import { createProjectController } from '../modules/admin/project/controller.js'
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
 import { createProjectService } from '../modules/admin/project/service.js';
 import { createProjectSerializer } from '../modules/admin/project/serializer.js';
-import { assertStatusTransition } from '../modules/admin/project/project-status.service.js';
+import { enrichExternalLinks } from '../modules/external-links/resolver.js';
 import { createProjectAccessService } from '../modules/admin/project-access.service.js';
 import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
 import { createPublicController } from '../modules/public/controller.js';
@@ -87,7 +87,7 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 			});
 		});
 		const repository = createProjectCrudRepository(db);
-		const service = createProjectService({
+		const service = createProjectService({ loadProjectWithAccess: createProjectAccessService(createProjectAccessRepository(db)).loadProjectWithAccess, resolveExternalLinks: enrichExternalLinks,
 			repository,
 			serializeProjectDetail: createProjectSerializer(apiOrigin, {
 				publicAssetOrigin: publicOrigin, publicBucket,
@@ -110,7 +110,6 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 		await app.register(createProjectController({
 			service, access: createProjectAccessService(createProjectAccessRepository(db)),
 			status: {
-				assertTransition: assertStatusTransition,
 				bulkUpdate: async (ids, status) => ({ updated: (await repository.bulkUpdateStatus(ids, status)).count }),
 			},
 		}), { prefix: '/api/admin' });

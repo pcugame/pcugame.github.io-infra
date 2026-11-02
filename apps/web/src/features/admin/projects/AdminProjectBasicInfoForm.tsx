@@ -51,11 +51,7 @@ export function AdminProjectBasicInfoForm({ project, form, formId, isPending, ca
 				<p>{project.status === 'DRAFT' ? '제출 중인 작품은 공개 조회되지 않습니다.' : `현재 조회 대상: ${visibilityLabels[effectiveVisibility]}. 작성자·참여자는 공개 범위와 관계없이 조회할 수 있습니다.`}</p>
 				{!env.VISIBILITY_CONTROLS_ENABLED && <p className="field-hint">현재 공개 범위 변경 기능이 비활성화되어 있습니다.</p>}
 			</div>
-				<div className="form-field">
-					<label htmlFor="sortOrder">오프셋(작을수록 상단에 표시)</label>
-					<input id="sortOrder" aria-invalid={!!errors.sortOrder} aria-describedby={errors.sortOrder ? "sortOrder-error" : undefined} type="number" {...register('sortOrder', { valueAsNumber: true })} />
-					{errors.sortOrder && <span id="sortOrder-error" className="field-error">{errors.sortOrder.message}</span>}
-				</div>
+
 			</FormSection>
 			</>}
 			{section !== 'introduction' && <>

@@ -216,8 +216,10 @@ describe('global project Apply', () => {
   expect((screen.getByLabelText('공개 범위') as HTMLSelectElement).selectedOptions[0].textContent).toContain('운영자·관리자');
   stored = { ...stored, canChangeVisibility: false };
   await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
-  expect((screen.getByLabelText('공개 범위') as HTMLSelectElement).disabled).toBe(true);
-  expect(screen.queryByText(/선택한 공개 범위는 아직 저장되지 않았습니다/)).toBeNull();
+  await waitFor(() => {
+   expect((screen.getByLabelText('공개 범위') as HTMLSelectElement).disabled).toBe(true);
+   expect(screen.queryByText(/선택한 공개 범위는 아직 저장되지 않았습니다/)).toBeNull();
+  });
   change('작품명 *', '제목만 변경'); fireEvent.click(apply());
   await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { title: '제목만 변경' }));
   expect(stored.visibility).toBe('PUBLIC');

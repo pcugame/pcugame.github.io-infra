@@ -20,12 +20,20 @@ export function createWebglNetworkService(repository: WebglNetworkRepository, co
  const gameOrigin = config.PUBLIC_ASSET_ORIGIN ?? '';
  return {
   async listOwner(actor: Actor, projectId: number) { enabled(); return { ...await repository.listOwner(actor, projectId), gameOrigin }; },
+  async listProjectAdmin(actor: Actor, projectId: number) { enabled(); return { ...await repository.listProjectAdmin(actor, projectId), gameOrigin }; },
+  async allowBatch(actor: Actor, projectId: number, body: unknown) {
+   enabled(); return { items: await repository.allowBatch(actor, projectId, body, privilegedHosts(config), now()) };
+  },
   async listAdmin(actor: Actor) { enabled(); return { ...await repository.listAdmin(actor), gameOrigin }; },
   async create(actor: Actor, projectId: number, body: unknown) {
    enabled();
    const input = parseBody(CreateWebglNetworkRequestSchema, body);
    if (isPrivilegedNetworkOrigin(input.origin, config)) throw badRequest('Site and storage origins cannot be approved as external connections', 'VALIDATION_ERROR');
    return repository.create(actor, projectId, input);
+  },
+  async createBatch(actor: Actor, projectId: number, body: unknown) {
+   enabled();
+   return { items: await repository.createBatch(actor, projectId, body, privilegedHosts(config)) };
   },
   async review(actor: Actor, id: string, action: 'approve' | 'reject' | 'revoke', body: unknown) {
    // Revocation remains usable while disabled so administrators can remove grants.

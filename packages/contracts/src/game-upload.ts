@@ -71,7 +71,7 @@ export type DirectGameUploadCompleteRequest = {
 };
 
 export type DirectGameUploadCompletionResponse = {
-	status: 'VERIFYING' | 'READY';
+	status: 'AWAITING_REVIEW' | 'VERIFYING' | 'READY';
 	sessionId: string;
 	generation: number;
 	sizeBytes: number;
@@ -85,7 +85,8 @@ export type DirectAssetUploadStatus = {
 	exhibitionId?: number;
 	owner: DirectAssetUploadOwner;
 	kind: DirectAssetUploadKind;
-	state: 'ALLOCATING' | 'UPLOADING' | 'COMPLETING' | 'VERIFYING' | 'READY' | 'REJECTED' | 'CANCELLED' | 'EXPIRED';
+	review?: { id: string; decision: string; reason: string };
+	state: 'ALLOCATING' | 'UPLOADING' | 'COMPLETING' | 'VERIFYING' | 'AWAITING_REVIEW' | 'READY' | 'REJECTED' | 'CANCELLED' | 'EXPIRED';
 	generation: number;
 	originalName: string;
 	totalBytes: number;

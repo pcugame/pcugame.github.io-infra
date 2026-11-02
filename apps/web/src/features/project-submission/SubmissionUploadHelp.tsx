@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { env } from '../../lib/env';
-import { WebglBuildGuideLink } from '../../components/project/WebglBuildGuideLink';
 
 interface HelpStep {
 	title: string;
@@ -18,33 +17,6 @@ const posterSteps: HelpStep[] = [
 		description: '포스터 영역의 ‘포스터 선택·교체’를 누르거나 파일을 끌어다 놓으세요. JPG·PNG·WebP·PDF 한 개를 선택할 수 있습니다. 이미지 포스터는 작은 미리보기 아래의 ‘포스터 확대’로 확인할 수 있습니다.',
 	},
 ];
-const fileSteps: HelpStep[] = [
-	{
-		title: '파일 선택',
-		image: 'files-select.webp',
-		alt: '게임·미디어·자료 영역의 파일 선택 버튼',
-		description: '‘게임·미디어·자료’에서 ‘파일 선택’을 누르세요. 여러 파일을 함께 선택하거나 끌어다 놓을 수 있습니다. ‘파일 형식·용량 안내’를 펼치면 제한을 확인할 수 있습니다.',
-	},
-	{
-		title: 'ZIP 용도 선택',
-		image: 'zip-purpose.webp',
-		alt: '선택한 ZIP 파일 바로 아래의 게임·WebGL·첨부자료 용도 버튼',
-		description: '각 ZIP 아래의 버튼으로 용도를 고르세요. 다운로드와 브라우저 실행을 모두 제공하려면 각각의 빌드를 ZIP으로 준비하세요.',
-	},
-	{
-		title: '선택한 파일 확인',
-		image: 'files-review.webp',
-		alt: '파일명·종류와 선택 취소 버튼이 함께 표시된 파일 목록',
-		description: '파일명과 용도를 확인하세요. 잘못 선택했다면 ‘선택 취소’를 누르고 다시 선택하세요.',
-	},
-	{
-		title: '작품 제출',
-		image: 'submit-action.webp',
-		alt: '화면 하단 작업 바의 작품 제출과 미리보기 버튼',
-		description: '작품 정보와 파일을 확인한 뒤 하단 작업 바의 ‘작품 제출’을 누르세요. 운영자 화면에서는 ‘작품 등록’으로 표시됩니다. 버튼을 누를 수 없으면 작업 바의 안내를 확인하세요.',
-	},
-];
-
 function HelpScreenshot({ step }: { step: HelpStep }) {
 	const [enlarged, setEnlarged] = useState(false);
 	return (
@@ -132,7 +104,7 @@ function SubmissionHelpModal({ title, steps, webglUploadHint, onClose }: {
 							<div className="submission-help-zip">
 								<dl>
 									<div><dt>게임</dt><dd>내려받아 실행할 게임 파일</dd></div>
-									<div><dt>WebGL</dt><dd>브라우저에서 플레이할 Unity WebGL 빌드</dd></div>
+									<div><dt>WebGL</dt><dd>브라우저에서 플레이할 웹 빌드 빌드</dd></div>
 									<div><dt>첨부자료</dt><dd>소스 코드·참고 자료 등</dd></div>
 								</dl>
 								<p>{webglUploadHint} index.html 한 개와 Build 폴더를 포함하고 빌드 폴더 구조를 유지하세요.</p>
@@ -174,11 +146,4 @@ function SubmissionHelpButton({ title, steps, webglUploadHint }: {
 
 export function SubmissionPosterHelp({ studio = false }: { studio?: boolean }) {
 	return <SubmissionHelpButton title="포스터 사용 방법" steps={studio ? [{ title: '포스터 선택', alt: '', description: '포스터 영역의 ‘파일 선택’을 누르거나 파일을 끌어다 놓으세요. JPG·PNG·WebP·PDF 한 개를 선택할 수 있습니다. 선택한 이미지 포스터는 전시 카드와 마지막 미리보기 단계에서 확인할 수 있습니다. PDF 포스터는 업로드 처리 후 첫 페이지가 표시됩니다. 기존 포스터를 삭제해도 ‘삭제 취소’로 되돌릴 수 있으며, 변경사항은 최종 제출·적용 후 반영됩니다.' }] : posterSteps} />;
-}
-
-export function SubmissionFilesHelp({ webglUploadHint }: { webglUploadHint: string }) {
-	return <span className="submission-guide-links">
-		<SubmissionHelpButton title="파일 업로드 사용 방법" steps={fileSteps} webglUploadHint={webglUploadHint} />
-		<WebglBuildGuideLink />
-	</span>;
 }

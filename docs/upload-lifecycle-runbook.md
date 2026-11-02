@@ -281,3 +281,148 @@ Prompt abort failures logged with
 already committed the exact durable abort task. Verify the task remains queued and
 the worker is progressing; those failures do not by themselves invalidate the
 already committed business response.
+
+## Build package inspection and shared operator review
+
+The additive migrations `20261016000000_build_review_state_expand` and
+`20261016000100_build_review_expand` introduce `AWAITING_REVIEW`, the review audit
+record and review-bound download tokens. The enum addition commits separately
+before the second migration uses it. Existing published assets are not rewritten.
+Use the normal reviewed release/migration workflow; these migrations do not grant
+permission to skip its release gates or restore older binaries after migration.
+
+`BUILD_PACKAGE_REVIEW_ENABLED` defaults to `false`. Apply both migrations and
+ship API/UI readers before enabling it on **the API, GAME validation worker and
+web build worker together**. A mixed fleet containing old readers or old workers
+must not receive new review sessions. Keep the compatible runtime available if
+validation is paused: turning the flag off does not resolve pending reviews, and
+approving work into an old validator would defeat revalidation. Drain affected
+workers instead of downgrading pending work. This flag also enables Canvas 2D
+play without the Unity GPU preflight; origin isolation, runtime CSP, external
+connection policy and service-worker denial are unchanged.
+
+Direct GAME and WEBGL allocation now reads the settings store on every request
+and applies the smaller of the role ceiling and `maxGameFileMb`. Defaults and
+worker resources are unchanged. ZIP64 does not increase any capacity. The ZIP
+validator checks CRC, offsets, entry/decoded-byte ceilings and resolves GAME
+symlinks only within the archive namespace. No filesystem links are created.
+WEBGL symlinks remain rejected. Nested ZIP/APK/AAB/IPA/NW/JAR inspection shares
+entry, expansion and temporary-space budgets and stops at two nested levels;
+resource limits are terminal validation failures, including after approval.
+
+The automatic acceptance registry uses real export fixtures for the following
+web families. Every downloaded file is pinned by immutable revision/upload ID,
+byte size and SHA-256 in `scripts/build-fixtures/*.json`; binaries are downloaded
+to temporary storage, not redistributed in this repository. The second fixture
+layout moves each export below multiple directories, uses Korean/spaced paths,
+and preserves a custom `game.html` entry.
+
+| Family | Actual fixture | Checked connection |
+| --- | --- | --- |
+| Unity | Six existing pinned exports | HTML → loader → framework/Wasm/player data; gzip/Brotli/fallback/threaded variants |
+| Godot | Official demo-projects Pong | HTML → Engine/Wasm → PCK directory/resources |
+| GameMaker | Verdini/celeste-classic-web | Minified bootstrap → compiled game object → room/texture tables |
+| RPG Maker MZ | unacro/rpgmaker-mz-demo | Bootstrap/core → database list → System/MapInfos/startup map |
+| Ren’Py 8 | renpytom’s official web demo, itch upload 7080742 | Bootstrap → game.zip/runtime/scripts → Wasm/Emscripten data ranges |
+| Construct 3 | seanmorley15/Racing2D | Runtime interface → main/worker scripts → project data |
+| GDevelop | RedEdge967/adventures-of-red | RuntimeGame/projectData → layouts/resources/startGameLoop |
+| Defold | selimanac/modplayer-html5-example | Loader/Wasm → archive manifest/pieces → project collection/resource hashes |
+| Cocos Creator 3.8 | readercar/random-roadblock-defense-preview | SystemJS bootstrap → engine/settings → asset bundle/launch scene |
+| PlayCanvas | talpitoo/flappy-bird-clone-browser-game | Application/configure/loadScene/start → configuration/scene/assets |
+
+Native Unity runtime/player-data adapters have actual Windows, Linux and macOS
+exports from beamcode/bounce_master. Godot external PCK also has the actual
+Rhythia Linux export. A pinned Construct APK exercises Android parsing
+and deliberately remains `REVIEW` until manifest-to-engine binding is certified.
+`scripts/build-fixtures/godot-native.py` exports an owned minimal project with
+pinned official Godot 3.6.2 tools for external/embedded PCK coverage; it executes
+the trusted exporter, never an uploaded native game. Unknown PCK versions,
+encrypted/sparse/delta directories and analysis beyond the bounded reader remain
+reviewable. These checks establish package structure, not absence of malware or
+appropriateness of game content.
+
+Variants outside this registry stay reviewable when an executable format is
+established. A native PE/ELF/Mach-O program, an opaque supported installer, a
+parsed mobile package or an executable web candidate can enter the same queue.
+Android binary XML/AAPT2 protobuf envelopes, DEX/native-library ranges and Apple
+XML/binary plist executable bindings have bounded parsers. Full Unreal
+Pak/IoStore/loose-content, GameMaker YYC, Electron ASAR/concatenated NW wrappers,
+native Defold/Cocos and mobile per-engine binding are not certified automatic
+acceptance adapters yet. RPG Maker MV, Construct 2 and other historical/minified
+variants without actual fixture proof must not be described as certified merely
+because their discovery hints or shared parser paths are present. No engine is
+automatically accepted based on its filename alone.
+
+UE structural inspection now runs through a fixed local CUE4Parse process in the
+GAME worker composition. It checks Pak index hashes/ranges, IoStore partition
+and block references. A versioned loose-package summary/export implementation
+remains disabled until a real loose export certifies its interpretation.
+It records parser revision and bounded structural facts in existing review
+`evidence`. Container copies are optional: insufficient workspace or semantic
+budget enters REVIEW. Confirmed damage cannot be bypassed by review approval;
+process installation/protocol failure uses infrastructure retry. All UE formats
+remain REVIEW until payload, executable/project binding and actual loose export
+certification are complete. The observed Windows/Linux mixed exports and
+remaining gates are documented in [UE inspector](../tools/ue-inspector/README.md).
+The API image contains a self-contained directory at `/opt/ue-inspector` and
+requires no executable extraction into the worker's `noexec` temporary mount.
+The existing `BUILD_PACKAGE_REVIEW_ENABLED` rollout gate remains authoritative;
+existing published builds are not revalidated by this change.
+
+Review lifecycle:
+
+1. The worker validates the immutable source identity and common package safety,
+   records one review per session/generation, releases its lease, and retains the
+   protected source. Ordinary upload TTL expiration does not apply. Submission
+   items remain `VERIFYING` with `awaitingReview: true`. Existing published builds
+   remain current throughout review.
+2. OPERATOR/ADMIN uses `/admin/build-reviews` or the same panel in project/change
+   request editing. The list omits file-tree payloads; detail loads on demand.
+   Uploaded HTML is never rendered in the admin origin. Ambiguous web entries
+   can be selected only from the inspected candidates. The original HTML name
+   is retained through staging, recovery, publication and play URL generation.
+3. An approval records actor/reason/version and queues `VERIFYING`. The worker
+   verifies the same source/generation, ZIP safety and normal permission/replace
+   fences again. Approval resolves only the unknown engine decision; it neither
+   publishes the project nor bypasses capacity, corruption or path checks.
+4. Rejection/cancellation uses the existing durable deletion outbox. Concurrent
+   decisions and cancellation lock the source before the review. Matching
+   duplicate decisions are idempotent. Review-bound source grants recheck the
+   current OPERATOR/ADMIN role and pending source on issue, renewal and gateway
+   requests; a decided/cancelled review token cannot become a normal asset token.
+
+Local verification commands (never production deployment commands):
+
+```sh
+FIXTURE_ROOT=/tmp/pcu-build-acceptance-unity python3 scripts/unity-fixtures/download.py
+python3 scripts/build-fixtures/godot.py
+FIXTURE_ROOT=/tmp/pcu-build-acceptance-unity GODOT_FIXTURE_ROOT=/tmp/pcu-build-godot \
+  node_modules/.bin/tsx scripts/build-fixtures/check.mts
+python3 scripts/build-fixtures/download.py playcanvas defold construct rpgmaker gdevelop-red cocos gamemaker renpy8
+ENGINE_FIXTURE_ROOT=/tmp/pcu-build-exports \
+  node_modules/.bin/tsx scripts/build-fixtures/engines-check.mts playcanvas defold construct rpgmaker gdevelop-red cocos gamemaker renpy8
+python3 scripts/build-fixtures/native.py
+node_modules/.bin/tsx scripts/build-fixtures/native-check.mts unity-windows unity-linux unity-macos godot-linux construct-apk
+python3 scripts/build-fixtures/godot-native.py
+node_modules/.bin/tsx scripts/build-fixtures/native-check.mts godot-generated-external godot-generated-embedded
+```
+
+`gateway-check.mts` additionally uses an isolated migrated PostgreSQL schema,
+real Fastify authentication/serialization, the production public Nginx template
+in a temporary container, and a local object byte server. Set `DATABASE_URL`,
+`PLAYWRIGHT_MODULE_PATH` and `CHROMIUM_EXECUTABLE`; optionally set
+`GODOT_FIXTURE_ROOT` and `ENGINE_FIXTURE_ROOT`. `ENGINE_BROWSER_SCENARIOS`
+selects comma-separated engine catalog names (all eight additional engines by
+default). Real exports must reach their initialized scene/runtime, not just HTTP
+200; the harness records screenshots and checks script errors. It binds loopback
+ports 19111–19113. It checks a custom-entry
+Canvas 2D fixture with GPU contexts disabled, gzip modules, streaming Wasm, a
+worker sharing WebAssembly memory, external-CSP denial and service-worker denial.
+This is a local gateway/browser test; it does not prove Garage deployment or
+production behavior. The harness deletes only its own container/schema/temp
+files; `KEEP_BUILD_BROWSER_ARTIFACTS=true` retains screenshots.
+
+Format references: [Godot web exports](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_web.html),
+[Godot PCK reader](https://github.com/godotengine/godot/blob/master/core/io/file_access_pack.cpp),
+[AAPT2 XML schema](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/tools/aapt2/Resources.proto),
+[Android App Bundle format](https://developer.android.com/guide/app-bundle/app-bundle-format).

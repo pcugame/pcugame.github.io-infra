@@ -1,3 +1,4 @@
+import { getMockAwardState } from './awards';
 import { SubmitProjectPayloadBaseSchema } from '@pcu/contracts';
 import type { DirectAssetUploadKind, DirectAssetUploadStatus, ProjectSubmissionStatusResponse, SubmitProjectPayload, SubmitProjectResponse } from '../../../contracts';
 import { MOCK_USERS, MockHttpError, UNHANDLED, type MockContext, type MockProject, type MockRequestOptions } from './context';
@@ -9,7 +10,7 @@ type UploadedPart = { partNumber: number; etag: string; sizeBytes: number; block
 export type MockUploadSession = Omit<DirectAssetUploadStatus, 'parts'> & {
   voteId?: string; actorId: number; submissionItemId?: string; completedAt?: string; processingState?: 'PROCESSING' | 'FAILED';
   sourceIdentityBlockDigests: string[]; capabilities: Record<number, { token: string; checksum: string; expiresAt: string }>;
-  parts: UploadedPart[]; resultAssetId?: number; previewBlob?: Blob;
+  parts: UploadedPart[]; resultAssetId?: number; previewBlob?: Blob; previewImageUrl?: string;
 };
 const fail = (status: number, code: string, message: string): never => { throw new MockHttpError(status, code, message); };
 const submissions = (ctx: MockContext) => ctx.state.submissions as Record<string, MockSubmissionRecord>;
@@ -66,7 +67,15 @@ function ownedImage(owner: MockUploadSession['owner']) { const image = mockRespo
 function attachAsset(ctx: MockContext, session: MockUploadSession, ready: boolean): void {
   if (session.voteId) return;
   if (session.owner.type === 'EXHIBITION') {
-    if (ready) { const exhibition = ctx.state.exhibitions.find(item => item.id === session.owner.id); if (exhibition) Object.assign(exhibition, { poster: ownedImage(session.owner), posterOriginalName: session.originalName, posterSize: session.totalBytes }); }
+    if (!ready) return;
+    if (session.kind === 'POSTER') {
+      const exhibition = ctx.state.exhibitions.find(item => item.id === session.owner.id);
+      if (exhibition) Object.assign(exhibition, { poster: ownedImage(session.owner), posterOriginalName: session.originalName, posterSize: session.totalBytes });
+    } else if (session.kind === 'IMAGE') {
+      const awards = getMockAwardState(ctx, session.owner.id);
+      const id = session.resultAssetId ??= assetId(ctx);
+      if (!awards.assets.some(asset => asset.id === id)) awards.assets.push({ id, name: session.originalName, imageUrl: session.previewImageUrl ?? ownedImage(session.owner).original.url });
+    }
     return;
   }
   const project = ctx.state.projects[session.owner.id]; if (!project) return;
@@ -190,7 +199,7 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
   if (match) {
     if (method !== 'POST') return fail(404, 'NOT_FOUND', 'Use POST');
     const owner = { type: match[1] === 'projects' ? 'PROJECT' as const : 'EXHIBITION' as const, id: Number(match[2]) }; const kind = match[3]!.toUpperCase() as DirectAssetUploadKind;
-    authorizeOwner(ctx, owner); if (owner.type === 'EXHIBITION' && kind !== 'POSTER') fail(404, 'NOT_FOUND', 'Only exhibition posters are supported');
+    authorizeOwner(ctx, owner); if (owner.type === 'EXHIBITION' && !['POSTER', 'IMAGE'].includes(kind)) fail(404, 'NOT_FOUND', 'Exhibitions support poster and image uploads');
     const body = json(options.body); const total = Number(body.totalBytes);
     const maxBytes = ['DOCUMENT', 'ATTACHMENT'].includes(kind) ? 50 * 1024 * 1024 : ctx.state.settings.maxGameFileMb * 1024 * 1024;
     if (!Number.isSafeInteger(total) || total < 1 || total > maxBytes || typeof body.originalName !== 'string' || !body.originalName || Array.from(body.originalName).some(character => character === '/' || character === '\\' || character.charCodeAt(0) < 32)) fail(400, 'VALIDATION_ERROR', 'Invalid file name or size');
@@ -228,6 +237,15 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
     if (checksum !== capability.checksum || new Headers(options.headers).get('x-amz-checksum-sha256') !== capability.checksum) fail(400, 'VALIDATION_ERROR', 'Part checksum does not match');
     const blockDigests: string[] = []; for (let offset = 0; offset < bytes.byteLength; offset += 1048576) blockDigests.push(await digest(bytes.slice(offset, offset + 1048576)));
     if (session.totalBytes <= 1024 * 1024 && ['IMAGE','POSTER','VIDEO','DOCUMENT','ATTACHMENT'].includes(session.kind)) session.previewBlob = body;
+    if (session.owner.type === 'EXHIBITION' && session.kind === 'IMAGE' && session.totalBytes <= 1024 * 1024) {
+      const extension = session.originalName.split('.').pop()?.toLowerCase();
+      const mime = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : ['jpg', 'jpeg'].includes(extension ?? '') ? 'image/jpeg' : undefined;
+      if (mime) {
+        let binary = ''; const data = new Uint8Array(bytes);
+        for (let offset = 0; offset < data.length; offset += 8192) binary += String.fromCharCode(...data.subarray(offset, offset + 8192));
+        session.previewImageUrl = `data:${mime};base64,${btoa(binary)}`;
+      }
+    }
     const etag = `"mock-${actualDigest.slice(0, 32)}"`; session.parts = session.parts.filter(part => part.partNumber !== number); session.parts.push({ partNumber: number, etag, sizeBytes: body.size, blockDigests }); session.parts.sort((a, b) => a.partNumber - b.partNumber);
     return new Response(null, { status: 200, headers: { ETag: etag } });
   }

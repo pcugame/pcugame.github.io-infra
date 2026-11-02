@@ -7,6 +7,8 @@
 @import './components/buttons.css';
 @import './components/forms.css';
 @import './components/feedback.css';
+@import './components/content.css';
+@import './components/award-badge.css';
 @import './features/admin-layout.css';
 @import './features/admin-collections.css';
 @import './features/admin-projects.css';

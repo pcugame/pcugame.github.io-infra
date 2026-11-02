@@ -1,3 +1,5 @@
+import { VIDEO_PLAYBACK_QUALITIES, type VideoPlaybackQuality } from '@pcu/contracts';
+import { resolveDownloadRepresentation } from '../assets/download-resolver.js';
 import { attachmentContentDisposition, buildGameDownloadFilename } from '@pcu/contracts';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { VisibilityActor as Actor } from '../../shared/visibility.js';
@@ -21,7 +23,7 @@ export function manifestIncludes(manifest: unknown, key: string): boolean {
  return Array.isArray(objects) && objects.some(item => item && typeof item === 'object' && 'objectKey' in item && item.objectKey === key);
 }
 export type RuntimeResolver = (raw: string, headers: Record<string,string|string[]|undefined>) => Promise<{path:string;host:string;csp:string}>;
-export function createFileAccessService(repository: FileAccessRepository, config: Env, now = () => new Date(), presign?: (bucket:string,key:string,options?:{method?:'GET'|'HEAD';responseContentDisposition?:string})=>Promise<string>, checkDownload?: (assetId:number,variant:'original'|'playback',ip:string,actor:NonNullable<Actor>|undefined)=>Promise<unknown>, runtimeResolver?: RuntimeResolver) {
+export function createFileAccessService(repository: FileAccessRepository, config: Env, assertDownloadIpAllowed: (ip: string) => void, now = () => new Date(), presign?: (bucket:string,key:string,options?:{method?:'GET'|'HEAD';responseContentDisposition?:string})=>Promise<string>, checkDownload?: (assetId:number,variant:'original'|'playback',ip:string,actor:NonNullable<Actor>|undefined)=>Promise<unknown>, runtimeResolver?: RuntimeResolver) {
  const publicOrigin = config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL;
  const protectedOrigin = config.S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT ?? config.API_PUBLIC_URL;
  function parseUrl(value: string) {
@@ -39,7 +41,17 @@ export function createFileAccessService(repository: FileAccessRepository, config
   if (!session || session.expiresAt <= now() || now().getTime()-session.lastSeenAt.getTime() >= config.SESSION_IDLE_MS) throw forbidden();
   return session.user;
  }
- async function authorize(bucket: string, key: string, actor: VisibilityActor, deploymentId?: string|null) {
+ async function authorizeReview(bucket: string, key: string, actor: VisibilityActor, reviewId?: string|null) {
+  const review = reviewId ? await repository.review?.(reviewId) : await repository.reviewSource?.(bucket,key);
+  if (reviewId && (!review || review.decision !== 'PENDING' || review.session.state !== 'AWAITING_REVIEW'
+   || review.session.bucket !== bucket || review.session.objectKey !== key)) throw forbidden();
+  if (!review) return false;
+  if (!actor || !['ADMIN','OPERATOR'].includes(actor.role) || review.sourceIdentity !== review.session.sourceIdentity || review.generation !== review.session.generation) throw forbidden();
+  return true;
+ }
+ async function authorize(bucket: string, key: string, actor: VisibilityActor, deploymentId?: string|null, reviewId?: string|null) {
+  if (reviewId) { await authorizeReview(bucket,key,actor,reviewId); return null; }
+  if (!deploymentId && await authorizeReview(bucket,key,actor)) return null;
   const deployment = deploymentId ? await repository.deployment(deploymentId) : await repository.findDeployment(bucket,key);
   if (deployment && deployment.state === 'READY') {
    const staged = deployment.stagingBucket !== null;
@@ -63,21 +75,39 @@ export function createFileAccessService(repository: FileAccessRepository, config
  }
  async function issue(value: string, request: FileAccessRequest) {
   let input=value;
+  let reviewId: string | undefined;
   let parsed:URL;try{parsed=new URL(value);}catch{throw notFound();}
   if(parsed.origin===new URL(config.API_PUBLIC_URL).origin){
+   const reviewMatch = /^\/api\/admin\/build-reviews\/([a-f0-9-]+)\/download$/.exec(parsed.pathname);
+   if (reviewMatch) {
+    const sid = request.currentUser ? request.cookies[config.SESSION_COOKIE_NAME] : undefined;
+    if (!sid || !presign) throw forbidden();
+    const actor = await actorForSession(sid);
+    reviewId = reviewMatch[1]!;
+    const review = await repository.review?.(reviewId);
+    if (!review || !await authorizeReview(review.session.bucket,review.session.objectKey,actor,reviewId)) throw forbidden();
+    assertDownloadIpAllowed(request.ip ?? '');
+    input = await presign(review.session.bucket,review.session.objectKey);
+   } else {
    const match=/^\/api\/assets\/(\d+)\/download$/.exec(parsed.pathname);
    if(!match || !presign) throw notFound();
    const asset=await repository.asset(Number(match[1]));
    const role=asset?.kind==='WEBGL'?'WEBGL_SOURCE':parsed.searchParams.get('variant')==='playback'?'PLAYBACK':'ORIGINAL';
-   const representation=asset?.representations.find(r=>r.role===role && r.state==='READY');
+   const profile = parsed.searchParams.get('profile');
+   const quality = parsed.searchParams.get('quality');
+   if (quality && !VIDEO_PLAYBACK_QUALITIES.includes(quality as VideoPlaybackQuality)) throw notFound();
+   if (profile && !['native', 'cap60', 'cap30'].includes(profile)) throw notFound();
+   const representation=asset ? resolveDownloadRepresentation(asset, role === 'PLAYBACK' ? 'playback' : 'original', profile as 'native' | 'cap60' | 'cap30' | undefined, (quality || undefined) as VideoPlaybackQuality | undefined) : undefined;
    if(!representation || asset?.status!=='READY') throw notFound();
    input=representation.bucket===config.S3_BUCKET_PUBLIC ? publicOrigin+'/'+representation.objectKey.split('/').map(encodeURIComponent).join('/') : await presign(representation.bucket,representation.objectKey);
+  }
   }
   const target = parseUrl(input);
   const sid=request.currentUser?request.cookies[config.SESSION_COOKIE_NAME]:undefined;
   const actor = sid ? await actorForSession(sid) : null;
-  const deployment = await authorize(target.bucket,target.objectKey,actor);
-  if(target.bucket===config.S3_BUCKET_PROTECTED && checkDownload && !request.downloadAlreadyChecked){
+  reviewId ??= (await repository.reviewSource?.(target.bucket,target.objectKey))?.id;
+  const deployment = await authorize(target.bucket,target.objectKey,actor,undefined,reviewId);
+  if(target.bucket===config.S3_BUCKET_PROTECTED && checkDownload && !request.downloadAlreadyChecked && !await authorizeReview(target.bucket,target.objectKey,actor,reviewId)){
    const representation=await repository.findRepresentation(target.bucket,target.objectKey);
    if(!representation && !deployment) throw forbidden();
    const assetId=representation?.asset.id??deployment?.sourceRepresentation.assetId;
@@ -85,18 +115,18 @@ export function createFileAccessService(repository: FileAccessRepository, config
    await checkDownload(assetId,representation?.role==='PLAYBACK'?'playback':'original',request.ip??'',actor??undefined);
   }
   let publicAccess = false;
-  try {await authorize(target.bucket,target.objectKey,null);publicAccess=true;} catch { /* a session-bound capability is required */ }
+  try {await authorize(target.bucket,target.objectKey,null,undefined,reviewId);publicAccess=true;} catch { /* a session-bound capability is required */ }
   if (publicAccess && !deployment && target.bucket !== config.S3_BUCKET_PROTECTED) return {url:target.url.toString(),token:null,expiresAt:null};
   const sessionId = actor ? request.cookies[config.SESSION_COOKIE_NAME] : null;
   if (!publicAccess && !sessionId) throw forbidden();
   if (sessionId) await actorForSession(sessionId);
   await repository.purgeExpired(now());
-  const reused=await repository.reusable(sessionId??null,target.bucket,target.objectKey,deployment?.id??null,now());
+  const reused=await repository.reusable(sessionId??null,target.bucket,target.objectKey,deployment?.id??null,now(),reviewId??null);
   if(!reused && await repository.activeCount(sessionId??null,now()) >= (sessionId?256:4096)) throw forbidden();
   const token = reused?.id ?? randomBytes(32).toString('hex');
   const expiresAt = new Date(now().getTime()+60_000);
   if(reused) await repository.renew(token,expiresAt);
-  else await repository.createToken({id:token,sessionId:sessionId??null,bucket:target.bucket,objectKey:target.objectKey,deploymentId:deployment?.id??null,expiresAt});
+  else await repository.createToken({id:token,sessionId:sessionId??null,bucket:target.bucket,objectKey:target.objectKey,deploymentId:deployment?.id??null,...(reviewId?{reviewId}:{}),expiresAt});
   if (deployment) target.url.pathname = '/play/'+token+'/'+target.objectKey.slice((deployment.stagingPrefix??deployment.publicPrefix).replace(/\/$/,'').length+1).split('/').map(encodeURIComponent).join('/');
   else if(target.bucket === config.S3_BUCKET_PROTECTED){target.url.pathname='/file/'+token;target.url.search='';}
   else target.url.searchParams.set('pcu_token',token);
@@ -108,11 +138,11 @@ export function createFileAccessService(repository: FileAccessRepository, config
    const sessionId = request.cookies[config.SESSION_COOKIE_NAME];
    if (token.sessionId && (!request.currentUser || token.sessionId !== sessionId)) throw forbidden();
    const actor = token.sessionId ? await actorForSession(token.sessionId) : null;
-   await authorize(token.bucket,token.objectKey,actor,token.deploymentId);
+   await authorize(token.bucket,token.objectKey,actor,token.deploymentId,token.reviewId);
    const expiresAt = new Date(now().getTime()+60_000);
    await repository.renew(token.id,expiresAt);
    return {ok:true,data:{token:token.id,expiresAt:expiresAt.toISOString()}};
- }, async check(headers: Record<string,string|string[]|undefined>) {
+ }, async check(headers: Record<string,string|string[]|undefined>, clientIp: string) {
    const supplied=headers['x-pcu-gateway-secret'];
    const expected=config.FILE_GATEWAY_SECRET;
    if (typeof supplied !== 'string' || !expected || Buffer.byteLength(supplied)!==Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(supplied),Buffer.from(expected))) throw forbidden();
@@ -141,14 +171,16 @@ export function createFileAccessService(repository: FileAccessRepository, config
      key=(deployment.stagingPrefix??deployment.publicPrefix).replace(/\/$/,'')+'/'+play[2]!;
     } else if(file) key=token.objectKey;
     else if (token.objectKey!==key) throw forbidden();
-    await authorize(target.bucket,key,actor,token.deploymentId);
+    await authorize(target.bucket,key,actor,token.deploymentId,token.reviewId);
    } else await authorize(target.bucket,key,null);
 
  if(kind==='protected'){
+    // Gateway byte requests (including HEAD/Range/retries) recheck bans without issuing grants.
+    assertDownloadIpAllowed(clientIp);
     if(!presign) throw forbidden();
     const representation=await repository.findRepresentation(target.bucket,key);
     const asset=representation?.asset;
-    const disposition=asset?.kind==='GAME' && asset.project ? attachmentContentDisposition(buildGameDownloadFilename(asset.project.title,asset.project.members).filename) : asset && (asset.kind==='DOCUMENT' || asset.kind==='ATTACHMENT') ? attachmentContentDisposition(asset.originalName || `material-${asset.id}`) : undefined;
+    const disposition=asset?.kind==='GAME' && asset.project ? attachmentContentDisposition(buildGameDownloadFilename(asset.project.title,asset.project.members).filename) : asset && (asset.kind==='DOCUMENT' || asset.kind==='ATTACHMENT') ? attachmentContentDisposition(asset.originalName || `material-${asset.id}`) : await repository.reviewSource?.(target.bucket,key) ? attachmentContentDisposition('build-review-source.zip') : undefined;
     const method=headers['x-pcu-file-method']==='HEAD'?'HEAD':'GET';
     const signed=new URL(await presign(target.bucket,key,{method,responseContentDisposition:disposition}));
     return {path:signed.pathname+signed.search,host:signed.host};

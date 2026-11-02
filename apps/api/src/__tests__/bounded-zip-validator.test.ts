@@ -297,7 +297,7 @@ describe('bounded ZIP validator', () => {
 			.rejects.toThrow(/unsafe|absolute/);
 	});
 
-	it('rejects symbolic links and unsupported Unix filesystem entries', async () => {
+	it('rejects dangling symbolic links and unsupported Unix filesystem entries', async () => {
 		const symlink = await writeArchive(makeZip([{
 			name: 'link',
 			data: 'target',
@@ -305,7 +305,7 @@ describe('bounded ZIP validator', () => {
 			externalFileAttributes: 0o120777 * 0x10000,
 		}]), 'symlink.zip');
 		await expect(validateBoundedZipFile(symlink.path, { profile: 'GAME' }))
-			.rejects.toThrow('Symbolic links');
+			.rejects.toThrow('Symbolic link target is missing');
 
 		const socket = await writeArchive(makeZip([{
 			name: 'socket',

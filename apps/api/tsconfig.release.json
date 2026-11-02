@@ -15,7 +15,8 @@
     "scripts/verify-cutover-report.ts",
     "scripts/correct-canonical-assets.ts",
     "scripts/correct-canonical-poster.ts",
-    "scripts/revoke-webgl-play-sessions.ts"
+    "scripts/revoke-webgl-play-sessions.ts",
+    "scripts/video-playbacks.ts"
   ],
   "exclude": [
     "node_modules",

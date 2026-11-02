@@ -10,14 +10,14 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
 
 // Execute the actual hashed shell, including events/session creation/iframe insertion.
 // A small DOM keeps API tests independent of the frontend's jsdom dependency.
-function shell(options: { renderer?: string; missing?: boolean; strictMissing?: boolean; strictFail?: boolean; rendererFail?: boolean; noDialogAPI?: boolean; fail?: boolean; lost?: boolean; brave?: boolean; bravePending?: Promise<boolean>; diagnostics?: boolean; width?: number; height?: number } = {}) {
+function shell(options: { generalWeb?: boolean; renderer?: string; missing?: boolean; strictMissing?: boolean; strictFail?: boolean; rendererFail?: boolean; noDialogAPI?: boolean; fail?: boolean; lost?: boolean; brave?: boolean; bravePending?: Promise<boolean>; diagnostics?: boolean; width?: number; height?: number } = {}) {
 	class Element {
 		style: Record<string, string> = {};
 		clientWidth = 1600; clientHeight = 900;
 		classList = { add: vi.fn() };
 		get firstElementChild(): Element | null { return this.children[0] ?? null; }
 		textContent = ''; value = ''; src = ''; alt = ''; width = 0; height = 0; hidden = true; open = false; disabled = false;
-		dataset = { projectId: '163', assetOrigin: 'https://assets.test', graphicsAssets: 'https://web.test/help/graphics-acceleration/' };
+		dataset = { generalWeb: String(options.generalWeb === true), projectId: '163', assetOrigin: 'https://assets.test', graphicsAssets: 'https://web.test/help/graphics-acceleration/' };
 		href = 'https://web.test/projects/163'; children: Element[] = []; attributes: Record<string, string> = {};
 		listeners: Record<string, ((event?: unknown) => void)[]> = {};
 		addEventListener(name: string, handler: () => void) { (this.listeners[name] ??= []).push(handler); }
@@ -67,6 +67,16 @@ function shell(options: { renderer?: string; missing?: boolean; strictMissing?: 
 const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
 describe('runtime shell graphics acceleration gate', () => {
+	it('starts a general web game without a WebGL context or a blocking graphics dialog', async () => {
+		const run = shell({ generalWeb: true, missing: true });
+		await settle();
+		expect(run.fetch).toHaveBeenCalledTimes(1);
+		expect(run.get('game').children).toHaveLength(1);
+		expect(run.get('acceleration-gate').open).toBe(false);
+		expect(run.probes).toEqual([]);
+		expect(run.get('status').textContent).toContain('게임 파일을 불러오고');
+		expect(renderPlayShell({ ...config, BUILD_PACKAGE_REVIEW_ENABLED: true }, 163)).toContain('data-general-web="true"');
+	});
 	it.each(['llvmpipe (LLVM)', 'ANGLE SwiftShader', 'softpipe', 'Software Rasterizer', 'Microsoft Basic Render Driver'])('holds %s before any session/iframe, bypass starts only once', async renderer => {
 		const run = shell({ renderer });
 		expect(run.get('acceleration-gate').open).toBe(true);

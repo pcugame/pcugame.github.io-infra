@@ -152,7 +152,7 @@ function session(bytes: Buffer): CanonicalWebglUploadSession {
 	};
 }
 
-async function harness(bytes = unityZip()) {
+async function harness(bytes = unityZip(), reviews?: Parameters<typeof createWebglProcessingProcessor>[0]['reviews']) {
 	const tempRoot = await mkdtemp(join(tmpdir(), 'pcu-webgl-processor-test-'));
 	tempRoots.push(tempRoot);
 	const uploadSession = session(bytes);
@@ -179,12 +179,12 @@ async function harness(bytes = unityZip()) {
 				projectId: 7,
 				publicBucket: 'public',
 				publicPrefix: `public/webgl/7/${deploymentId}/`,
-				entryObjectKey: `public/webgl/7/${deploymentId}/index.html`,
+				entryObjectKey: `public/webgl/7/${deploymentId}/${input.entryObjectKey.slice(input.publicPrefix.length)}`,
 				state: 'PENDING',
 				expectedCurrentDeploymentId: 'old-deployment',
 				outputBucket: 'public',
 				outputPrefix: `public/webgl/7/${deploymentId}/`,
-				outputEntryObjectKey: `public/webgl/7/${deploymentId}/index.html`,
+				outputEntryObjectKey: `public/webgl/7/${deploymentId}/${input.entryObjectKey.slice(input.publicPrefix.length)}`,
 				publicationStaged: false,
 			};
 			expect(input.candidateDeploymentId).toMatch(/^[0-9a-f-]{36}$/);
@@ -228,6 +228,7 @@ async function harness(bytes = unityZip()) {
 	const ids = [randomUUID(), randomUUID()];
 	const storage = { openSource: vi.fn(async () => ({ body: Readable.from([bytes]), sizeBytes: bytes.length })) };
 	const processor = createWebglProcessingProcessor({
+		reviews,
 		publicBucket: 'public',
 		protectedBucket: 'protected',
 		tempRoot,
@@ -254,6 +255,28 @@ async function harness(bytes = unityZip()) {
 }
 
 describe('canonical WebGL processing', () => {
+	it('keeps unrecognized web builds private and publishes their selected entry only after review', async () => {
+		const bytes = storedZip([{ name: 'outer/deep/game.html', body: '<canvas></canvas><script src="play.mjs"></script>' }, { name: 'outer/deep/play.mjs', body: 'document.querySelector("canvas").getContext("2d");' }]);
+		const reviews = { approval: vi.fn(async () => null as {sourceIdentity:string;generation:number;entryPath:string}|null), awaitReview: vi.fn(async () => true) };
+		const h = await harness(bytes, reviews);
+		await expect(h.processor.process(h.uploadSession, h.context)).rejects.toMatchObject({ inspection: { outcome: 'REVIEW', entryPath: 'outer/deep/game.html' } });
+		expect(h.uploader.put).not.toHaveBeenCalled(); expect(h.repository.reserveDeployment).not.toHaveBeenCalled();
+		expect(reviews.awaitReview).toHaveBeenCalledWith(expect.objectContaining({ generation: 3, sourceIdentity: h.uploadSession.sourceIdentity, token: 'claim' }));
+		reviews.approval.mockResolvedValue({ sourceIdentity: h.uploadSession.sourceIdentity, generation: 3, entryPath: 'outer/deep/game.html' });
+		const ready = await h.processor.process(h.uploadSession, h.context);
+		expect(ready.entryObjectKey).toBe(`public/webgl/7/${h.deploymentId}/game.html`);
+		expect(h.uploaded.map(item => item.key)).toContain(ready.entryObjectKey);
+		expect(h.uploaded.find(item => item.key.endsWith('play.mjs'))?.type).toBe('text/javascript; charset=utf-8');
+	});
+	it('does not let review approval bypass source identity or required local references', async () => {
+		const reviews = { approval: vi.fn(async () => ({ sourceIdentity: 'ignored', generation: 3, entryPath: 'game.html' })), awaitReview: vi.fn(async () => true) };
+		const h = await harness(storedZip([{ name: 'game.html', body: '<canvas></canvas><script src="missing.js"></script>' }]), reviews);
+		await expect(h.processor.process(h.uploadSession, h.context)).rejects.toThrow('missing:missing.js');
+		expect(h.repository.commitReady).not.toHaveBeenCalled();
+		h.storage.openSource.mockResolvedValue({ body: Readable.from([Buffer.alloc(h.bytes.length)]), sizeBytes: h.bytes.length });
+		await expect(h.processor.process(h.uploadSession, h.context)).rejects.toBeInstanceOf(WebglTerminalValidationError);
+		expect(h.uploader.put).not.toHaveBeenCalled();
+	});
 	// Synthetic archives verify processing and stored metadata, not Unity execution.
 	for (const wrapper of ['', 'UnityBuild/']) {
 		for (const configuration of ['plain', 'gzip', 'brotli', 'gzip-fallback', 'brotli-fallback'] as const) {

@@ -1,0 +1,14 @@
+[Container]
+Image=docker.io/dxflrs/garage:v1.1.0@sha256:fdb8272fcbe643eef830ee17874d5d4ed623a86501f1acbac8012583113b1c26
+ContainerName=pcu-garage
+Network=pcu-storage.network:ip=10.89.41.10
+NetworkAlias=garage
+Volume=/srv/pcu/config/garage.toml:/etc/garage.toml:ro,z
+Volume=pcu-garage-data.volume:/var/lib/garage/data:Z
+Volume=pcu-garage-meta.volume:/var/lib/garage/meta:Z
+StopTimeout=60
+[Service]
+Restart=always
+TimeoutStopSec=75
+[Install]
+WantedBy=default.target

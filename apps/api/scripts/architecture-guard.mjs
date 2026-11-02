@@ -40,13 +40,14 @@ function importNames(node) {
 	const clause = node.importClause;
 	if (!clause) return [];
 	const names = [];
-	if (clause.name) names.push({ typeOnly: clause.isTypeOnly });
+	if (clause.name) names.push({ imported: 'default', local: clause.name.text, typeOnly: clause.isTypeOnly });
 	if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
-		names.push({ typeOnly: clause.isTypeOnly });
+		names.push({ imported: '*', local: clause.namedBindings.name.text, typeOnly: clause.isTypeOnly });
 	}
 	if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
 		for (const element of clause.namedBindings.elements) {
-			names.push({ typeOnly: clause.isTypeOnly || element.isTypeOnly });
+			names.push({ imported: element.propertyName?.text ?? element.name.text, local: element.name.text,
+				typeOnly: clause.isTypeOnly || element.isTypeOnly });
 		}
 	}
 	return names;
@@ -66,21 +67,28 @@ function importsOf(sourceFile, fileName) {
 			const names = importNames(node);
 			edges.push({
 				node,
+				names,
 				specifier: node.moduleSpecifier.text,
 				source: resolveSource(fileName, node.moduleSpecifier.text),
 				runtime: !node.importClause || names.some(({ typeOnly }) => !typeOnly),
 			});
 		} else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+			const names = node.exportClause && ts.isNamedExports(node.exportClause)
+				? node.exportClause.elements.map(element => ({ imported: element.propertyName?.text ?? element.name.text,
+					typeOnly: node.isTypeOnly || element.isTypeOnly }))
+				: [{ imported: '*', typeOnly: node.isTypeOnly }];
 			edges.push({
 				node,
+				names,
 				specifier: node.moduleSpecifier.text,
 				source: resolveSource(fileName, node.moduleSpecifier.text),
-				runtime: !node.isTypeOnly,
+				runtime: names.some(name => !name.typeOnly),
 			});
 		} else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
 			&& node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])) {
 			edges.push({
 				node,
+				names: [{ imported: '*', typeOnly: false }],
 				specifier: node.arguments[0].text,
 				source: resolveSource(fileName, node.arguments[0].text),
 				runtime: true,
@@ -248,7 +256,71 @@ function report(rule, module, node, message) {
 	violations.push({ rule, file: module.file, line: position.line + 1, column: position.character + 1, message });
 }
 
+// Ownership rules retained from 07f76a6, independently of the data-plane rules.
+// These are runtime resource rules, not an API-wide strict layer migration.
+const runtimeSource = source => /(?:^|\/)(?:runtime|[^/]+\.runtime)$/.test(source);
+const globalPrisma = source => /(?:^|\/)src\/lib\/prisma$/.test(source);
+const resourceSource = source => globalPrisma(source)
+	|| /(?:^|\/)src\/(?:infrastructure\/production-ports|lib\/(?:s3|storage|logger|lifecycle)|shared\/(?:upload-limits|download-rate-limit|protected-download-limiter|site-settings))$/.test(source);
+const resourceCreators = new Set(['S3Client', 'PrismaClient', 'OAuth2Client', 'createS3Client',
+	'createObjectStorage', 'createPrismaClientForDatabase', 'createUploadLimiter',
+	'createDownloadRateLimiter', 'createProtectedDownloadLimiter', 'createRootLogger', 'createLifecycle']);
+const processResources = new Set(['prisma', 's3', 'objectStorage', 'rootLogger', 'logger',
+	'processLifecycle', 'processLimiter', 'processUploadLimiter', 'gameDownloadLimiter']);
+const compositionFile = file => /(?:^|\/)(?:composition|[^/]+\.composition|[^/]*worker)\.[cm]?ts$/.test(file)
+	|| /^src\/(?:infrastructure\/|backend-context(?:\/|\.)|app\.|server\.)/.test(file);
+
+function inspectOwnership(module) {
+	if (/\.test\.[cm]?ts$/.test(module.file) || module.file.startsWith('scripts/')) return;
+	const bindings = new Map();
+	for (const edge of module.imports) {
+		for (const name of edge.names ?? []) {
+			if (name.local && !name.typeOnly) bindings.set(name.local, { ...name, source: edge.source });
+		}
+		if (!edge.runtime) continue;
+		const forbid = rule => report(rule, module, edge.node, `resource dependency ${JSON.stringify(edge.specifier)}`);
+		if (isController(module.file)) {
+			if (runtimeSource(edge.source)) forbid('no-controller-runtime');
+			if (/(?:^|\/)src\/config\/env$/.test(edge.source)) forbid('no-controller-env');
+			if (resourceSource(edge.source)) forbid('no-controller-global-resource');
+		}
+		if (/(?:^|\/)(?:[^/]+\.)?repository\.[cm]?ts$/.test(module.file) && globalPrisma(edge.source)) {
+			forbid('no-repository-global-prisma');
+		}
+		if (isFeature(module.file) && !compositionFile(module.file) && runtimeSource(edge.source)) forbid('no-feature-runtime');
+		if (!compositionFile(module.file) && resourceSource(edge.source)
+			&& edge.names.some(name => !name.typeOnly && (name.imported === '*' || processResources.has(name.imported)))) {
+			forbid('no-noncomposition-stateful-import');
+		}
+	}
+	function immediateResource(node) {
+		const current = unwrap(node);
+		if (ts.isCallExpression(current) || ts.isNewExpression(current)) {
+			const callee = unwrap(current.expression);
+			const binding = ts.isIdentifier(callee) ? bindings.get(callee.text) : undefined;
+			const namespace = ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)
+				? bindings.get(callee.expression.text) : undefined;
+			const name = binding?.imported ?? memberName(callee);
+			if (resourceCreators.has(name) || (namespace?.imported === '*' && resourceCreators.has(memberName(callee)))) return true;
+			// An immediately invoked factory still creates a module-owned resource.
+			if (ts.isCallExpression(current) && (ts.isArrowFunction(callee) || ts.isFunctionExpression(callee))
+				&& immediateResource(callee.body)) return true;
+		}
+		if (ts.isFunctionLike(current)) return false;
+		return !!ts.forEachChild(current, child => immediateResource(child) || undefined);
+	}
+	for (const statement of module.sourceFile.statements) {
+		const expressions = ts.isExportAssignment(statement) ? [statement.expression]
+			: ts.isVariableStatement(statement) ? statement.declarationList.declarations.map(item => item.initializer).filter(Boolean) : [];
+		for (const expression of expressions) {
+			if (immediateResource(expression)) report('no-stateful-module-singleton', module, expression,
+				'create resource instances inside an explicitly owned factory');
+		}
+	}
+}
+
 for (const module of modules.values()) {
+	inspectOwnership(module);
 	for (const diagnostic of module.sourceFile.parseDiagnostics) {
 		report('architecture-guard-parse-error', module, module.sourceFile,
 			ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));

@@ -10,8 +10,9 @@ export const UNHANDLED = Symbol('unhandled mock route');
 export class MockHttpError extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string, message: string) {
-    super(message); this.name = 'MockHttpError'; this.status = status; this.code = code;
+  readonly details?: unknown;
+  constructor(status: number, code: string, message: string, details?: unknown) {
+    super(message); this.name = 'MockHttpError'; this.status = status; this.code = code; this.details = details;
   }
 }
 export type MockRequestOptions = Omit<RequestInit, 'body'> & { body?: unknown };
@@ -33,7 +34,9 @@ export type MockFault = { status: number; code: string; message: string; path?: 
 export type MockControls = { delayMs: number; fault: MockFault | null; worker: 'auto' | 'paused' | 'fail' };
 export type MockBannedIp = { id:number; ip:string; reason:string; createdAt:string; source:'AUTO'|'MANUAL'|'LEGACY'; active:boolean; disabledAt:string|null };
 export type MockState = {
+	videoRepairs?: Record<number, { projectId: number; dueAt: number }>;
   voting?: MockVotingState;
+  awards?: Record<number, import('@pcu/contracts').AwardState>;
   version: 2; revision: number; counters: Record<string, number>; authUser: MockUserSelection; authExpiresAt?: string;
   projects: Record<number, MockProject>; exhibitions: AdminExhibitionItem[];
   submissions: Record<string, MockSubmissionRecord>; sessions: Record<string, MockUploadSession>; changeRequests: Record<string, ProjectChangeDetail & {dueAt?:number}>;

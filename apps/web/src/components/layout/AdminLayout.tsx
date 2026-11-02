@@ -8,6 +8,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/admin/votes', label: '투표·추첨', icon: 'clipboard', end: false },
   { to: '/admin/projects', label: '작품 관리', icon: 'grid', end: true },
   { to: '/admin/projects/new', label: '작품 등록', icon: 'plus', end: false },
+  { to: '/admin/build-reviews', label: '빌드 검토', icon: 'file', end: false },
   { to: '/admin/webgl-network', label: '게임 외부 연결', icon: 'globe', end: false },
   { to: '/admin/change-requests', label: '변경 요청', icon: 'clipboard', end: false },
   { to: '/admin/years', label: '전시회 관리', icon: 'calendar', end: false },

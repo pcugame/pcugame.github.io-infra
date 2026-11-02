@@ -1,0 +1,14 @@
+# Install as /etc/fail2ban/jail.d/sshd-public-daily.local.
+# This adds a long window without replacing the existing burst/tailnet jails.
+[sshd-public-daily]
+enabled = true
+port = 5050
+filter = sshd
+backend = systemd
+ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10 fd7a:115c:a1e0::/48
+maxretry = 3
+findtime = 1d
+bantime = 1d
+bantime.increment = true
+bantime.multipliers = 1 2 4 7
+bantime.maxtime = 7d

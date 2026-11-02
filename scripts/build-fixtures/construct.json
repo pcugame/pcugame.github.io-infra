@@ -1,0 +1,188 @@
+{
+  "engine": "construct",
+  "source": "https://github.com/seanmorley15/Racing2D",
+  "revision": "5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0",
+  "license": "Upstream licenses apply; download for local verification only. Do not redistribute fixtures.",
+  "files": [
+    {
+      "path": "appmanifest.json",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/appmanifest.json",
+      "size": 713,
+      "sha256": "72952992c55f041001288d0872341b5cdafe7c8c48abe3bc16f0abc8491e7838"
+    },
+    {
+      "path": "data.json",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/data.json",
+      "size": 94657,
+      "sha256": "7410d7236905496f8f2b6f6634058e3c870e0128aa8c36729d6efc776685c230"
+    },
+    {
+      "path": "icons/icon-128.png",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/icons/icon-128.png",
+      "size": 22267,
+      "sha256": "a0dfb8f1510406d8ab1a3016a1d95edad0f556f3b66e061bc1fe831542b43ae8"
+    },
+    {
+      "path": "icons/icon-16.png",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/icons/icon-16.png",
+      "size": 16505,
+      "sha256": "3daaea4d23f58298988365d299330a7ffdb71dd98c0c6747e4a6e644f577e17f"
+    },
+    {
+      "path": "icons/icon-256.png",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/icons/icon-256.png",
+      "size": 28930,
+      "sha256": "aa47620b6cfc9d0125bdb0c7b934276c6d78d21f7ed8945cbe07bb9f83f90a4f"
+    },
+    {
+      "path": "icons/icon-32.png",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/icons/icon-32.png",
+      "size": 17541,
+      "sha256": "8048a578ca2558413c740c2912f601be10da83abdb53a7b110e54a829b789f05"
+    },
+    {
+      "path": "icons/icon-512.png",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/icons/icon-512.png",
+      "size": 30345,
+      "sha256": "8eaf76b355aa04ab2508a1ace235b0735dc29c2e0a519fdb1c2442f7c2b1c7b5"
+    },
+    {
+      "path": "icons/icon-64.png",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/icons/icon-64.png",
+      "size": 19120,
+      "sha256": "994743ea037f2db25147ad61d8508a291e3fd41e1abd583a25ba1945c7a98bca"
+    },
+    {
+      "path": "icons/loading-logo.png",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/icons/loading-logo.png",
+      "size": 19120,
+      "sha256": "994743ea037f2db25147ad61d8508a291e3fd41e1abd583a25ba1945c7a98bca"
+    },
+    {
+      "path": "images/shared-0-sheet0.webp",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/images/shared-0-sheet0.webp",
+      "size": 1010896,
+      "sha256": "7bcc671b441d8deeb4973ab719c7f44db929450609ab70e8b1318d1dd92f6eb5"
+    },
+    {
+      "path": "images/shared-0-sheet1.webp",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/images/shared-0-sheet1.webp",
+      "size": 2860,
+      "sha256": "ed9ca7c449a389660fb1a24c05f351ea0146a54c4e76c2d02e12f7c63c52a455"
+    },
+    {
+      "path": "index.html",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/index.html",
+      "size": 1365,
+      "sha256": "9e5d7ac836ca0bef6d238cb54f64ab0899b59dcccfbb33b1fb94f36592fb27f0"
+    },
+    {
+      "path": "media/audiotrack1.webm",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/media/audiotrack1.webm",
+      "size": 431749,
+      "sha256": "3f3bc4cbdb7e1c06f783aeca85f2b7458faebd31d1e4a0041bd98c9425583bb4"
+    },
+    {
+      "path": "media/cheer.webm",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/media/cheer.webm",
+      "size": 44505,
+      "sha256": "fbb972c035e92ce3a870f838db58325470bdf462a8061bd62b259d56291549c7"
+    },
+    {
+      "path": "media/endingMusic.webm",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/media/endingMusic.webm",
+      "size": 403749,
+      "sha256": "53603c4f16d28be3cf3258f8083347e7c218144b8b2ea5d8d029752f8ef19401"
+    },
+    {
+      "path": "media/explosion.webm",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/media/explosion.webm",
+      "size": 20382,
+      "sha256": "e98eb60456c88c7cf33b8c83df5ecf60dcd786476d834b82159c82120e3f2fe6"
+    },
+    {
+      "path": "media/splash.webm",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/media/splash.webm",
+      "size": 36263,
+      "sha256": "569a2e47a135cc7c683fbd98a259bec2f52dd2e0323824e45bf67ef16b030947"
+    },
+    {
+      "path": "offline.json",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/offline.json",
+      "size": 616,
+      "sha256": "0fe8b8943417b7a9fd5b122492626f3a0125e5104347e1023cac4be69c3e1177"
+    },
+    {
+      "path": "scripts/c3runtime.js",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/scripts/c3runtime.js",
+      "size": 1460605,
+      "sha256": "e521968088a6417507b4fcd0738340a4fb691e2c66d38e1407a5fcde1d854f41"
+    },
+    {
+      "path": "scripts/dispatchworker.js",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/scripts/dispatchworker.js",
+      "size": 3932,
+      "sha256": "2998475e0faa9c6f9135c1dd5037fcfdd93987bcdd12e14fb945c934c82566ef"
+    },
+    {
+      "path": "scripts/jobworker.js",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/scripts/jobworker.js",
+      "size": 3020,
+      "sha256": "0415a4ba7564700a52cf68ad991dffa9741739885a065055d9b13bceecd457ef"
+    },
+    {
+      "path": "scripts/main.js",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/scripts/main.js",
+      "size": 128563,
+      "sha256": "f6c80a1e7404aace6a5b27dd5a5815ef8fc1256b4f17ab163003b59ede4b77ee"
+    },
+    {
+      "path": "scripts/offlineclient.js",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/scripts/offlineclient.js",
+      "size": 603,
+      "sha256": "dfaba9f1fa0ea22c703a1aba1dd90faa1abc07ca63b4d36830e61ec3fa18e34d"
+    },
+    {
+      "path": "scripts/opus.wasm.js",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/scripts/opus.wasm.js",
+      "size": 68172,
+      "sha256": "2d4794efc4b06ce7ab5472b459cd46f1622a1ee28156d2fa39593cc53ed8fac6"
+    },
+    {
+      "path": "scripts/opus.wasm.wasm",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/scripts/opus.wasm.wasm",
+      "size": 121571,
+      "sha256": "3b090d2b704dbc4d16fc236b6d695611d29b261c2588ba47eb8a30260f948a7a"
+    },
+    {
+      "path": "scripts/register-sw.js",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/scripts/register-sw.js",
+      "size": 303,
+      "sha256": "74ffbf6f2239666e2d741cf383c0a7d2e144df82ec09018203b925b147206953"
+    },
+    {
+      "path": "scripts/supportcheck.js",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/scripts/supportcheck.js",
+      "size": 2435,
+      "sha256": "58c4017c68c35272918cfeb3eaf10e0b692a8119a95f99ecc5b9782355cd0668"
+    },
+    {
+      "path": "style.css",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/style.css",
+      "size": 1389,
+      "sha256": "92fddd100d5f74f30c3f1aa985119681e3a61a96ba12d59e81afb78e7bbe1857"
+    },
+    {
+      "path": "sw.js",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/sw.js",
+      "size": 6095,
+      "sha256": "8c8fe8826d635878cf61455643597d488bc4b434af35e75ffb95209b455e444b"
+    },
+    {
+      "path": "workermain.js",
+      "url": "https://raw.githubusercontent.com/seanmorley15/Racing2D/5847ae59cf4477e8ddc886fc0b9d6c896b2dd2a0/game/workermain.js",
+      "size": 3617,
+      "sha256": "6fee5864ae374cb4a15e724c135a3cb36f9cd5ac09ec04674aa70d96cb4f776d"
+    }
+  ]
+}

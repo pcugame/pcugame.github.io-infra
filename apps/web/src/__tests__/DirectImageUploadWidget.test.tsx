@@ -115,7 +115,7 @@ describe('DirectImageUploadWidget', () => {
 			.mockImplementationOnce(() => new Promise((resolve) => { resolveRestore = resolve; }))
 			.mockResolvedValueOnce({ ...session, state: 'UPLOADING', originalName: second.name, totalBytes: second.size, parts: [] });
 		uploadDirectAssetFile
-			.mockResolvedValueOnce({ status: 'VERIFYING', sessionId: session.sessionId })
+			.mockResolvedValueOnce({ status: 'VERIFYING', sessionId: session.sessionId, generation: session.generation })
 			.mockResolvedValueOnce({ status: 'READY', sessionId: 'image-third' });
 		waitForDirectAssetReady.mockResolvedValue({ state: 'READY' });
 		const complete = vi.fn();

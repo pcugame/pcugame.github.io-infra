@@ -1,3 +1,5 @@
+import { serializeAwards, type AwardLink } from '../awards/serialization.js';
+import { videoPlaybackFields, type PlaybackJobView } from '../../shared/video-playbacks.js';
 import { effectiveProjectExternalLinks } from '../../shared/project-external-links.js';
 import { resolveWebglDisplay, type WebglDisplayMode } from '@pcu/contracts';
 import { canChangeProjectVisibility, type VisibilityActor } from '../../shared/visibility.js';
@@ -26,6 +28,7 @@ interface PublicPosterRecord {
 }
 
 interface PublicProjectListRecord {
+ awards?: AwardLink[];
 	visibility: Visibility;
 	creatorId: number;
 	exhibition: { year: number; visibility: Visibility; isModificationEnabled: boolean };
@@ -61,6 +64,7 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 	members: { id: number; name: string; studentId: string; userId: number | null }[];
 	assets: {
 		id: number;
+		playbackJobs?: PlaybackJobView[];
 		videoSortOrder?: number | null;
 		createdAt?: Date;
 		originalName?: string;
@@ -157,6 +161,7 @@ export async function listProjectsByYear(
 		const poster = p.poster;
 		return {
 			id: p.id,
+ awards: serializeAwards(p.awards, imageOptions(deps).publicAssetOrigin, imageOptions(deps).publicBucket),
 			visibility: p.visibility,
 			exhibitionVisibility: p.exhibition.visibility,
 			canChangeVisibility: canChangeProjectVisibility(actor, p),
@@ -194,6 +199,7 @@ export async function listProjectsByExhibition(
 		const poster = p.poster;
 		return {
 			id: p.id,
+ awards: serializeAwards(p.awards, imageOptions(deps).publicAssetOrigin, imageOptions(deps).publicBucket),
 			visibility: p.visibility,
 			exhibitionVisibility: p.exhibition.visibility,
 			canChangeVisibility: canChangeProjectVisibility(actor, p),
@@ -282,6 +288,7 @@ export async function getProjectDetail(
 			? 'READY' as const
 			: playback?.state === 'FAILED' ? 'FAILED' as const : 'PENDING' as const;
 		return [{
+			...videoPlaybackFields(videoAsset, protectedAssetUrl(deps, videoAsset.id, 'playback')),
 			assetId: videoAsset.id,
 			sortOrder: videoAsset.videoSortOrder ?? null,
 			role: index === 0 ? 'MAIN' as const : 'ADDITIONAL' as const,
@@ -319,6 +326,7 @@ export async function getProjectDetail(
 	}
 	return {
 		id: project.id,
+ awards: serializeAwards(project.awards, imageOptions(deps).publicAssetOrigin, imageOptions(deps).publicBucket),
 		visibility: project.visibility,
 		exhibitionVisibility: project.exhibition.visibility,
 		canChangeVisibility: canChangeProjectVisibility(actor, project),

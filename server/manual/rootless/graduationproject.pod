@@ -1,0 +1,12 @@
+[Unit]
+Description=PCU application pod (manual installation)
+[Pod]
+PodName=graduationproject
+Network=pcu-app.network:ip=10.89.40.10
+PublishPort=127.0.0.1:4000:4000
+AddHost=postgres:127.0.0.1
+PodmanArgs=--exit-policy=continue
+[Service]
+Restart=on-failure
+[Install]
+WantedBy=default.target

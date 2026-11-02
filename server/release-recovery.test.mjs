@@ -198,3 +198,23 @@ test('recovery discovers an adopted custom Quadlet directory without sourcing sh
   assert.ok(f.containers.has('gp-api'));
  } finally { f.cleanup(); }
 });
+
+for (const slot of ['a', 'b']) test(`pre-migration recovery uses active slot ${slot} and rejects slot drift`, async () => {
+ const f = fixture();
+ const apiName = `gp-api-${slot}`;
+ try {
+  writeFileSync(join(f.deployDir, 'cutover-state/active-slot'), slot);
+  copyFileSync(join(f.quadletDir, 'gp-api.container'), join(f.quadletDir, `${apiName}.container`));
+  f.containers.set(apiName, { ...f.containers.get('gp-api'), Name: apiName });
+  f.containers.delete('gp-api');
+  await runRecovery('capture', runKey, f.options);
+  f.containers.clear(); f.calls.length = 0;
+  await runRecovery('recover', runKey, f.options);
+  assert.deepEqual(f.calls.filter(c => c[2] === 'start').map(c => c[3]), [`${apiName}.service`, 'gp-worker-image.service']);
+  assert.ok(f.calls.some(c => c[1] === 'exec' && c[2] === apiName && c.at(-1) === `http://localhost:${slot === 'b' ? 4001 : 4000}/api/health`));
+  writeFileSync(join(f.deployDir, 'cutover-state/active-slot'), slot === 'a' ? 'b' : 'a');
+  f.calls.length = 0;
+  await assert.rejects(runRecovery('recover', runKey, f.options), /Active API slot changed/);
+  assert.equal(f.calls.filter(c => c[2] === 'start').length, 0);
+ } finally { f.cleanup(); }
+});

@@ -49,3 +49,15 @@ describe('production data-plane origins', () => {
 		expect(parseEnv(input).NODE_ENV).toBe(nodeEnv);
 	});
 });
+
+describe('total shutdown budget', () => {
+	it('defaults to 15 seconds', () => {
+		expect(parseEnv(productionEnv).SHUTDOWN_DRAIN_MS).toBe(15_000);
+	});
+	it.each(['1', '15000', '60000'])('accepts supported budget %s', (value) => {
+		expect(parseEnv({ ...productionEnv, SHUTDOWN_DRAIN_MS: value }).SHUTDOWN_DRAIN_MS).toBe(Number(value));
+	});
+	it.each(['0', '-1', '60001', '2147483648', '1.5', 'NaN', 'Infinity', '', 'invalid'])('rejects unsafe budget %s', (value) => {
+		expect(() => parseEnv({ ...productionEnv, SHUTDOWN_DRAIN_MS: value })).toThrow(ZodError);
+	});
+});

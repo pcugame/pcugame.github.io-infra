@@ -1,3 +1,4 @@
+import { enqueuePlayback } from './playback.repository.js';
 import {
 	Prisma,
 	type AssetUploadSession,
@@ -16,6 +17,7 @@ import type {
 import { videoPlaybackObjectKey } from './playback-identity.js';
 import { countReservedProjectVideos, getProjectVideos, MAX_PROJECT_VIDEOS, normalizeProjectVideoOrder } from '../assets/video-order.js';
 import { conflict } from '../../shared/errors.js';
+import { isVideoPlaybackRepair } from './policy.js';
 
 const SERIALIZABLE = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable } as const;
 const PLAYBACK_PURPOSE = 'direct-video-playback-generation';
@@ -69,7 +71,7 @@ function assertSourceFence(
 	}
 }
 
-export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRepository {
+export function createVideoWorkerRepository(client: PrismaClient, enqueueRenditions = false): VideoWorkerRepository {
 	return {
 		async claimVideoVerifying(limit, token, leaseMs) {
 			const claimed = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -187,7 +189,9 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 					throw new Error('VIDEO upload session must be project-owned');
 				}
 				const actor = await tx.user.findUniqueOrThrow({ where: { id: session.userId }, select: { id: true, role: true } });
-				await assertProjectUploadWriteAccessInTransaction(tx, actor, session.projectId);
+				// Administrator repair is authorized when queued and only updates an
+				// already committed video's playback. The uploader may have lost access.
+				if (!isVideoPlaybackRepair(session)) await assertProjectUploadWriteAccessInTransaction(tx, actor, session.projectId);
 				const owned = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
 					SELECT "id" FROM "asset_upload_sessions"
 					WHERE "id" = ${input.session.id}
@@ -391,6 +395,7 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 						},
 					},
 				});
+                if (enqueueRenditions) await enqueuePlayback(tx, asset.id);
 				return {
 					assetId: asset.id,
 					originalRepresentationId: original.id,
@@ -452,77 +457,13 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 						},
 					},
 				});
+                if (enqueueRenditions) await enqueuePlayback(tx, asset.id);
 				return true;
 			});
 		},
 
 		requestPlaybackRepair(input) {
-			return withAssetMutationTransaction(client, async (tx) => {
-				await tx.$queryRaw(Prisma.sql`
-					SELECT "id" FROM "asset_upload_sessions" WHERE "id" = ${input.sessionId} FOR UPDATE
-				`);
-				const frozen = await tx.$queryRaw<Array<{ frozen: boolean }>>(Prisma.sql`
-					SELECT EXISTS (
-						SELECT 1
-						FROM "asset_upload_sessions" session
-						JOIN "project_submission_items" item ON item."id" = session."submission_item_id"
-						JOIN "project_submissions" submission ON submission."id" = item."submission_id"
-						WHERE session."id" = ${input.sessionId}
-							AND submission."state" = 'FINALIZING'::"ProjectSubmissionState"
-					) AS "frozen"
-				`);
-				if (frozen[0]?.frozen) return false;
-				const session = await tx.assetUploadSession.findUnique({ where: { id: input.sessionId } });
-				if (!session || session.kind !== 'VIDEO' || session.state !== 'READY'
-					|| session.projectId === null || session.exhibitionId !== null
-					|| session.generation !== input.generation
-					|| session.sourceIdentityAlgorithm !== input.sourceIdentityAlgorithm
-					|| session.sourceIdentity !== input.sourceIdentity
-					|| session.resultAssetId === null || session.resultRepresentationId === null) return false;
-				const asset = await tx.asset.findUnique({
-					where: { id: session.resultAssetId },
-					include: { representations: true },
-				});
-				const original = asset?.representations.find(({ id }) => id === session.resultRepresentationId);
-				const playback = asset?.representations.find(({ role }) => role === 'PLAYBACK');
-				if (!asset || asset.kind !== 'VIDEO' || asset.status !== 'READY'
-					|| asset.projectId !== session.projectId
-					|| original?.role !== 'ORIGINAL' || original.state !== 'READY'
-					|| original.bucket !== session.bucket || original.objectKey !== session.objectKey
-					|| original.sourceIdentityAlgorithm !== input.sourceIdentityAlgorithm
-					|| original.sourceIdentity !== input.sourceIdentity
-					|| playback?.state !== 'FAILED'
-					|| playback.bucket !== session.bucket
-					|| playback.objectKey !== videoPlaybackObjectKey({
-						id: session.id,
-						projectId: session.projectId,
-						generation: session.generation,
-					})) return false;
-				await tx.assetRepresentation.update({
-					where: { id: playback.id },
-					data: { state: 'VERIFYING', error: null },
-				});
-				await tx.assetUploadSession.update({
-					where: { id: session.id },
-					data: {
-						state: 'VERIFYING',
-						validationLeaseToken: null,
-						validationLeaseUntil: null,
-						validationError: null,
-						completionResult: {
-							status: 'VERIFYING',
-							phase: 'PLAYBACK_REPAIR',
-							generation: session.generation,
-							sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
-							sourceIdentity: session.sourceIdentity,
-							assetId: asset.id,
-							originalRepresentationId: original.id,
-							playbackRepresentationId: playback.id,
-						},
-					},
-				});
-				return true;
-			});
+			return withAssetMutationTransaction(client, (tx) => requestPlaybackRepairInTransaction(tx, input));
 		},
 
 		async rejectVideo(input) {
@@ -571,4 +512,76 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 			}, SERIALIZABLE);
 		},
 	};
+}
+
+/** Shared fenced transition for worker repair and administrator retry requests. */
+export async function requestPlaybackRepairInTransaction(
+	tx: Prisma.TransactionClient,
+	input: Parameters<VideoWorkerRepository['requestPlaybackRepair']>[0],
+): Promise<boolean> {
+	await tx.$queryRaw(Prisma.sql`
+		SELECT "id" FROM "asset_upload_sessions" WHERE "id" = ${input.sessionId} FOR UPDATE
+	`);
+	const frozen = await tx.$queryRaw<Array<{ frozen: boolean }>>(Prisma.sql`
+		SELECT EXISTS (
+			SELECT 1
+			FROM "asset_upload_sessions" session
+			JOIN "project_submission_items" item ON item."id" = session."submission_item_id"
+			JOIN "project_submissions" submission ON submission."id" = item."submission_id"
+			WHERE session."id" = ${input.sessionId}
+				AND submission."state" = 'FINALIZING'::"ProjectSubmissionState"
+		) AS "frozen"
+	`);
+	if (frozen[0]?.frozen) return false;
+	const session = await tx.assetUploadSession.findUnique({ where: { id: input.sessionId } });
+	if (!session || session.kind !== 'VIDEO' || session.state !== 'READY'
+		|| session.projectId === null || session.exhibitionId !== null
+		|| session.generation !== input.generation
+		|| session.sourceIdentityAlgorithm !== input.sourceIdentityAlgorithm
+		|| session.sourceIdentity !== input.sourceIdentity
+		|| session.resultAssetId === null || session.resultRepresentationId === null) return false;
+	const asset = await tx.asset.findUnique({
+		where: { id: session.resultAssetId },
+		include: { representations: true },
+	});
+	const original = asset?.representations.find(({ id }) => id === session.resultRepresentationId);
+	const playback = asset?.representations.find(({ role }) => role === 'PLAYBACK');
+	if (!asset || asset.kind !== 'VIDEO' || asset.status !== 'READY'
+		|| asset.projectId !== session.projectId
+		|| original?.role !== 'ORIGINAL' || original.state !== 'READY'
+		|| original.bucket !== session.bucket || original.objectKey !== session.objectKey
+		|| original.sourceIdentityAlgorithm !== input.sourceIdentityAlgorithm
+		|| original.sourceIdentity !== input.sourceIdentity
+		|| playback?.state !== 'FAILED'
+		|| playback.bucket !== session.bucket
+		|| playback.objectKey !== videoPlaybackObjectKey({
+			id: session.id,
+			projectId: session.projectId,
+			generation: session.generation,
+		})) return false;
+	await tx.assetRepresentation.update({
+		where: { id: playback.id },
+		data: { state: 'VERIFYING', error: null },
+	});
+	await tx.assetUploadSession.update({
+		where: { id: session.id },
+		data: {
+			state: 'VERIFYING',
+			validationLeaseToken: null,
+			validationLeaseUntil: null,
+			validationError: null,
+			validationAttemptCount: 0,
+			completionResult: {
+				status: 'VERIFYING',
+				phase: 'PLAYBACK_REPAIR',
+				generation: session.generation,
+				sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
+				sourceIdentity: session.sourceIdentity,
+				assetId: asset.id,
+				originalRepresentationId: original.id,
+				playbackRepresentationId: playback.id,
+			},
+		},
+	});
+	return true;
 }

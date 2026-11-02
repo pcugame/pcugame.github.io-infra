@@ -1,3 +1,4 @@
+import { createProjectUpdateController } from './update.controller.js';
 import type { FastifyPluginAsync } from 'fastify';
 import { sendOk } from '../../../shared/http.js';
 import {
@@ -6,7 +7,6 @@ import {
 	BulkStatusBody,
 	SetPosterBody,
 	SetProjectVideoOrderBody,
-	UpdateProjectBody,
 	parseBody,
 	parseIntParam,
 } from '../../../shared/validation.js';
@@ -23,7 +23,6 @@ export interface ProjectControllerDependencies {
 		loadProjectWithAccess(actor: Actor, projectId: number): Promise<{ status: string }>;
 	};
 	status: {
-		assertTransition(currentStatus: string, targetStatus: string, role: string): void;
 		bulkUpdate(ids: number[], status: Parameters<typeof bulkUpdateStatus>[2]): Promise<{ updated: number }>;
 	};
 }
@@ -52,20 +51,7 @@ export function createProjectController(deps: ProjectControllerDependencies): Fa
 			},
 		);
 
-		app.patch<{ Params: { id: string } }>(
-			'/projects/:id',
-			{ preHandler: requireLogin },
-			async (request, reply) => {
-				const projectId = parseIntParam(request.params.id);
-				const patch = parseBody(UpdateProjectBody, request.body);
-				const user = request.currentUser!;
-				const project = await deps.access.loadProjectWithAccess(user, projectId);
-				if (patch.status !== undefined) {
-					deps.status.assertTransition(project.status, patch.status, user.role);
-				}
-				sendOk(reply, await deps.service.updateProject(projectId, patch, user));
-			},
-		);
+		await app.register(createProjectUpdateController(deps.service.updateProject));
 
 		app.delete<{ Params: { id: string } }>(
 			'/projects/:id',

@@ -172,6 +172,10 @@ const suites = {
 		],
 		env: garageEnv,
 	},
+	'video-playbacks': {
+		files: ['src/__tests__/video-playback.postgres.test.ts', 'src/__tests__/video-framerate.test.ts'],
+		env: { RUN_FFMPEG_TESTS: 'true' },
+	},
 	'project-assets': {
 		files: [
 			'src/__tests__/project-materials.postgres.test.ts',
@@ -192,6 +196,7 @@ const suites = {
 			'src/__tests__/canonical-asset-contract-schema.postgres.test.ts',
 			'src/__tests__/project-submission.postgres.test.ts',
 			'src/__tests__/faculty-management-http.postgres.test.ts',
+			'src/__tests__/manual-bootstrap-auth.postgres.test.ts',
 			'src/__tests__/phase2-project-http.postgres.test.ts',
 			'src/__tests__/contract-age-exception.postgres.test.ts',
 			'src/__tests__/contract-image-bridge36.postgres.test.ts',
@@ -237,6 +242,7 @@ const fullSuiteOrder = [
 	'lifecycle-schema',
 	'responsive-image-migration',
 	'canonical-migration-chain',
+	'video-playbacks',
 	'project-assets',
 	'admin-project-search',
 	'banned-ips',

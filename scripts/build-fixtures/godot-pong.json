@@ -1,0 +1,50 @@
+{
+  "engine": "Godot",
+  "sourceCommit": "2828de5c104d98702dc7831dbc266550e6a25406",
+  "source": "https://github.com/godotengine/godot-demo-projects",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "index.html",
+      "url": "https://raw.githubusercontent.com/godotengine/godot-demo-projects/2828de5c104d98702dc7831dbc266550e6a25406/2d/pong/index.html",
+      "bytes": 5447,
+      "sha256": "1bc3494605d201b8ff846d4036c77a73ba00e657bc2998fd528a276a8f5fb882"
+    },
+    {
+      "path": "index.js",
+      "url": "https://raw.githubusercontent.com/godotengine/godot-demo-projects/2828de5c104d98702dc7831dbc266550e6a25406/2d/pong/index.js",
+      "bytes": 279815,
+      "sha256": "68586d6daafc93c6e697b3fb258976874aa7459b8931165ebb1dc3c9614cc42c"
+    },
+    {
+      "path": "index.wasm",
+      "url": "https://raw.githubusercontent.com/godotengine/godot-demo-projects/2828de5c104d98702dc7831dbc266550e6a25406/index.wasm",
+      "bytes": 39513091,
+      "sha256": "35116f68540ac41acf7d71ea457added91b5e960a9cca3e2acc72918eaf01277"
+    },
+    {
+      "path": "index.pck",
+      "url": "https://raw.githubusercontent.com/godotengine/godot-demo-projects/2828de5c104d98702dc7831dbc266550e6a25406/2d/pong/index.pck",
+      "bytes": 17156,
+      "sha256": "e10e410d98a4214e588821c836d49f99dd882087e06484410cce643020c3aee9"
+    },
+    {
+      "path": "index.png",
+      "url": "https://raw.githubusercontent.com/godotengine/godot-demo-projects/2828de5c104d98702dc7831dbc266550e6a25406/2d/pong/index.png",
+      "bytes": 21443,
+      "sha256": "3cb4495c0b98dfbe4b663cbf2b6836473572339beb66d902367893162a70be0e"
+    },
+    {
+      "path": "index.icon.png",
+      "url": "https://raw.githubusercontent.com/godotengine/godot-demo-projects/2828de5c104d98702dc7831dbc266550e6a25406/2d/pong/index.icon.png",
+      "bytes": 2836,
+      "sha256": "26544591bd57562e8a0604514b131f1ba0ec4f970ad4ebbef4ccfebf4fea5203"
+    },
+    {
+      "path": "index.apple-touch-icon.png",
+      "url": "https://raw.githubusercontent.com/godotengine/godot-demo-projects/2828de5c104d98702dc7831dbc266550e6a25406/2d/pong/index.apple-touch-icon.png",
+      "bytes": 6019,
+      "sha256": "bf66a29f4758c59b63f7e73f2319d7c10bc2ce27934c884852d83802dac94717"
+    }
+  ]
+}

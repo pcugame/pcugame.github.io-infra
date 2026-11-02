@@ -1,3 +1,5 @@
+import { serializeAwards, type AwardLink } from '../../awards/serialization.js';
+import { videoPlaybackFields, type PlaybackJobView } from '../../../shared/video-playbacks.js';
 import { projectRequiredAssets, type RequiredAssetsSource } from '../../../shared/project-required-assets.js';
 import { effectiveProjectExternalLinks } from '../../../shared/project-external-links.js';
 import type { Visibility } from '@pcu/contracts';
@@ -24,6 +26,7 @@ type SerializableRepresentation = {
 };
 
 export type SerializableAsset = {
+	playbackJobs?: PlaybackJobView[];
 	id: number;
 	kind: AssetKind;
 	originalName: string;
@@ -64,6 +67,8 @@ function imageSourceFor(asset: {
 
 /** Serialize a project detail record to the API response shape */
 export type SerializableProject = {
+ exhibitionId?: number;
+ awards?: AwardLink[];
 	assetUploads?: RequiredAssetsSource['assetUploads'];
 	publicationJob?: RequiredAssetsSource['publicationJob'];
 	visibility: Visibility;
@@ -164,6 +169,7 @@ export function createProjectSerializer(
 			.map((videoAsset, index) => {
 				const playbackStatus = playbackStatusFor(videoAsset);
 				return {
+					...videoPlaybackFields(videoAsset, canonicalProtectedAssetUrl(base, videoAsset.id, 'playback')),
 					assetId: videoAsset.id,
 					sortOrder: videoAsset.videoSortOrder ?? null,
 					role: index === 0 ? 'MAIN' as const : 'ADDITIONAL' as const,
@@ -194,6 +200,8 @@ export function createProjectSerializer(
 		return {
 			requiredAssets: projectRequiredAssets(project, publicDelivery?.publicBucket),
 			id: project.id,
+ exhibitionId: project.exhibitionId,
+ awards: serializeAwards(project.awards, publicDelivery?.publicAssetOrigin ?? base, publicDelivery?.publicBucket ?? 'pcu-public'),
 			visibility: project.visibility,
 			exhibitionVisibility: project.exhibition.visibility,
 			canChangeVisibility: false,

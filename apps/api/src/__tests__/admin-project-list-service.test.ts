@@ -6,12 +6,14 @@ const mocks = {
 };
 
 const projectService = createProjectService({
+	loadProjectWithAccess: vi.fn(),
+	resolveExternalLinks: vi.fn(),
 	deletionBuckets: { publicBucket: 'public', protectedBucket: 'protected' },
 	repository: {
 		findProjectsForUser: mocks.findProjectsForUser,
 		findProjectById: vi.fn(),
 		isMemberOfProject: vi.fn(),
-		updateProject: vi.fn(),
+		runProjectUpdate: vi.fn(),
 		deleteProjectReturningAssets: vi.fn(),
 		clearWebglDeployment: vi.fn(),
 		findAssetById: vi.fn(),

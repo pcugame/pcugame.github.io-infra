@@ -26,6 +26,7 @@ class RuntimeCheck(unittest.TestCase):
         self.scopes[0]['DATABASE_URL'] = 'postgresql://fixture:PRIVATE_PASSWORD@postgres:5432/db?application_name=a%2Fb#fragment'
         self.scopes[0]['FILE_GATEWAY_SECRET'] = ''
         self.scopes[1]['ALLOWED_GOOGLE_HD'] = ''
+        self.scopes[1]['SHUTDOWN_DRAIN_MS'] = '15000'
         self.paths = [self.root / (name + '.env') for name in ('common', 'api', 'postgres')]
         self.write_files()
         self.document = []
@@ -63,6 +64,19 @@ class RuntimeCheck(unittest.TestCase):
         env[:] = [entry for entry in env if not entry.startswith(key + '=')]
         if value is not None:
             env.append(key + '=' + value)
+
+    def test_shutdown_budget_bounds(self):
+        for value in ('1', '15000', '60000'):
+            self.scopes[1]['SHUTDOWN_DRAIN_MS'] = value
+            self.write_files()
+            self.assertEqual(RUNTIME['deployment_values'](self.paths)['SHUTDOWN_DRAIN_MS'], value)
+        for value in ('0', '-1', '60001', '2147483648', '1.5', 'NaN', 'Infinity', '', SENTINEL):
+            with self.subTest(value=value):
+                self.scopes[1]['SHUTDOWN_DRAIN_MS'] = value
+                self.write_files()
+                with self.assertRaises(ValueError):
+                    RUNTIME['deployment_values'](self.paths)
+                self.assertEqual(self.run_check().returncode, 2)
 
     def test_all_containers_literal_empty_and_inherited_values(self):
         result = self.run_check()

@@ -1,3 +1,4 @@
+import { videoPlaybackRenditionKey, type VideoPlaybackQuality } from '@pcu/contracts';
 import { AppError, notFound } from '../../shared/errors.js';
 
 export type AssetDownloadVariant = 'original' | 'playback';
@@ -15,6 +16,7 @@ export interface AssetDownloadIdentity {
 	kind: string;
 	status: string;
 	representations: AssetDownloadRepresentation[];
+ playbackJobs?: { active: boolean; renditions: { profile: string; state: string; bucket: string; objectKey: string; expiresAt: Date | null }[] }[];
 }
 
 export interface ResolvedDownloadRepresentation {
@@ -31,6 +33,8 @@ function roleFor(variant: AssetDownloadVariant): DownloadRepresentationRole {
 export function resolveDownloadRepresentation(
 	asset: AssetDownloadIdentity,
 	variant: AssetDownloadVariant,
+ profile?: 'native' | 'cap60' | 'cap30',
+ quality: VideoPlaybackQuality = 'max',
 ): ResolvedDownloadRepresentation {
 	if (asset.status !== 'READY') throw notFound('Asset is not ready for download');
 	if (asset.kind !== 'GAME' && asset.kind !== 'VIDEO' && asset.kind !== 'DOCUMENT' && asset.kind !== 'ATTACHMENT'
@@ -43,6 +47,13 @@ export function resolveDownloadRepresentation(
 		throw notFound('Asset playback representation does not exist');
 	}
 
+ if (profile || quality !== 'max') {
+  const key = videoPlaybackRenditionKey(profile ?? 'native', quality);
+  if (variant !== 'playback') throw notFound('Profile requires playback variant');
+  const rendition = asset.playbackJobs?.find(job => job.active)?.renditions.find(r => r.profile === key && r.state === 'READY' && r.expiresAt === null);
+  if (rendition) return { role: 'PLAYBACK', bucket: rendition.bucket, objectKey: rendition.objectKey };
+  if (key !== 'native') throw notFound('Playback profile is unavailable');
+ }
 	const role = asset.kind === 'WEBGL' ? 'WEBGL_SOURCE' : roleFor(variant);
 	const canonical = asset.representations.find((representation) => representation.role === role);
 	if (canonical) {

@@ -9,6 +9,7 @@ import { lazy, Suspense } from 'react';
 import { LoadingSpinner } from '../components/common';
 
 const VotePage = lazy(() => import('../pages/VotePage'));
+const AdminBuildReviewsPage = lazy(() => import('../pages/admin/AdminBuildReviewsPage'));
 const AdminVotesPage = lazy(() => import('../pages/admin/AdminVotesPage'));
 const HomePage = lazy(() => import('../pages/HomePage'));
 const YearsPage = lazy(() => import('../pages/YearsPage'));
@@ -156,7 +157,9 @@ export const routes: RouteObject[] = [
           children: [
             { path: 'votes', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><AdminVotesPage /></Lazy></RequireRole>) },
             { path: 'projects/new/studio', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><AdminProjectSubmissionStudioPage /></Lazy></RequireRole>) },
+            { path: 'build-reviews', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><AdminBuildReviewsPage /></Lazy></RequireRole>) },
             { path: 'webgl-network', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><WebglNetworkPage admin /></Lazy></RequireRole>) },
+            { path: 'projects/:id/network', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><WebglNetworkPage admin projectAdmin /></Lazy></RequireRole>) },
             {
               index: true,
               element: <Navigate to="projects" replace />,

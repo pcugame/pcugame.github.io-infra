@@ -8,6 +8,7 @@ import {
 import { createAssetUploadService } from '../modules/asset-upload/service.js';
 import type { AssetUploadRepository, AssetUploadSessionRecord } from '../modules/asset-upload/ports.js';
 import { DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX } from '@pcu/contracts';
+import { resolveRoleUploadLimits } from '../shared/upload-policy.js';
 import { reservePartCapabilityCount } from '../modules/asset-upload/repository.js';
 
 function sourceProof(bytes: Buffer) {
@@ -47,7 +48,7 @@ function session(overrides: Partial<AssetUploadSessionRecord> = {}): AssetUpload
 function harness(current = session(), configOverrides: Partial<{
 	partSizeBytes: number;
 	partUrlRefreshMax: number;
-	maxBytesFor(actor: { id: number; role: string }, kind: string): number;
+	maxBytesFor(actor: { id: number; role: string }, kind: string): number | Promise<number>;
 }> = {}) {
 	const wakeMaintenance = vi.fn();
 	const repository = {
@@ -228,6 +229,29 @@ describe('canonical direct GAME control plane', () => {
 		})).rejects.toMatchObject({ statusCode: 400 });
 		expect(repository.createAllocating).toHaveBeenCalledTimes(1);
 		expect(storage.createMultipart).toHaveBeenCalledTimes(1);
+	});
+
+	it.each(['GAME', 'WEBGL'] as const)('%s awaits current administrator settings and preserves role ceilings', async kind => {
+		let maxGameFileMb = 1;
+		const policy = { UPLOAD_USER_GAME_MAX_MB: 2, UPLOAD_PRIVILEGED_GAME_MAX_MB: 4,
+			UPLOAD_USER_IMAGE_MAX_MB: 1, UPLOAD_PRIVILEGED_IMAGE_MAX_MB: 1,
+			UPLOAD_USER_REQUEST_MAX_MB: 2, UPLOAD_PRIVILEGED_REQUEST_MAX_MB: 4,
+			UPLOAD_USER_MAX_FILES: 10, UPLOAD_PRIVILEGED_MAX_FILES: 10 };
+		const { service, storage } = harness(session(), {
+			partSizeBytes: 1024 * 1024,
+			maxBytesFor: async actor => { await Promise.resolve(); return resolveRoleUploadLimits(policy, actor.role, { maxGameFileMb }).gameMaxBytes; },
+		});
+		const create = (role: string, bytes: number) => service[kind === 'GAME' ? 'createGameSession' : 'createWebglSession'](
+			{ id: 11, role }, 7, { originalName: 'game.zip', totalBytes: bytes, ...sourceProofForSize(bytes) });
+		await expect(create('USER', 1024 ** 2)).resolves.toBeDefined();
+		await expect(create('ADMIN', 1024 ** 2 + 1)).rejects.toMatchObject({ statusCode: 400 });
+		maxGameFileMb = 3;
+		await expect(create('USER', 2 * 1024 ** 2)).resolves.toBeDefined();
+		await expect(create('USER', 2 * 1024 ** 2 + 1)).rejects.toMatchObject({ statusCode: 400 });
+		await expect(create('OPERATOR', 3 * 1024 ** 2)).resolves.toBeDefined();
+		maxGameFileMb = 10;
+		await expect(create('ADMIN', 4 * 1024 ** 2 + 1)).rejects.toMatchObject({ statusCode: 400 });
+		expect(storage.createMultipart).toHaveBeenCalledTimes(3);
 	});
 
 	it('issues bounded batches and fences every URL batch by generation', async () => {

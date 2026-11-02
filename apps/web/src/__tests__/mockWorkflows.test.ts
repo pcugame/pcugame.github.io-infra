@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CONNECTION_PROFILES, ConnectionRule, draftOrigin, ProjectChangeDetailSchema, ProjectChangeListResponseSchema, WebglDisplaySettingsResponseSchema, WebglNetworkRequestSchema, WebglNetworkRequestListSchema, type ProjectChangeDetail, type WebglNetworkRequest } from '@pcu/contracts';
+import { WebglNetworkBatchResponseSchema, CONNECTION_PROFILES, ConnectionRule, draftOrigin, ProjectChangeDetailSchema, ProjectChangeListResponseSchema, WebglDisplaySettingsResponseSchema, WebglNetworkRequestSchema, WebglNetworkRequestListSchema, type ProjectChangeDetail, type WebglNetworkRequest } from '@pcu/contracts';
 import { api } from '../lib/api/client';
 import { adminImportApi, adminExportApi, adminSettingsApi, adminBannedIpApi } from '../lib/api/admin';
 import { getMockSnapshot, resetMockState, selectMockUser, setMockControls, updateMockState, forgetMockCacheForTests } from '../lib/api/mock/transport';
@@ -185,4 +185,29 @@ describe('shared service example contract', () => {
    }
   }
  });
+});
+
+it('atomically creates network batches through the mock HTTP transport', async () => {
+ await selectMockUser('owner');
+ const path = '/api/me/projects/1/webgl-network-requests';
+ const item = (origin: string) => ({ origin, mode: 'HTTPS', purpose: 'Bundles', cors: 'Configured' });
+ await expect(api.post(path + '/batch', { items: [item('https://first.example.com'), item('https://localhost')] })).rejects.toMatchObject({ status: 400 });
+ expect((await api.get<{ items: unknown[] }>(path)).items).toHaveLength(0);
+ await expect(api.post(path + '/batch', { items: [item('https://*.example.com:*'), item('https://first.example.com')] })).rejects.toMatchObject({ status: 400 });
+ const response = WebglNetworkBatchResponseSchema.parse(await api.post(path + '/batch', { items: [item('https://first.example.com'), item('https://second.example.com')] }));
+ expect(response.items.map(row => row.origin)).toEqual(['https://first.example.com', 'https://second.example.com']);
+ await expect(api.post(path + '/batch', { items: [item('https://third.example.com'), item('https://second.example.com')] })).rejects.toMatchObject({ status: 409, body: { error: { details: [expect.objectContaining({ index: 1, field: 'origin' })] } } });
+ expect((await api.get<{ items: unknown[] }>(path)).items).toHaveLength(2);
+});
+
+it('allows staff to grant a closed game directly, preserving atomicity and review history', async () => {
+ const project = await closedProject(); await selectMockUser('OPERATOR');
+ const path = `/api/admin/projects/${project.id}/webgl-network-requests`;
+ const items = [{ origin: 'https://game.example.com:*', mode: 'HTTPS', purpose: 'Game server', cors: 'Configured' }];
+ const initial = WebglNetworkRequestListSchema.parse(await api.get(path)); expect(initial.items).toHaveLength(0);
+ const created = WebglNetworkBatchResponseSchema.parse(await api.post(path + '/allow', { items, reason: 'Verified game server' }));
+ expect(created.items[0]).toMatchObject({ state: 'APPROVED', policyVersion: initial.policyVersion! + 1, events: [{ action: 'APPROVE', reason: 'Verified game server' }] });
+ await expect(api.post(path + '/allow', { items: [items[0], { ...items[0], origin: 'https://other.example.com' }], reason: 'Duplicate' })).rejects.toMatchObject({ status: 409 });
+ expect(WebglNetworkRequestListSchema.parse(await api.get(path)).items).toHaveLength(1);
+ await selectMockUser('owner'); await expect(api.post(path + '/allow', { items, reason: 'Denied' })).rejects.toMatchObject({ status: 403 });
 });

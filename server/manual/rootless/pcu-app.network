@@ -1,0 +1,4 @@
+[Network]
+NetworkName=pcu-app
+Subnet=10.89.40.0/24
+Gateway=10.89.40.1

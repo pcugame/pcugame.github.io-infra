@@ -1,0 +1,28 @@
+/* Opt-in structure: semantic tags alone never impose page layout. */
+.ui-panel {
+  min-width: 0;
+  padding: var(--admin-panel-padding, 1.5rem);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+}
+.ui-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-stack-gap, 1rem);
+  min-width: 0;
+}
+.ui-stack > :where(*) { margin-block: 0; min-width: 0; }
+.ui-prose > :where(* + *) { margin-block-start: 0.75rem; }
+.ui-prose :where(h2, h3, h4) { font-weight: 700; line-height: 1.4; }
+.ui-prose :where(h2) { font-size: 1.25rem; }
+.ui-prose :where(h3) { font-size: 1.1rem; }
+.ui-prose :where(h4) { font-size: 1rem; }
+.ui-prose :where(ul, ol) { padding-inline-start: 1.5rem; }
+.ui-prose :where(li + li) { margin-block-start: 0.35rem; }
+.ui-prose :where(summary) { cursor: pointer; font-weight: 600; }
+.ui-prose :where(code) { overflow-wrap: anywhere; }
+.ui-table-scroll { max-width: 100%; overflow-x: auto; }
+@media (max-width: 50em) {
+  .ui-panel { padding: 1rem; }
+}

@@ -5,7 +5,7 @@ import { ExternalLinksSchema, HardwareRequirementsSchema, PlatformsSchema } from
 import { ExternalLinksFieldset } from '../components/project/ExternalLinksFieldset';
 import { WebglBuildGuideLink } from '../components/project/WebglBuildGuideLink';
 import { effectiveExternalLinks } from '../components/project/externalLinks';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ProjectChangeManifestItem } from '@pcu/contracts';
@@ -94,7 +94,7 @@ function makeUploadManifest(files: UploadFiles): {
 
 const fileSizeLabel = (file: File) => `${(file.size / 1024 / 1024).toFixed(1)}MB`;
 
-export default function ProjectChangeRequestPage() {
+function useChangeRequestData() {
 	const { id: rawId } = useParams<{ id: string }>();
 	const projectId = Number(rawId);
 	const { user } = useMe();
@@ -132,6 +132,22 @@ export default function ProjectChangeRequestPage() {
 		queryKey: ['public-upload-config'],
 		queryFn: publicApi.getUploadConfig,
 	});
+	return { projectId, user, queryClient, projectQuery, requestsQuery, activeSummary, activeDetailQuery, uploadConfigQuery };
+}
+
+export default function ProjectChangeRequestPage() {
+	const data = useChangeRequestData();
+	// Refetches retain the editor; changing requests discards all local state and mutations.
+	return <ChangeRequestEditor key={`${data.projectId}:${data.activeSummary?.id ?? 'new'}`} data={data} />;
+}
+
+function ChangeRequestEditor({ data }: { data: ReturnType<typeof useChangeRequestData> }) {
+	const { projectId, user, queryClient, projectQuery, requestsQuery, activeSummary, activeDetailQuery, uploadConfigQuery } = data;
+	const mounted = useRef(true);
+	useEffect(() => {
+		mounted.current = true;
+		return () => { mounted.current = false; };
+	}, []);
 	const active = activeDetailQuery.data;
 	const [kind, setKind] = useState<ChangeRequestKind>('EDIT');
 	const [reason, setReason] = useState<string | null>(null);
@@ -144,6 +160,7 @@ export default function ProjectChangeRequestPage() {
 	const [fileError, setFileError] = useState<string | null>(null);
 
 	const invalidate = () => {
+		if (!mounted.current) return;
 		void queryClient.invalidateQueries({
 			queryKey: queryKeys.projectChangeRequests(projectId),
 		});
@@ -228,6 +245,7 @@ export default function ProjectChangeRequestPage() {
 				? changeRequestApi.update(active.id, { manifest })
 				: Promise.reject(new Error('작성 중인 요청이 없습니다.')),
 		onSuccess: (detail, manifest) => {
+			if (!mounted.current) return;
 			queryClient.setQueryData(queryKeys.changeRequest(detail.id), detail);
 			setUploadManifest(manifest);
 			invalidate();
@@ -273,11 +291,6 @@ export default function ProjectChangeRequestPage() {
 		create.isPending || save.isPending || prepareUploads.isPending || submit.isPending || cancel.isPending;
 	const mutationError = create.error ?? save.error ?? prepareUploads.error ?? submit.error ?? cancel.error;
 	const uploadItemsByToken = new Map((active?.items ?? []).map((item) => [item.clientToken, item]));
-	const uploadsReady = active
-		? active.items.every(
-				(item) => item.state === 'READY' && (item.kind !== 'VIDEO' || item.playbackState === 'READY'),
-			)
-		: true;
 	const preparedManifest =
 		uploadManifest ??
 		(active?.items.length
@@ -287,6 +300,12 @@ export default function ProjectChangeRequestPage() {
 					clientToken,
 				}))
 			: null);
+	const uploadsReady = (active?.items ?? []).every(
+		(item) => item.state === 'READY' && (item.kind !== 'VIDEO' || item.playbackState === 'READY'),
+	) && (preparedManifest ?? []).every((planned) => {
+		const item = uploadItemsByToken.get(planned.clientToken);
+		return item?.kind === planned.kind && item.slot === planned.slot && item.state === 'READY';
+	});
 	const limits = getClientUploadLimits(user?.role ?? 'USER');
 	const materialLimits = materialUploadLimitsFromConfig(uploadConfigQuery.data);
 	const removedAssetIds = new Set(formChanges.removeAssetIds ?? []);
@@ -793,7 +812,7 @@ export default function ProjectChangeRequestPage() {
 								<button
 									type="button"
 									className="btn btn--danger"
-									disabled={busy}
+									disabled={save.isPending || submit.isPending || cancel.isPending}
 									onClick={() => cancel.mutate()}
 								>
 									요청 취소

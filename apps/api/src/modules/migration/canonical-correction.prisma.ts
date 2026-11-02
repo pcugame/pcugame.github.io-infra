@@ -7,7 +7,7 @@ import { OBJECT_REFERENCE_CLAIM_LOCK_ID } from '../orphan/reference-resolver.js'
 
 type SqlClient = PrismaClient | Prisma.TransactionClient;
 type Row = Record<string, unknown>;
-const activeUploads = Prisma.sql`('ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING')`;
+const activeUploads = Prisma.sql`('ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING', 'AWAITING_REVIEW')`;
 
 async function snapshot(client: SqlClient, projectIds: number[], keys: string[]): Promise<Record<string, unknown>> {
 	const owners = Prisma.join([...projectIds].sort((a, b) => a - b));

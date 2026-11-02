@@ -120,7 +120,7 @@ describe('DirectVideoUploadWidget', () => {
 		uploadDirectAssetFile.mockImplementation((_projectId, file, _kind, _onProgress, options) => {
 			if (file === first) {
 				options.onSession(firstSession);
-				return Promise.resolve({ status: 'VERIFYING', sessionId: 'video-first' });
+				return Promise.resolve({ status: 'VERIFYING', sessionId: 'video-first', generation: 1 });
 			}
 			if (!secondOptions) {
 				secondOptions = options;
@@ -128,7 +128,7 @@ describe('DirectVideoUploadWidget', () => {
 				_onProgress({ percent: 50, uploadedBytes: 1, totalBytes: 2, uploadedChunks: 0, totalChunks: 1 });
 				return new Promise(() => undefined);
 			}
-			return Promise.resolve({ status: 'VERIFYING', sessionId: 'video-second' });
+			return Promise.resolve({ status: 'VERIFYING', sessionId: 'video-second', generation: 1 });
 		});
 		waitForDirectAssetReady.mockResolvedValue({ state: 'READY' });
 		render(
@@ -222,14 +222,14 @@ describe('DirectVideoUploadWidget', () => {
 		uploadDirectAssetFile.mockImplementation((_projectId, file, _kind, _onProgress, options) => {
 			if (file === first) {
 				options.onSession(firstSession);
-				return Promise.resolve({ status: 'VERIFYING', sessionId: firstSession.sessionId });
+				return Promise.resolve({ status: 'VERIFYING', sessionId: firstSession.sessionId, generation: 1 });
 			}
 			if (file === current) {
 				options.onSession(currentSession);
 				return new Promise(() => undefined);
 			}
 			options.onSession(remainingSession);
-			return Promise.resolve({ status: 'VERIFYING', sessionId: remainingSession.sessionId });
+			return Promise.resolve({ status: 'VERIFYING', sessionId: remainingSession.sessionId, generation: 1 });
 		});
 		waitForDirectAssetReady.mockResolvedValue({ state: 'READY' });
 		cancelDirectAssetUploadSession.mockRejectedValue(new Error('conflict'));

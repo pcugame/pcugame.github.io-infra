@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
-import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
+import { createProjectUpdateRepository } from '../modules/admin/project/update.repository.js';
+import { updateProject } from '../modules/admin/project/update.service.js';
+import { createProjectAccessService } from '../modules/admin/project-access.service.js';
+import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
+import { createProjectSerializer } from '../modules/admin/project/serializer.js';
+import { enrichExternalLinks } from '../modules/external-links/resolver.js';
 import { assertProjectUploadWriteAccessInTransaction } from '../modules/admin/project-access.service.js';
 
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
@@ -27,12 +32,15 @@ describe.runIf(enabled)('project year modification policy PostgreSQL', () => {
 	afterAll(async () => { await database?.close(); });
 	async function project() { const row = await db.project.create({ data: { exhibitionId, creatorId: owner.id, slug: randomUUID(), title: 'before', status: 'PUBLISHED', members: { create: { userId: member.id, name: 'member' } } } }); projectIds.push(row.id); return row; }
 	it('rejects closed owner/member/stranger writes, allows operator, then allows owner and member after opening', async () => {
-		const item = await project(); const repo = createProjectCrudRepository(db);
-		for (const actor of [owner, member, stranger]) await expect(repo.updateProject(item.id, { title: 'blocked' }, actor)).rejects.toMatchObject({ statusCode: 403 });
-		await expect(repo.updateProject(item.id, { title: 'operator' }, operator)).resolves.toMatchObject({ title: 'operator' });
+		const item = await project(); const deps = { repository: createProjectUpdateRepository(db),
+			loadProjectWithAccess: createProjectAccessService(createProjectAccessRepository(db)).loadProjectWithAccess,
+			resolveExternalLinks: enrichExternalLinks,
+			serializeProjectDetail: createProjectSerializer('http://api.test').serializeProjectDetail };
+		for (const actor of [owner, member, stranger]) await expect(updateProject(deps, item.id, { title: 'blocked' }, actor)).rejects.toMatchObject({ statusCode: 403 });
+		await expect(updateProject(deps, item.id, { title: 'operator' }, operator)).resolves.toMatchObject({ title: 'operator' });
 		await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: true } });
-		await expect(repo.updateProject(item.id, { title: 'owner' }, owner)).resolves.toMatchObject({ title: 'owner' });
-		await expect(repo.updateProject(item.id, { title: 'member' }, member)).resolves.toMatchObject({ title: 'member' });
+		await expect(updateProject(deps, item.id, { title: 'owner' }, owner)).resolves.toMatchObject({ title: 'owner' });
+		await expect(updateProject(deps, item.id, { title: 'member' }, member)).resolves.toMatchObject({ title: 'member' });
 	});
 	it('rechecks a late worker write after the year closes', async () => {
 		const item = await project(); await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: false } });

@@ -170,7 +170,7 @@ export function createExhibitionRepository(
 				tx.assetUploadSession.findMany({
 					where: {
 						project: { exhibitionId: id },
-						state: { in: ['ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING'] },
+						state: { in: ['ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING', 'AWAITING_REVIEW'] },
 					},
 					select: {
 						id: true,
@@ -216,6 +216,7 @@ export function createExhibitionRepository(
 					uploadSessionId: upload.canonicalSessionId,
 				});
 			}
+			await tx.exhibitionAward.deleteMany({ where: { exhibitionId: id } });
 			await tx.exhibition.delete({ where: { id } });
 			return { id: existing.id, cleanupQueued: targets.length > 0 || canonicalActiveUploads.length > 0 };
 		}, policy);

@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UpdateProjectChangeSchema } from '@pcu/contracts';
@@ -45,6 +45,7 @@ vi.mock('../features/auth', () => ({
 }));
 
 import ProjectChangeRequestPage from '../pages/ProjectChangeRequestPage';
+import { queryKeys } from '../lib/query';
 
 const project = {
 	id: 9,
@@ -100,9 +101,9 @@ function draft(
 	};
 }
 
-function renderPage() {
+function renderPage(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
 	return render(
-		<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+		<QueryClientProvider client={client}>
 			<MemoryRouter initialEntries={['/me/projects/9/change-request']}>
 				<Routes>
 					<Route path="/me/projects/:id/change-request" element={<ProjectChangeRequestPage />} />
@@ -118,6 +119,82 @@ afterEach(() => {
 });
 
 describe('ProjectChangeRequestPage', () => {
+	it.each([false, true])('isolates a new request after cancellation (late prepare: %s)', async (latePrepare) => {
+		const requestA = draft();
+		const requestB = { ...draft(), id: '123e4567-e89b-42d3-a456-426614174001', reason: 'B 사유' };
+		let active: ReturnType<typeof draft> | null = requestA;
+		let resolvePrepare!: (value: ReturnType<typeof draft>) => void;
+		let preparedA!: ReturnType<typeof draft>;
+		mocks.getDetail.mockResolvedValue(project);
+		mocks.listForProject.mockImplementation(async () => ({ items: active ? [active] : [], total: active ? 1 : 0 }));
+		mocks.get.mockImplementation(async () => active);
+		mocks.cancel.mockImplementation(async () => { active = null; return { ...requestA, state: 'CANCELLED' }; });
+		mocks.create.mockImplementation(async () => { active = requestB; return active; });
+		mocks.update.mockImplementation(async (id, body) => {
+			if (id === requestA.id && body.manifest) {
+				preparedA = { ...requestA, ...draft([{ id: 'item-a', kind: 'IMAGE', clientToken: body.manifest[0].clientToken, state: 'READY' }]) };
+				if (latePrepare) return new Promise<ReturnType<typeof draft>>((resolve) => { resolvePrepare = resolve; });
+				active = preparedA;
+				return preparedA;
+			}
+			return active;
+		});
+		renderPage();
+		fireEvent.change(await screen.findByLabelText('제목 *'), { target: { value: 'A 초안' } });
+		fireEvent.change(screen.getByLabelText('요청 사유 *'), { target: { value: 'A 사유' } });
+		const selectImage = (name: string) => fireEvent.change(
+			screen.getAllByLabelText('게임·미디어·자료 선택').find((element) => element.tagName === 'INPUT')!,
+			{ target: { files: [new File(['image'], name, { type: 'image/png' })] } },
+		);
+		selectImage('a.png');
+		fireEvent.click(screen.getByRole('button', { name: '업로드 준비' }));
+		await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+		if (!latePrepare) await screen.findByText('image upload item item-a');
+		fireEvent.click(screen.getByRole('button', { name: '요청 취소' }));
+		await screen.findByRole('button', { name: '요청 작성 시작' });
+		expect((screen.getByLabelText('요청 사유 *') as HTMLTextAreaElement).value).toBe('');
+		fireEvent.change(screen.getByLabelText('요청 사유 *'), { target: { value: 'B 사유' } });
+		fireEvent.click(screen.getByRole('button', { name: '요청 작성 시작' }));
+		await screen.findByLabelText('제목 *');
+		expect((screen.getByLabelText('제목 *') as HTMLInputElement).value).toBe(project.title);
+		expect((screen.getByLabelText('요청 사유 *') as HTMLTextAreaElement).value).toBe('B 사유');
+		expect(screen.queryByText('a.png')).toBeNull();
+		expect(screen.queryByText(/image upload item/)).toBeNull();
+		// An empty item list is valid for an edit without uploads.
+		expect((screen.getByRole('button', { name: '운영자에게 제출' }) as HTMLButtonElement).disabled).toBe(false);
+		selectImage('b.png');
+		if (latePrepare) await act(async () => { resolvePrepare(preparedA); });
+		expect(screen.getByText('b.png')).toBeTruthy();
+		expect(screen.queryByText(/image upload item/)).toBeNull();
+		expect((screen.getByRole('button', { name: '운영자에게 제출' }) as HTMLButtonElement).disabled).toBe(true);
+		fireEvent.click(screen.getByRole('button', { name: '운영자에게 제출' }));
+		expect(mocks.submit).not.toHaveBeenCalled();
+		// Even a successful prepare response must contain the planned upload items.
+		fireEvent.click(screen.getByRole('button', { name: '업로드 준비' }));
+		await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(2));
+		await screen.findByText('임시 업로드 공간을 준비하고 있습니다.');
+		expect((screen.getByRole('button', { name: '운영자에게 제출' }) as HTMLButtonElement).disabled).toBe(true);
+		expect(mocks.update.mock.calls[1]![0]).toBe(requestB.id);
+	});
+
+	it('preserves edits and selected files when the same request is refetched', async () => {
+		const active = draft();
+		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		mocks.getDetail.mockResolvedValue(project);
+		mocks.listForProject.mockResolvedValue({ items: [active], total: 1 });
+		mocks.get.mockResolvedValue(active);
+		renderPage(client);
+		fireEvent.change(await screen.findByLabelText('제목 *'), { target: { value: '입력 중 제목' } });
+		fireEvent.change(screen.getByLabelText('요청 사유 *'), { target: { value: '입력 중 사유' } });
+		fireEvent.change(screen.getAllByLabelText('게임·미디어·자료 선택').find((element) => element.tagName === 'INPUT')!, {
+			target: { files: [new File(['image'], 'keep.png', { type: 'image/png' })] },
+		});
+		mocks.get.mockResolvedValue({ ...active, reason: '서버 사유', changes: { title: '서버 제목' } });
+		await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.changeRequest(active.id) }); });
+		expect((screen.getByLabelText('제목 *') as HTMLInputElement).value).toBe('입력 중 제목');
+		expect((screen.getByLabelText('요청 사유 *') as HTMLTextAreaElement).value).toBe('입력 중 사유');
+		expect(screen.getByText('keep.png')).toBeTruthy();
+	});
  it('initializes legacy requirements, clears values, and rejects overlength hardware before saving', async () => {
   const active = draft();
   mocks.getDetail.mockResolvedValue(project);

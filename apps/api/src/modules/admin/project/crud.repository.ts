@@ -1,3 +1,6 @@
+import { awardInclude } from '../../awards/serialization.js';
+import { projectAssetActivityInclude, projectDetailInclude } from './detail.projection.js';
+import { createProjectUpdateRepository } from './update.repository.js';
 import { canReadVisibility, isVisibilityStaff } from '../../../shared/visibility.js';
 import { getProjectVideos, rewriteProjectVideoOrder, MAX_PROJECT_VIDEOS } from '../../assets/video-order.js';
 import { withAssetMutationTransaction } from '../../assets/mutation-transaction.js';
@@ -44,20 +47,8 @@ async function guardMutation(tx: TxClient, actor: Actor | undefined, projectId: 
 }
 
 const projectListPlayableKinds: AssetKind[] = ['GAME', 'VIDEO'];
-const projectAssetActivityInclude = {
-	assetUploads: {
-		where: { kind: { in: ['GAME', 'WEBGL', 'VIDEO', 'POSTER'] } },
-		// Keep active sessions and the newest terminal attempt without returning upload history.
-		distinct: ['kind', 'state'],
-		orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-		select: { kind: true, state: true },
-	},
-	publicationJob: { select: {
-		state: true,
-		submission: { select: { items: { select: { kind: true, state: true } } } },
-	} },
-} satisfies Prisma.ProjectInclude;
 const projectListInclude = {
+ awards: awardInclude,
 	...projectAssetActivityInclude,
 	currentWebglDeployment: { select: {
 		id: true, projectId: true, state: true,
@@ -91,27 +82,13 @@ const projectListInclude = {
 	},
 } as const satisfies Prisma.ProjectInclude;
 
-export const projectDetailInclude = {
-	...projectAssetActivityInclude,
-	exhibition: true,
-	changeRequestDraft: { select: { id: true } },
-	members: { orderBy: { sortOrder: 'asc' as const } },
-	assets: {
-		where: { status: 'READY' as const },
-		orderBy: { createdAt: 'asc' as const },
-		include: { representations: true },
-	},
-	poster: { include: { representations: { where: { state: 'READY' as const } } } },
-	currentWebglDeployment: true,
-} as const;
-
 const projectSubmissionInclude = {
 	project: { select: { id: true, status: true } },
 	publicationJob: { select: { state: true, lastError: true } },
 	items: {
 		orderBy: { slot: 'asc' as const },
 		include: { uploadSession: { select: {
-			id: true, generation: true, sourceIdentityAlgorithm: true, sourceIdentity: true,
+			id: true, generation: true, state: true, sourceIdentityAlgorithm: true, sourceIdentity: true,
 		} } },
 	},
 } as const satisfies Prisma.ProjectSubmissionInclude;
@@ -130,7 +107,7 @@ const webglDeletionSnapshotSelect = {
 	},
 } as const satisfies Prisma.WebglDeploymentSelect;
 
-const canonicalActiveUploadStates = ['ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING'] as const;
+const canonicalActiveUploadStates = ['ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING', 'AWAITING_REVIEW'] as const;
 
 export type FindProjectsForUserOptions = {
 	page: number;
@@ -293,18 +270,7 @@ export function createProjectCrudRepository(
 		isMemberOfProject(projectId, userId) {
 			return client.projectMember.findFirst({ where: { projectId, userId } });
 		},
-		async updateProject(id, data, actor) {
-			return client.$transaction(async (tx) => {
-				await guardMutation(tx, actor, id);
-				const current = await tx.project.findUniqueOrThrow({ where: { id }, select: { status: true } });
-				if (current.status === 'DRAFT' && data.status !== undefined && data.status !== 'DRAFT') {
-					throw conflict('Draft submissions may only be published by submission finalize');
-				}
-				await tx.project.update({ where: { id }, data });
-				await tx.project.update({ where: { id }, data: { version: { increment: 1 } } });
-				return tx.project.findUniqueOrThrow({ where: { id }, include: projectDetailInclude });
-			});
-		},
+		...createProjectUpdateRepository(client),
 		deleteProjectReturningAssets(id, outbox, actor) {
 			return client.$transaction(async (tx) => {
 				await guardMutation(tx, actor, id);

@@ -102,6 +102,19 @@ export class DownloadRateLimiter {
 		return [...this.bannedIps.values()].some((matches) => matches(ip));
 	}
 
+	/** Request-time ban enforcement; does not consume a download grant. */
+	assertIpAllowed(ip: string): void {
+		this.assertOpen();
+		ip = normalizeIpTarget(ip);
+		if (this.isBanned(ip)) {
+			throw new AppError(
+				403,
+				'Downloads from your IP address are blocked.',
+				'IP_BANNED',
+			);
+		}
+	}
+
 	/**
 	 * Check a principal scope and the independently supplied client IP.
 	 *
@@ -114,13 +127,7 @@ export class DownloadRateLimiter {
 		this.assertOpen();
 		ip = normalizeIpTarget(ip);
 		principalScope ??= `anonymous:${ip}`;
-		if (this.isBanned(ip)) {
-			throw new AppError(
-				403,
-				'Downloads from your IP address are blocked.',
-				'IP_BANNED',
-			);
-		}
+		this.assertIpAllowed(ip);
 
 		const now = this.clock.now().getTime();
 		const cutoff = now - this.windowMs;

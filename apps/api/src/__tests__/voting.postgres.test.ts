@@ -1,3 +1,4 @@
+import { DownloadRateLimiter } from '../shared/download-rate-limit.js';
 import { createPrismaImageWorkerRepository } from '../modules/image/prisma.repository.js';
 import { randomUUID, randomBytes } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyError } from 'fastify';
@@ -26,6 +27,9 @@ import { collectObjectReferences, createObjectReferenceIndex } from '../modules/
 import { createFileAccessRepository } from '../modules/file-access/repository.js';
 import { createFileAccessService } from '../modules/file-access/service.js';
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
+const downloadIpLimiter = new DownloadRateLimiter();
+const allowDownloadIp = (ip: string) => downloadIpLimiter.assertIpAllowed(ip);
+
 describe.runIf(enabled)('exhibition voting PostgreSQL and authenticated HTTP', () => {
 	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>,
 		db: PrismaClient,
@@ -731,7 +735,7 @@ describe.runIf(enabled)('exhibition voting PostgreSQL and authenticated HTTP', (
 				targetKind: 'EXACT',
 			}),
 		).toBe(true);
-		const access = createFileAccessService(createFileAccessRepository(db), config);
+		const access = createFileAccessService(createFileAccessRepository(db), config, allowDownloadIp);
 		expect(
 			(
 				await access.issue('https://images.fixture.example/public/images/voting-fixture.webp', {

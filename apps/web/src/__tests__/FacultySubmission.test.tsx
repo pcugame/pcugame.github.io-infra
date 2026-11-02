@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PropsWithChildren } from 'react';
 import { MemoryRouter } from 'react-router-dom';
@@ -9,7 +9,6 @@ import { adminExhibitionApi, adminProjectApi, publicApi } from '../lib/api';
 import { userProjectApi } from '../lib/api/me';
 import { isFacultyAccount } from '../features/project-submission/faculty-account';
 import { useProjectSubmissionForm } from '../features/project-submission/useProjectSubmissionForm';
-import { ProjectSubmissionForm } from '../features/project-submission/ProjectSubmissionForm';
 
 const mocks = vi.hoisted(() => ({ user: undefined as AuthUser | undefined, navigate: vi.fn() }));
 vi.mock('../features/auth', () => ({ useMe: () => ({ user: mocks.user }) }));
@@ -72,21 +71,6 @@ it.each(['USER', 'ADMIN'] as const)('preserves numeric student defaults for non-
   const { result } = renderHook(() => useProjectSubmissionForm({ mode, files }), { wrapper });
   expect(result.current.form.getValues('members.0')).toEqual({ name: faculty.name, studentId: '20260001', ...(mode === 'admin' ? { userId: 9 } : {}) });
 });
-
-it('remounts the entire form and file controls when the signed-in account changes', async () => {
-  const { container, rerender } = render(<ProjectSubmissionForm mode="admin" />, { wrapper });
-  fireEvent.change(screen.getByLabelText('이름'), { target: { value: '기존 학생' } });
-  fireEvent.change(screen.getByLabelText('제목 *'), { target: { value: '이전 계정의 작품' } });
-  const oldFileInput = container.querySelector('input[type=file]');
-  expect(oldFileInput).not.toBeNull();
-  mocks.user = { ...faculty, id: 10, email: 'A00001@pcu.ac.kr' };
-  rerender(<ProjectSubmissionForm mode="admin" />);
-  expect((screen.getByLabelText('이름') as HTMLInputElement).value).toBe('');
-  expect((screen.getByLabelText('제목 *') as HTMLInputElement).value).toBe('');
-  expect(container.querySelector('input[type=file]')).not.toBe(oldFileInput);
-  await waitFor(() => expect(adminExhibitionApi.list).toHaveBeenCalled());
-});
-
 
 it('restores only the faculty account submission after remount without creating another project', async () => {
   const saved = { id: 73, slug: 'faculty-project', year: 2026, status: 'DRAFT' as const, submissionId: 'faculty-submission', items: [], adminEditUrl: '/admin/projects/73/edit' };

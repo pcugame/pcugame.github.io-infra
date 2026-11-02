@@ -1,3 +1,5 @@
+import type { ProjectDetailRecord, ProjectUpdateRepository } from './update.ports.js';
+export type { ProjectDetailRecord } from './update.ports.js';
 import type { RequiredAssetsSource } from '../../../shared/project-required-assets.js';
 import type { ExternalLink, Platform, Visibility } from '@pcu/contracts';
 import type {
@@ -5,7 +7,6 @@ import type {
 	ProjectStatus,
 } from '@pcu/contracts';
 import type { PosterCandidate } from '../../../shared/poster-validation.js';
-import type { SerializableProject } from './serializer.js';
 import type { Actor } from '../../../application/http-input.js';
 
 export interface ExhibitionUploadRecord {
@@ -69,12 +70,13 @@ export interface ProjectSubmissionRecord {
 		failureReason: string | null;
 		playbackState: 'NONE' | 'READY' | 'FAILED';
 		playbackError: string | null;
-		uploadSession: { id: string; generation: number } | null;
+		uploadSession: { id: string; generation: number; state?: string } | null;
 	}>;
 	publicationJob: { state: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'; lastError: string | null } | null;
 }
 
 export interface ProjectListRecord extends RequiredAssetsSource {
+ awards?: import('../../awards/serialization.js').AwardLink[];
 	visibility: Visibility;
 	id: number;
 	title: string;
@@ -92,11 +94,6 @@ export interface ProjectListRecord extends RequiredAssetsSource {
 		status: string;
 		representations?: Array<{ role: string; objectKey: string; state: string }>;
 	} | null;
-}
-
-export interface ProjectDetailRecord extends SerializableProject {
-	creatorId: number;
-	changeRequestDraft?: { id: string } | null;
 }
 
 export interface ActiveUploadCleanup {
@@ -119,7 +116,7 @@ export interface DeletionOutboxConfig {
 	reason: string;
 }
 
-export interface ProjectRepository {
+export interface ProjectRepository extends ProjectUpdateRepository {
 	findProjectsForUser(
 		userId: number,
 		isPrivileged: boolean,
@@ -135,18 +132,6 @@ export interface ProjectRepository {
 	): Promise<{ items: ProjectListRecord[]; totalItems: number }>;
 	findProjectById(id: number): Promise<ProjectDetailRecord | null>;
 	isMemberOfProject(projectId: number, userId: number): Promise<unknown | null>;
-	updateProject(id: number, patch: {
-		visibility?: Visibility;
-		title?: string;
-		summary?: string;
-		description?: string;
-		externalLinks?: ExternalLink[];
-		platforms?: Platform[];
-		hardwareRequirements?: string;
-		isIncomplete?: boolean;
-		status?: ProjectStatus;
-		sortOrder?: number;
-	}, actor?: Actor): Promise<ProjectDetailRecord>;
 	deleteProjectReturningAssets(id: number, outbox: DeletionOutboxConfig, actor?: Actor): Promise<{
 		assets: DeletedAssetRecord[];
 		activeUploads: ActiveUploadCleanup[];
@@ -187,7 +172,7 @@ export type ProjectCrudRepository = Pick<ProjectRepository,
 	| 'isMemberOfProject'
 	| 'setProjectPoster'
 	| 'setProjectVideoOrder'
-	| 'updateProject'
+	| 'runProjectUpdate'
 >;
 
 export type SubmitProjectRepository = Pick<ProjectRepository,

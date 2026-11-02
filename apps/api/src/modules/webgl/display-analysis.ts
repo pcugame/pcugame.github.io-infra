@@ -71,8 +71,10 @@ export async function analyzeWebglDisplayArchive(input: { archivePath: string; l
 				texts.set(path, text);
 				return text;
 			};
-			const html = await read('index.html');
-			return await analyzeWebglDisplay(html, read, new Set(entries.keys()));
+			const entryPath = input.layout.entryPath ?? 'index.html';
+			const html = await read(entryPath);
+			const prefix = posix.dirname(entryPath);
+			return await analyzeWebglDisplay(html, path => read(posix.join(prefix, path)), new Set([...entries.keys()].map(path => posix.relative(prefix, path))));
 		} finally { zip.close(); }
 	} catch (error) {
 		if (input.signal?.aborted) throw input.signal.reason;

@@ -1,19 +1,20 @@
+import { serializeAwards } from '../../awards/serialization.js';
+import { capabilities } from './capabilities.js';
+import { updateProject } from './update.service.js';
+import type { ProjectUpdateDependencies } from './update.ports.js';
 import { projectRequiredAssets } from '../../../shared/project-required-assets.js';
-import type { ExternalLink, Platform, Visibility } from '@pcu/contracts';
-import type { ProjectStatus } from '@pcu/contracts';
 import type { AdminProjectItem, AdminProjectListQuery, AdminProjectListResponse } from '@pcu/contracts';
 import { forbidden, notFound } from '../../../shared/errors.js';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
 import type { createProjectSerializer } from './serializer.js';
 import type { ActiveUploadCleanup, ProjectCrudRepository } from './ports.js';
-import { enrichExternalLinks } from '../../external-links/resolver.js';
 import type { Actor } from '../../../application/http-input.js';
 
 type ProjectSerializer = ReturnType<typeof createProjectSerializer>['serializeProjectDetail'];
 
-export interface ProjectServiceDependencies {
+export interface ProjectServiceDependencies extends ProjectUpdateDependencies {
 	repository: ProjectCrudRepository;
-	resolveExternalLinks?: typeof enrichExternalLinks;
+ publicAssetOrigin?: string;
 	serializeProjectDetail: ProjectSerializer;
 	deletionBuckets: { publicBucket: string; protectedBucket: string };
 	abortMultipart(key: string, uploadId: string): Promise<void>;
@@ -31,20 +32,6 @@ function wakeCommittedCleanup(deps: ProjectServiceDependencies): void {
 	deps.wakeMaintenance();
 }
 
-
-function capabilities(project: { status?: string; creatorId: number; members: Array<{ userId: number | null }>; exhibition: { isModificationEnabled?: boolean } }, userId: number, role: string) {
-	const isModificationEnabled = project.exhibition.isModificationEnabled !== false;
-	const privileged = role === 'ADMIN' || role === 'OPERATOR';
-	const related = project.creatorId === userId || project.members.some((member) => member.userId === userId);
-	const direct = privileged || (isModificationEnabled && related);
-	return {
-		isModificationEnabled,
-		canEdit: direct,
-		canChangeVisibility: direct,
-		canDelete: direct,
-		canRequestChange: !privileged && !isModificationEnabled && related && project.status !== 'DRAFT',
-	};
-}
 
 // ── Business logic ──────────────────────────────────────────
 
@@ -70,6 +57,7 @@ export async function listProjects(
 	const items: AdminProjectItem[] = projects.map((p) => ({
 		requiredAssets: projectRequiredAssets(p, deps.deletionBuckets.publicBucket),
 		id: p.id,
+ awards: serializeAwards(p.awards, deps.publicAssetOrigin ?? "http://localhost", deps.deletionBuckets.publicBucket),
 		visibility: p.visibility,
 		exhibitionVisibility: p.exhibition.visibility,
 		title: p.title,
@@ -122,33 +110,6 @@ export async function getProjectDetail(
 		if (!isMember) throw forbidden('Not your project');
 	}
 	return { ...deps.serializeProjectDetail(project), ...capabilities(project, userId, userRole), canEditWebglDisplay: (userRole === 'ADMIN' || userRole === 'OPERATOR') || (project.creatorId === userId && project.exhibition.isModificationEnabled !== false) };
-}
-
-/** Partial-update a project */
-export async function updateProject(
-	deps: ProjectServiceDependencies,
-	projectId: number,
-	patch: {
-		visibility?: Visibility;
-		title?: string; summary?: string; description?: string; externalLinks?: ExternalLink[];
-		platforms?: Platform[]; hardwareRequirements?: string;
-		isIncomplete?: boolean; status?: ProjectStatus; sortOrder?: number;
-	},
-	actor: Actor,
-) {
-	const updated = await deps.repository.updateProject(projectId, {
-		...(patch.visibility !== undefined ? { visibility: patch.visibility } : {}),
-		...(patch.title !== undefined ? { title: patch.title } : {}),
-		...(patch.summary !== undefined ? { summary: patch.summary } : {}),
-		...(patch.description !== undefined ? { description: patch.description } : {}),
-		...(patch.platforms !== undefined ? { platforms: patch.platforms } : {}),
-		...(patch.hardwareRequirements !== undefined ? { hardwareRequirements: patch.hardwareRequirements } : {}),
-		...(patch.externalLinks !== undefined ? { externalLinks: await (deps.resolveExternalLinks ?? enrichExternalLinks)(patch.externalLinks) } : {}),
-		...(patch.isIncomplete !== undefined ? { isIncomplete: patch.isIncomplete } : {}),
-		...(patch.status !== undefined ? { status: patch.status } : {}),
-		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
-	}, actor);
-	return { ...deps.serializeProjectDetail(updated), ...capabilities(updated, actor.id, actor.role), canEditWebglDisplay: (actor.role === 'ADMIN' || actor.role === 'OPERATOR') || (updated.creatorId === actor.id && updated.exhibition.isModificationEnabled !== false) };
 }
 
 /** Delete a project and its associated asset files from S3 */

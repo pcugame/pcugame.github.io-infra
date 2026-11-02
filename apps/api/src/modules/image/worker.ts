@@ -26,9 +26,7 @@ export function createImageWorker(deps: {
 			const token = deps.ids.next();
 			const sessions = await deps.repository.claimVerifying(['IMAGE', 'POSTER'], deps.batchSize ?? 2, token, leaseMs);
 			const stats = { claimed: sessions.length, ready: 0, rejected: 0, retried: 0 };
-			for (const session of sessions) {
-				if (signal?.aborted) break;
-				const claim = createClaimHeartbeatGuard({
+			const claims = sessions.map(session => createClaimHeartbeatGuard({
 					heartbeatMs,
 					lostMessage: 'Image processing lease lost',
 					outerSignal: signal,
@@ -36,41 +34,46 @@ export function createImageWorker(deps: {
 						.then((owned) => ({ count: owned ? 1 : 0 })),
 					logHeartbeatFailure: (error) => deps.logger.error(
 						{ error, sessionId: session.id }, 'Image worker lease heartbeat failed'),
-				});
-				try {
-					await deps.processor.process(session, token, claim.signal, claim.assertOwned);
-					stats.ready++;
-				} catch (error) {
-					if (claim.isLost() || signal?.aborted) {
-						stats.retried++;
-						continue;
-					}
-					const terminal = error instanceof ImageRejectedError
-						|| error instanceof WorkerGenerationFencedError
-						|| isWorkerSourceObjectMissing(error);
-					if (terminal || (session.validationAttemptCount ?? 0) >= MAX_WORKER_VALIDATION_ATTEMPTS) {
-						try {
-							await claim.assertOwned();
-							const reason = terminal
-								? `${error instanceof ImageRejectedError ? `${error.code}: ` : ''}${imageErrorMessage(error)}`
-								: retryBudgetReason(session.kind, error);
-							const rejected = await deps.repository.reject({
-								session, token, reason: reason.slice(0, 500),
-							});
-							if (rejected) stats.rejected++;
-							else stats.retried++;
-						} catch (rejectError) {
+			}));
+			try {
+				for (const session of sessions) {
+					if (signal?.aborted) break;
+					const claim = claims[sessions.indexOf(session)]!;
+					try {
+						await deps.processor.process(session, token, claim.signal, claim.assertOwned);
+						stats.ready++;
+					} catch (error) {
+						if (claim.isLost() || signal?.aborted) {
 							stats.retried++;
-							deps.logger.error({ error: rejectError, sessionId: session.id },
-								'Image terminal outcome lost its lease; takeover will converge it');
+							continue;
 						}
-					} else {
-						stats.retried++;
-						deps.logger.warn({ error: imageErrorMessage(error), sessionId: session.id },
-							'Image processing will retry after lease expiry');
-					}
-				} finally { claim.stop(); }
-			}
+						const terminal = error instanceof ImageRejectedError
+							|| error instanceof WorkerGenerationFencedError
+							|| isWorkerSourceObjectMissing(error);
+						if (terminal || (session.validationAttemptCount ?? 0) >= MAX_WORKER_VALIDATION_ATTEMPTS) {
+							try {
+								await claim.assertOwned();
+								const reason = terminal
+									? `${error instanceof ImageRejectedError ? `${error.code}: ` : ''}${imageErrorMessage(error)}`
+									: retryBudgetReason(session.kind, error);
+								const rejected = await deps.repository.reject({
+									session, token, reason: reason.slice(0, 500),
+								});
+								if (rejected) stats.rejected++;
+								else stats.retried++;
+							} catch (rejectError) {
+								stats.retried++;
+								deps.logger.error({ error: rejectError, sessionId: session.id },
+									'Image terminal outcome lost its lease; takeover will converge it');
+							}
+						} else {
+							stats.retried++;
+							deps.logger.warn({ error: imageErrorMessage(error), sessionId: session.id },
+								'Image processing will retry after lease expiry');
+						}
+					} finally { await claim.stop(); }
+				}
+			} finally { await Promise.all(claims.map(claim => claim.stop())); }
 			return stats;
 		},
 	};

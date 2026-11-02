@@ -14,6 +14,21 @@ describe('DownloadRateLimiter', () => {
 		limiters.length = 0;
 	});
 
+	it('checks current bans without consuming principal or automatic IP capacity', () => {
+		const limiter = create({ maxHits: 1, maxIpHits: 1 });
+		for (let request = 0; request < 10; request++) limiter.assertIpAllowed('::ffff:203.0.113.1');
+		expect(limiter._bucketSize()).toBe(0);
+		expect(limiter._ipBucketSize()).toBe(0);
+		expect(limiter.check('203.0.113.1', 'user:1')).toEqual({ status: 'ok' });
+		expect(() => limiter.assertIpAllowed('203.0.113.1')).not.toThrow();
+		limiter.addBan('203.0.113.0/24');
+		expect(() => limiter.assertIpAllowed('::ffff:203.0.113.1')).toThrowError(
+			expect.objectContaining({ statusCode: 403, code: 'IP_BANNED' }),
+		);
+		limiter.removeBan('203.0.113.0/24');
+		expect(() => limiter.assertIpAllowed('203.0.113.1')).not.toThrow();
+	});
+
 	it('temporarily limits one principal without banning its shared IP', () => {
 		const limiter = create({ maxHits: 2, maxIpHits: 100, windowMs: 60_000 });
 		expect(limiter.check('203.0.113.1', 'user:1:asset:42')).toEqual({ status: 'ok' });

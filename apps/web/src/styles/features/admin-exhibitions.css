@@ -285,12 +285,12 @@
 	}
 }
 
-/* Settings follow the earlier editor: large poster on the left, fields on the right. */
+/* Exhibition identity above an editor with tabs aligned at the upper left. */
 .exhibition-dialog {
 	margin: auto;
 	padding: 0;
-	width: min(58rem, calc(100vw - 2rem));
-	max-height: calc(100dvh - 2rem);
+	width: min(62rem, calc(100vw - 3rem));
+	max-height: calc(100dvh - 3rem);
 	border: 1px solid var(--color-border);
 	border-top: 3px solid var(--color-primary);
 	border-radius: 12px;
@@ -303,55 +303,105 @@
 	background: rgb(0 0 0 / 55%);
 }
 .exhibition-dialog__header {
-	position: sticky;
-	top: 0;
-	z-index: 1;
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 	justify-content: space-between;
 	gap: 1rem;
-	padding: 1rem 1.5rem;
+	padding: 1.5rem 2rem;
 	border-bottom: 1px solid var(--color-border);
-	background: var(--color-surface);
+}
+.exhibition-dialog__identity {
+	min-width: 0;
+}
+.exhibition-dialog__eyebrow {
+	margin: 0 0 0.45rem;
+	font-size: 0.78rem;
+	font-weight: 600;
+	color: var(--color-primary);
 }
 .exhibition-dialog__header h2 {
 	margin: 0;
-	font-size: 1.25rem;
+	font-size: clamp(1.25rem, 2vw, 1.65rem);
+	line-height: 1.4;
+	overflow-wrap: anywhere;
 }
-.exhibition-dialog__header p {
-	margin: 0.25rem 0 0;
-	font-size: 0.85rem;
+.exhibition-dialog__header > button {
+	flex-shrink: 0;
+}
+.exhibition-dialog__facts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 1.5rem;
+	margin: 0.85rem 0 0;
+	font-size: 0.8rem;
+}
+.exhibition-dialog__facts > div {
+	display: flex;
+	gap: 0.5rem;
+}
+.exhibition-dialog__facts dt {
 	color: var(--color-text-muted);
 }
+.exhibition-dialog__facts dd {
+	margin: 0;
+	font-weight: 600;
+}
 .exhibition-dialog__body {
-	display: grid;
-	grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+	display: flex;
+	flex-direction: column;
+	min-height: 29rem;
 }
-.exhibition-dialog .exhibition-settings {
-	grid-column: 2;
-	grid-row: 1;
+.exhibition-dialog__tabs {
+	display: flex;
+	justify-content: flex-start;
+	gap: 0.5rem;
+	width: 100%;
+	padding: 0.75rem 2rem;
+	border-bottom: 1px solid var(--color-border);
+	overflow-x: auto;
+}
+.exhibition-dialog__tab.btn {
+	flex: 0 0 auto;
+	padding: 0.7rem 1rem;
+	white-space: nowrap;
+	border: 1px solid transparent;
+	background: transparent;
+	color: var(--color-text);
+	box-shadow: none;
+}
+.exhibition-dialog__tab small {
+	display: none;
+}
+.exhibition-dialog__tab.btn:hover {
+	background: var(--color-bg);
+}
+.exhibition-dialog__tab.btn[aria-selected='true'] {
+	background: var(--color-bg);
+	border-color: var(--color-border);
+	color: var(--color-primary);
+	box-shadow: inset 0 -3px var(--color-primary);
+}
+.exhibition-dialog__content {
+	width: 100%;
 	min-width: 0;
-	padding: 1.5rem;
-	border-left: 1px solid var(--color-border);
+	min-height: 29rem;
+	padding: 1.75rem 2rem;
 }
+.exhibition-dialog [role='tabpanel'][hidden] {
+	display: none;
+}
+.exhibition-dialog [role='tabpanel'] {
+	min-width: 0;
+}
+.exhibition-dialog .exhibition-settings,
 .exhibition-dialog .exhibition-poster-section {
-	grid-column: 1;
-	grid-row: 1;
 	min-width: 0;
 	margin: 0;
-	padding: 1.5rem;
+	padding: 0;
 	border: 0;
 }
 .exhibition-dialog .exhibition-poster-section > .field-hint {
-	margin-bottom: 1rem;
-}
-.exhibition-dialog .exhibition-danger {
-	grid-column: 1 / -1;
-	padding: 1rem 1.5rem;
-}
-.exhibition-dialog__body > .field-error {
-	grid-column: 1 / -1;
-	padding: 0 1.5rem 1rem;
+	margin-bottom: 1.25rem;
 }
 .exhibition-settings__primary {
 	display: grid;
@@ -373,22 +423,26 @@
 	flex-basis: 100%;
 }
 .exhibition-dialog .admin-exhibition-poster {
-	flex-direction: column;
-	align-items: center;
+	align-items: flex-start;
+	gap: 1.5rem;
 }
 .exhibition-dialog .project-poster-preview {
 	margin: 0;
-	width: 100%;
+	flex: 0 1 13rem;
 }
 .exhibition-dialog .admin-exhibition-poster__preview {
 	width: 100%;
-	max-width: 15rem;
-	margin: auto;
+	max-width: 13rem;
 	font-size: 1rem;
 }
+.exhibition-dialog
+	.admin-exhibition-poster
+	> .admin-exhibition-poster__preview {
+	width: 10rem;
+}
 .exhibition-dialog .admin-exhibition-poster__body {
-	width: 100%;
-	flex-basis: auto;
+	flex: 1;
+	min-width: 0;
 }
 .exhibition-dialog .admin-exhibition-poster .game-upload {
 	min-height: 0;
@@ -398,43 +452,55 @@
 	background: transparent;
 }
 .exhibition-dialog .admin-exhibition-poster__name {
-	margin-top: 0.5rem;
 	font-size: 0.85rem;
 }
 .exhibition-dialog .field-hint {
 	line-height: 1.6;
 }
-@media (max-width: 45em) {
+@media (max-width: 50em) {
 	.exhibition-dialog {
 		width: calc(100vw - 1rem);
 		max-height: calc(100dvh - 1rem);
 	}
 	.exhibition-dialog__header {
-		padding: 0.85rem 1rem;
+		padding: 1.25rem 1rem;
 	}
-	.exhibition-dialog__header > button {
-		flex-shrink: 0;
+	.exhibition-dialog__facts {
+		gap: 0.5rem 1rem;
 	}
 	.exhibition-dialog__body {
-		grid-template-columns: minmax(0, 1fr);
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
 	}
-	.exhibition-dialog .exhibition-poster-section {
-		grid-column: 1;
-		grid-row: 1;
-		padding: 1rem;
+	.exhibition-dialog__tabs {
+		justify-content: flex-start;
+		flex-direction: row;
+		width: 100%;
+		gap: 0.25rem;
+		padding: 0.65rem;
+		border-bottom: 1px solid var(--color-border);
+		overflow-x: auto;
 	}
-	.exhibition-dialog .exhibition-settings {
-		grid-column: 1;
-		grid-row: 2;
-		border-left: 0;
-		border-top: 1px solid var(--color-border);
-		padding: 1rem;
+	.exhibition-dialog__tab.btn {
+		width: auto;
+		flex: 1 0 auto;
+		align-items: center;
+		padding: 0.7rem 0.6rem;
+		font-size: 0.82rem;
+		white-space: nowrap;
 	}
-	.exhibition-dialog .admin-exhibition-poster__preview {
-		max-width: 13rem;
+	.exhibition-dialog__tab small {
+		display: none;
 	}
-	.exhibition-dialog .exhibition-danger {
-		padding: 1rem;
+	.exhibition-dialog__tab.btn[aria-selected='true'] {
+		box-shadow: inset 0 -3px var(--color-primary);
+	}
+	.exhibition-dialog__content {
+		width: 100%;
+		min-height: 0;
+		padding: 1.25rem 1rem;
+		border-right: 0;
 	}
 	.exhibition-settings__primary {
 		grid-template-columns: minmax(0, 1fr);
@@ -445,4 +511,393 @@
 	.exhibition-settings__options {
 		grid-template-columns: minmax(0, 1fr) 7rem;
 	}
+	.exhibition-dialog .admin-exhibition-poster {
+		flex-direction: column;
+		align-items: center;
+	}
+	.exhibition-dialog .project-poster-preview {
+		flex-basis: auto;
+		width: 100%;
+	}
+	.exhibition-dialog .admin-exhibition-poster__preview {
+		margin-inline: auto;
+	}
+	.exhibition-dialog .admin-exhibition-poster__body {
+		width: 100%;
+	}
+}
+
+/* Award composition shares the compact add-row and card patterns of member editors. */
+.award-settings {
+	display: grid;
+	gap: 1rem;
+	min-width: 0;
+}
+.award-settings__heading {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.65rem;
+}
+.award-settings__heading h3,
+.award-settings__heading h4 {
+	margin: 0;
+}
+.award-settings__count {
+	border-radius: 2rem;
+	padding: 0.2rem 0.6rem;
+	background: var(--color-bg);
+	color: var(--color-text-muted);
+	font-size: 0.75rem;
+}
+.award-settings .award-settings__controls {
+	display: grid;
+	gap: 1rem;
+	border: 0;
+	margin: 0;
+	padding: 0;
+	min-width: 0;
+}
+.award-settings__list {
+	display: grid;
+	gap: 0.75rem;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+.award-card {
+	border: 1px solid var(--color-border);
+	border-radius: 10px;
+	overflow: hidden;
+	background: var(--color-surface);
+}
+.award-card--expanded {
+	border-color: var(--color-primary);
+}
+.award-card__header {
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	padding: 1rem 1.25rem;
+}
+.award-card__rank {
+	font-size: 1.15rem;
+	font-weight: 700;
+	color: var(--color-text-muted);
+	font-variant-numeric: tabular-nums;
+}
+.award-card:first-child .award-card__rank {
+	color: var(--color-primary);
+}
+.award-card__identity {
+	flex: 1;
+	min-width: 0;
+}
+.award-card__identity .award-badge {
+	flex-direction: row;
+	gap: 0.65rem;
+	max-width: 100%;
+	background: transparent;
+	color: var(--color-text);
+	padding: 0;
+	font-size: 1rem;
+	font-weight: 600;
+	text-align: left;
+}
+.award-card__identity .award-badge :is(img, svg) {
+	width: 2rem;
+	height: 2rem;
+	flex-shrink: 0;
+}
+.award-card__identity p {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	margin: 0.2rem 0 0;
+	font-size: 0.75rem;
+	color: var(--color-text-muted);
+}
+.award-card__highest {
+	color: var(--color-primary);
+	font-weight: 600;
+}
+.award-card__actions,
+.award-card__order,
+.award-settings__actions {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+}
+.award-card__actions {
+	flex-shrink: 0;
+}
+.award-card__order .btn {
+	min-width: 2rem;
+	padding-inline: 0.6rem;
+}
+.award-card__recipients {
+	margin: 0;
+	padding: 0 1.25rem 1rem 3.6rem;
+	font-size: 0.8rem;
+	color: var(--color-text-muted);
+	overflow-wrap: anywhere;
+}
+.award-card__recipients > p { margin: 0; }
+.award-card__recipients-editor { display: grid; gap: 1rem; }
+.award-card__name-editor { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; min-width: 0; flex: 1; }
+.award-card__name-editor .form-field { flex: 1 1 10rem; }
+.award-card__name-editor .form-field__label { margin: 0; }
+.award-card__name-editor .form-control { font-size: 1rem; font-weight: 600; }
+.award-card__name-editor .btn { flex-shrink: 0; }
+.award-settings .form-field {
+	margin: 0;
+	min-width: 0;
+}
+.award-card__image-select {
+	width: 9rem;
+	flex-shrink: 0;
+}
+.award-card__image-select .form-field__label {
+	font-size: 0.75rem;
+}
+.award-card__selection {
+	display: grid;
+	gap: 1rem;
+	padding-top: 1.25rem;
+	border-top: 1px solid var(--color-border);
+}
+.award-card__projects {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 0.5rem;
+	max-height: 20rem;
+	overflow-y: auto;
+	padding: 0.25rem;
+}
+.award-card__projects .form-choice {
+	display: flex;
+	align-items: center;
+	gap: 0.65rem;
+	min-height: 2.75rem;
+	padding: 0.65rem 0.8rem;
+	border: 1px solid var(--color-border);
+	border-radius: 7px;
+	cursor: pointer;
+	overflow-wrap: anywhere;
+}
+.award-card__projects .form-choice:has(:checked) {
+	background: var(--color-bg);
+	border-color: var(--color-primary);
+}
+.award-card__projects .form-choice input {
+	flex-shrink: 0;
+}
+.award-card__selection > .btn,
+.award-settings__add.btn {
+	justify-self: start;
+}
+.award-card__changes,
+.award-settings__notice {
+	border-left: 3px solid var(--color-primary);
+	background: var(--color-bg);
+	padding: 0.75rem 1rem;
+	font-size: 0.8rem;
+	overflow-wrap: anywhere;
+}
+.award-card__delete {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+	border-top: 1px solid var(--color-border);
+	padding-top: 1rem;
+}
+.award-settings__create,
+.award-settings__empty {
+	padding: 1.25rem;
+	background: var(--color-bg);
+	border: 1px dashed var(--color-border);
+	border-radius: 10px;
+}
+.award-settings__create {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: start;
+	gap: 1rem;
+}
+.award-settings__create .award-settings__actions {
+	padding-top: 1.7rem;
+}
+.award-settings__empty p {
+	margin-top: 0.5rem;
+}
+.award-settings__assets {
+	border-top: 1px solid var(--color-border);
+	padding-top: 1rem;
+}
+.award-settings__assets summary {
+	cursor: pointer;
+	font-size: 0.85rem;
+	font-weight: 600;
+}
+.award-settings__assets summary span {
+	margin-left: 0.5rem;
+	color: var(--color-text-muted);
+	font-size: 0.75rem;
+	font-weight: 400;
+}
+.award-settings__assets[open] summary {
+	margin-bottom: 1rem;
+}
+.award-settings__asset {
+	display: flex;
+	justify-content: space-between;
+	gap: 1rem;
+	align-items: center;
+	overflow-wrap: anywhere;
+}
+@media (max-width: 50em) {
+	.award-card__header {
+		gap: 0.65rem;
+		padding: 1rem;
+		flex-wrap: wrap;
+	}
+	.award-card__rank {
+		font-size: 1rem;
+	}
+	.award-card__actions {
+		width: 100%;
+		justify-content: flex-end;
+	}
+	.award-card__recipients {
+		padding: 0 1rem 1rem;
+	}
+	.award-card__image-select {
+		width: 100%;
+	}
+	.award-card__projects {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.award-settings__create {
+		grid-template-columns: minmax(0, 1fr);
+		padding: 1rem;
+	}
+	.award-settings__create .award-settings__actions {
+		padding-top: 0;
+	}
+}
+
+.award-card__image-select {
+	width: 11rem;
+	display: grid;
+	gap: 0.5rem;
+}
+.award-card__image-select > .btn {
+	justify-self: start;
+}
+.award-card__upload {
+	padding: 1.25rem;
+	border-top: 1px solid var(--color-border);
+}
+.award-card__upload[hidden] {
+	display: none;
+}
+.award-card__upload > .ui-stack {
+	margin-top: 0.75rem;
+}
+.award-card__upload .game-upload {
+	margin: 0;
+}
+.award-card__upload .award-settings__asset {
+	flex-wrap: wrap;
+}
+@media (max-width: 50em) {
+	.award-card__image-select {
+		width: 100%;
+	}
+}
+
+.award-upload-popup {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	min-width: 0;
+	gap: 1rem;
+	padding-block: 1rem;
+}
+.award-upload-popup__empty {
+	padding: 1.25rem;
+	border: 1px dashed var(--color-border);
+	border-radius: 8px;
+	text-align: center;
+	color: var(--color-text-muted);
+	font-size: 0.85rem;
+}
+.award-upload-popup h3 {
+	margin-bottom: 0.75rem;
+	font-size: 0.9rem;
+}
+.award-upload-popup__library {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 0.75rem;
+	max-height: 15rem;
+	overflow-y: auto;
+}
+.award-upload-popup .award-settings__asset {
+	display: grid;
+	justify-items: center;
+	gap: 0.5rem;
+	padding: 0.75rem;
+	border: 1px solid var(--color-border);
+	border-radius: 8px;
+	min-width: 0;
+}
+.award-upload-popup .award-settings__asset img {
+	width: 3rem;
+	height: 3rem;
+	object-fit: contain;
+}
+.award-upload-popup .award-settings__asset > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
+	font-size: 0.75rem;
+}
+@media (max-width: 50em) {
+	.award-upload-popup__library {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+
+.award-card__icon-picker { min-width: 0; padding: 0 1.25rem 1rem; }
+.award-card__icon-modes, .award-card__laurels, .award-card__photos { display: flex; flex-wrap: wrap; gap: .4rem; }
+.award-card__laurels, .award-card__photos { margin-top: .5rem; }
+.award-card__icon-tile.btn {
+  flex-direction: column;
+  gap: .25rem;
+  width: 4.25rem;
+  height: 4.5rem;
+  padding: .35rem .25rem;
+  font-size: .75rem;
+}
+.award-card__icon-tile :is(svg, img) { width: 2rem; height: 2rem; flex-shrink: 0; object-fit: contain; }
+.award-card__icon-tile > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.award-card__photo { position: relative; }
+.award-card__photo-delete.btn {
+  position: absolute;
+  top: -.2rem;
+  right: -.2rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+}
+.award-card__photos { gap: .6rem; }
+.award-card__icon-picker .btn[aria-pressed='true'] { border-color: var(--color-primary); background: var(--color-bg); }
+@media (max-width: 50em) {
+  .award-card__icon-picker { padding-inline: 1rem; }
 }

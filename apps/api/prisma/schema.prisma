@@ -126,6 +126,7 @@ enum AssetUploadKind {
 }
 
 enum AssetUploadSessionState {
+  AWAITING_REVIEW
   ALLOCATING
   UPLOADING
   COMPLETING
@@ -201,6 +202,8 @@ model User {
 }
 
 model Exhibition {
+  awardsVersion Int @default(0) @map("awards_version")
+  awards ExhibitionAward[]
   visibility Visibility @default(PUBLIC)
   id              Int      @id @default(autoincrement())
   year            Int
@@ -223,6 +226,7 @@ model Exhibition {
 }
 
 model Project {
+  awards ProjectAward[]
   visibility Visibility @default(PUBLIC)
   version                  Int           @default(1)
   id                       Int           @id @default(autoincrement())
@@ -263,6 +267,7 @@ model Project {
   webglNetworkPolicyVersion Int @default(0) @map("webgl_network_policy_version")
   webglNetworkRequests WebglNetworkRequest[]
 
+  @@unique([id, exhibitionId])
   @@unique([exhibitionId, slug], name: "project_exhibition_slug")
   @@index([exhibitionId, status, sortOrder])
   @@index([status])
@@ -292,6 +297,7 @@ model ProjectMember {
 }
 
 model Asset {
+  awards ExhibitionAward[]
   id             Int         @id @default(autoincrement())
   projectId      Int?        @map("project_id")
   exhibitionId   Int?        @map("exhibition_id")
@@ -307,6 +313,7 @@ model Asset {
   posterOf           Project?                @relation("ProjectPoster")
   posterOfExhibition Exhibition?             @relation("ExhibitionPoster")
   representations    AssetRepresentation[]   @relation("AssetRepresentations")
+  playbackJobs       VideoPlaybackJob[]
   expectedByUploads  AssetUploadSession[]    @relation("AssetUploadExpectedTarget")
   resultOfUploads    AssetUploadSession[]    @relation("AssetUploadResult")
   submissionItems    ProjectSubmissionItem[] @relation("ProjectSubmissionItemAsset")
@@ -329,6 +336,7 @@ model StorageBucket {
   createdAt  DateTime          @default(now()) @map("created_at")
   updatedAt  DateTime          @updatedAt @map("updated_at")
 
+  videoPlaybackRenditions    VideoPlaybackRendition[]
   representations            AssetRepresentation[] @relation("AssetRepresentationBucket")
   publicationRepresentations AssetRepresentation[] @relation("AssetRepresentationPublicationBucket")
   publicWebglDeployments     WebglDeployment[]     @relation("WebglDeploymentPublicBucket")
@@ -465,6 +473,7 @@ model AssetUploadSession {
   reservedWebglDeployment WebglDeployment?       @relation("AssetUploadReservedWebglDeployment", fields: [reservedWebglDeploymentId], references: [id], onDelete: SetNull)
   submissionItem          ProjectSubmissionItem? @relation("ProjectSubmissionItemUpload", fields: [submissionItemId], references: [id], onDelete: SetNull)
   abortTasks              MultipartAbortTask[]   @relation("AssetUploadAbortTasks")
+  buildReviews            BuildReview[]
 
   // Partial unique index `asset_upload_sessions_active_project_kind_key` keeps
   // non-VIDEO project uploads single-active. VIDEO sessions reserve one of five
@@ -822,6 +831,7 @@ model ReleaseContractExceptionReceipt {
 
 /// Short-lived delivery capability. Anonymous deployments have no session.
 model FileAccessToken {
+  reviewId String? @map("review_id")
   id String @id
   sessionId String? @map("session_id")
   bucket String
@@ -1086,4 +1096,97 @@ model WebglConnectionDiagnostic {
   session WebglPlaySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   @@id([sessionId, origin, directive])
   @@map("webgl_connection_diagnostics")
+}
+
+model BuildReview {
+  id String @id @default(uuid())
+  sessionId String @map("session_id")
+  generation Int
+  sourceIdentity String @map("source_identity")
+  validatorVersion String @map("validator_version")
+  inspection Json
+  decision String @default("PENDING")
+  version Int @default(1)
+  decidedBy Int? @map("decided_by")
+  reason String?
+  entryPath String? @map("entry_path")
+  decidedAt DateTime? @map("decided_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  session AssetUploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  @@unique([sessionId, generation])
+  @@index([decision, createdAt])
+  @@map("build_reviews")
+}
+
+/// Independent of upload sessions so preserved legacy originals can be rebuilt.
+model VideoPlaybackJob {
+  id String @id @default(uuid())
+  assetId Int? @map("asset_id")
+  asset Asset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  sourceRepresentationId String @map("source_representation_id")
+  sourceBucket String @map("source_bucket")
+  sourceObjectKey String @map("source_object_key")
+  sourceVersion String @map("source_version")
+  sourceSha256 String? @map("source_sha256")
+  state String @default("PENDING")
+  active Boolean @default(false)
+  leaseToken String? @map("lease_token")
+  leaseUntil DateTime? @map("lease_until")
+  attempts Int @default(0)
+  error String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  renditions VideoPlaybackRendition[]
+  @@index([state, leaseUntil])
+  @@index([assetId, active])
+  @@map("video_playback_jobs")
+}
+model VideoPlaybackRendition {
+  id String @id @default(uuid())
+  jobId String @map("job_id")
+  job VideoPlaybackJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  /// FPS profile, optionally suffixed with @720p; unsuffixed is maximum quality.
+  profile String
+  attempt String
+  bucket String
+  storageBucket StorageBucket @relation(fields: [bucket], references: [bucket], onDelete: Restrict, onUpdate: Cascade)
+  objectKey String @map("object_key")
+  state String @default("PENDING")
+  checksum String?
+  sizeBytes BigInt @default(0) @map("size_bytes")
+  frameRate Float? @map("frame_rate")
+  width Int?
+  height Int?
+  expiresAt DateTime? @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([jobId, profile, attempt])
+  @@index([bucket, objectKey])
+  @@index([expiresAt])
+  @@map("video_playback_renditions")
+}
+
+model ExhibitionAward {
+  id Int @id @default(autoincrement())
+  exhibitionId Int @map("exhibition_id")
+  name String
+  sortOrder Int @map("sort_order")
+  /// Builtin keys (including laurel color variants) are constrained by the SQL migration.
+  builtinKey String? @map("builtin_key")
+  assetId Int? @map("asset_id")
+  exhibition Exhibition @relation(fields: [exhibitionId], references: [id], onDelete: Cascade)
+  asset Asset? @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  recipients ProjectAward[]
+  @@unique([id, exhibitionId])
+  @@unique([exhibitionId, name])
+  @@map("exhibition_awards")
+}
+model ProjectAward {
+  exhibitionId Int @map("exhibition_id")
+  projectId Int @map("project_id")
+  awardId Int @map("award_id")
+  project Project @relation(fields: [projectId, exhibitionId], references: [id, exhibitionId], onDelete: Cascade, onUpdate: NoAction)
+  award ExhibitionAward @relation(fields: [awardId, exhibitionId], references: [id, exhibitionId], onDelete: Cascade, onUpdate: NoAction)
+  @@id([projectId, awardId])
+  @@index([awardId, exhibitionId])
+  @@map("project_awards")
 }

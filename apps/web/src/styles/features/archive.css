@@ -304,7 +304,7 @@
   aspect-ratio: 2 / 3;
 }
 
-.archive-grid--poster .archive-card__image img {
+.archive-grid--poster .archive-card__image > img {
   object-fit: cover;
 }
 
@@ -320,6 +320,12 @@
   transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 0;
+  text-align: left;
+  font-weight: inherit;
   min-height: 2.75rem;
   width: 100%;
   container-type: inline-size;
@@ -340,14 +346,14 @@
   flex-shrink: 0;
 }
 
-.archive-card__image img {
+.archive-card__image > img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   transition: transform 0.4s ease;
 }
 
-.archive-card:hover .archive-card__image img {
+.archive-card:hover .archive-card__image > img {
   transform: scale(1.04);
 }
 
@@ -387,6 +393,7 @@
 
 .archive-card__summary {
   font-size: 0.82rem;
+  min-height: 1.5em;
   color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -650,4 +657,44 @@ button.archive-card {
   .years-card__arrow {
     font-size: 0.9rem;
   }
+}
+
+.archive-card__image { position: relative; }
+.archive-card__awards {
+  position: absolute;
+  inset: auto .4rem .4rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: .25rem;
+  pointer-events: none;
+}
+
+@container (max-width: 12rem) {
+  .archive-card__awards { inset: auto .3rem .3rem; gap: .2rem; }
+  .archive-card__awards .project-award {
+    gap: 0;
+    padding: .05rem .25rem;
+    font-size: .625rem;
+  }
+  .archive-card__awards .project-award__icon { width: 1.5rem; height: 1.5rem; }
+}
+
+/* Keep rank visible through hover and theme overrides. */
+.archive-card[data-award-tone],
+[data-theme='dark'] .archive-card[data-award-tone]:hover {
+  border: 4px solid var(--award-border);
+}
+.archive-card[data-award-tone]:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 3px; }
+.archive-card__image:has(.archive-card__awards) { display: grid; }
+.archive-card__image:has(.archive-card__awards) > * { grid-area: 1 / 1; }
+.archive-card__image:has(.archive-card__awards) > :is(img, picture) { width: 100%; height: 100%; min-height: 0; object-fit: cover; }
+.archive-card__image .archive-card__awards {
+  position: relative;
+  inset: auto;
+  align-self: end;
+  margin: .4rem;
+}
+@container (max-width: 12rem) {
+  .archive-card__image .archive-card__awards { margin: .3rem; }
 }
