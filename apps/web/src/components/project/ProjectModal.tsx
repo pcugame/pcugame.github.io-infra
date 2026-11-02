@@ -257,11 +257,10 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 						{/* 본문 */}
 						<div className="modal-body">
-							<h1 className="modal-title">
-								{project.title}
-							</h1>
-
-							<ProjectAwards awards={project.awards} />
+							<div className="modal-title-row">
+								<h1 className="modal-title">{project.title}</h1>
+								<ProjectAwards awards={project.awards} />
+							</div>
 
 							<ProjectPublicMeta githubUrl={project.githubUrl} externalLinks={project.externalLinks} platforms={project.platforms} hardwareRequirements={project.hardwareRequirements} />
 

@@ -324,6 +324,18 @@
   margin-bottom: 1rem;
 }
 
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem .75rem;
+  margin-bottom: 1rem;
+}
+.modal-title-row .modal-title { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.modal-title-row .project-awards { margin: 0; min-width: 0; gap: .35rem; }
+.modal-title-row .project-award { padding: .15rem .4rem; font-size: .75rem; }
+.modal-title-row .project-award__icon { width: 1.75rem; height: 1.75rem; }
+
 /* 참여 학생 칩 */
 .modal-members {
   display: flex;
