@@ -77,7 +77,8 @@ Web은 정적 SPA로 빌드된다. API는 공개·인증·운영 route를 제공
 
 ## 요구 환경
 
-- Node.js 26.12.1
+- Nix 개발 환경: x86_64 Linux, Nix의 `nix-command`·`flakes` 기능, Node.js 26.13.0
+- Nix 미사용 환경: Node.js 26.12.1 (`.nvmrc` 기준)
 - npm과 저장소의 `package-lock.json`
 - Docker Engine 및 Docker Compose v2
 - 로컬 개발 포트 `4000`, `5173`, `5432`, `3900`, `3902`
@@ -121,11 +122,26 @@ npm run testenv:reset
 
 API와 Web의 hot reload가 필요한 경우 PostgreSQL과 Garage만 Docker로 실행한다.
 
-### 1. 의존성 설치
+### 1. 개발 shell 진입·의존성 설치
+
+Nix 환경에서는 저장소 루트에서 다음 명령을 실행한다. 개발 server를 별도 terminal에서 실행할 때도 각각 `nix develop`로 진입한다.
 
 ```bash
+nix develop
 npm ci
 ```
+
+`flake.lock`은 Node.js 26.13.0과 Prisma schema engine 7.9.1의 nixpkgs revision을 고정한다. 개발 shell은 `PRISMA_SCHEMA_ENGINE_BINARY`를 Nix engine 경로로 지정하며, CLI는 npm workspace에 설치된 Prisma 7.9.1을 사용한다. CLI·client·adapter와 Nix engine의 버전이 다르면 Nix 평가가 실패한다. 시스템 Prisma 교체와 direnv 자동 활성화는 수행하지 않는다. Nix를 사용하지 않는 Linux에서는 기존 Node·npm 환경에서 `npm ci`를 실행하며, Nix engine 환경 변수를 설정할 필요가 없다.
+
+다음 명령은 `.env`와 `DATABASE_URL` 없이 실행할 수 있다. DB 연결은 수행하지 않는다.
+
+```bash
+npm exec --workspace=apps/api -- prisma --version
+npm exec --workspace=apps/api -- prisma validate
+npm run db:generate --workspace=apps/api
+```
+
+Prisma 설정은 [공식 설정 문서](https://docs.prisma.io/docs/orm/reference/prisma-config-reference)에 따라 `process.env['DATABASE_URL']`을 전달한다. `migrate status` 등 DB 명령은 주소가 없으면 Prisma의 datasource URL 누락 오류로 종료한다.
 
 ### 2. PostgreSQL·Garage 기동
 
@@ -139,8 +155,8 @@ docker compose -f apps/db/docker-compose.yml logs garage-init
 ### 3. 환경 변수 구성
 
 ```bash
-cp apps/api/.env.example apps/api/.env
-cp apps/web/.env.example apps/web/.env.local
+test -e apps/api/.env || cp apps/api/.env.example apps/api/.env
+test -e apps/web/.env.local || cp apps/web/.env.example apps/web/.env.local
 ```
 
 `apps/api/.env`에서 최소한 다음 항목을 로컬 환경에 정합한다.
@@ -151,7 +167,11 @@ cp apps/web/.env.example apps/web/.env.local
 
 API는 시작 시 환경 변수를 검증한다. `SESSION_SECRET`은 32자 이상이어야 하며, `DATABASE_URL`, `CORS_ALLOWED_ORIGINS`, `API_PUBLIC_URL`, `WEB_PUBLIC_URL`, S3 접속 정보는 필수이다. `.env`와 `.env.local`은 commit하지 않는다.
 
+위 복사 명령은 파일이 없는 경우에만 수동으로 실행한다. `nix develop`과 개발 명령은 `.env`를 생성하거나 덮어쓰지 않는다. API 개발 명령은 `apps/api/.env`를 읽으며, 이미 설정된 shell 환경 변수를 우선한다. `.env`가 없어도 shell에 필수 설정이 있으면 실행할 수 있다.
+
 ### 4. database 초기화
+
+`DATABASE_URL`이 개발용 DB를 가리키는지 확인한 뒤 명시적으로 실행한다. 개발 server 시작 시 migration·seed는 자동 실행하지 않는다.
 
 ```bash
 npm run db:generate --workspace=apps/api
@@ -167,7 +187,7 @@ npm run db:seed:import --workspace=apps/api
 
 ### 5. 개발 server 실행
 
-두 terminal에서 각각 실행한다.
+두 terminal에서 각각 실행한다. API의 `predev`는 공용 계약을 빌드한 뒤 Prisma 코드를 생성한다. 어느 단계든 실패하면 server 실행을 중단한다. 운영용 `start` 명령은 기존과 동일하다.
 
 ```bash
 npm run dev --workspace=apps/api
