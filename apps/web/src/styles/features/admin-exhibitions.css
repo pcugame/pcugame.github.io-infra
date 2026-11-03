@@ -1041,3 +1041,11 @@
 .project-award-tile:has(:disabled) { opacity: .65; cursor: wait; }
 .project-award-picker__footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; }
 .project-award-picker__footer > span { font-size: .8rem; color: var(--color-text-muted); }
+
+.award-color-editor { display: grid; gap: .5rem; padding: 0 1.25rem 1rem; }
+.award-color-editor__controls { display: flex; align-items: end; flex-wrap: wrap; gap: .65rem; }
+.award-color-editor__controls > .form-field:not(.award-color-editor__picker) { flex: 0 1 10rem; min-width: 0; }
+.award-color-editor__picker input { width: 3rem; height: 2.5rem; padding: .2rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); cursor: pointer; }
+.award-color-editor__picker input:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.award-color-editor__preview { align-self: center; max-width: 12rem; }
+.award-color-editor > .field-hint { margin: 0; }

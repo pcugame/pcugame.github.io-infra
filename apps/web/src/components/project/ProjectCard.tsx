@@ -1,4 +1,4 @@
-import { awardTone, orderedAwards } from './awardTone';
+import { awardStyle, awardTone, orderedAwards } from './awardTone';
 import { AwardBadge } from './AwardBadge';
 import { useEffect, useRef } from 'react';
 import type { PublicProjectCard } from '../../contracts';
@@ -25,7 +25,7 @@ export function ProjectCard({ project, onSelect, localPoster }: Props) {
   return (
     <button
       type="button"
-      className="archive-card" data-award-tone={project.awards?.length ? awardTone(orderedAwards(project.awards)[0]) : undefined}
+      className="archive-card" style={awardStyle(orderedAwards(project.awards)[0])} data-award-tone={project.awards?.length ? awardTone(orderedAwards(project.awards)[0]) : undefined}
       onClick={() => onSelect?.(project.slug)}
     >
       <div className="archive-card__image">

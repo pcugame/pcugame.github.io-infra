@@ -61,11 +61,11 @@ export function handleAwards(ctx: MockContext, path: string, method: string, opt
    award!.projectIds = [...new Set([...award!.projectIds.filter(id => !removeProjectIds.includes(id)), ...addProjectIds])];
   } else if (method === 'DELETE' && award) state.items = state.items.filter(a => a.id !== award.id);
   else {
-   allowMethod(method,award ? 'PATCH' : 'POST'); const { name, builtinKey, assetId } = parseInput(AwardEditSchema,body);
+   allowMethod(method,award ? 'PATCH' : 'POST'); const { name, builtinKey, assetId, color } = parseInput(AwardEditSchema,body);
    if (state.items.some(a => a.name === name && a.id !== awardId)) throw new MockHttpError(409,'CONFLICT','같은 이름의 상이 있습니다.');
    const asset = state.assets.find(a => a.id === assetId);
    if (assetId !== null && !asset) fail('Invalid image');
-   const fields = { name, builtinKey, assetId, imageUrl: asset?.imageUrl };
+   const fields = { name, builtinKey, assetId, ...(color !== undefined ? { color } : {}), imageUrl: asset?.imageUrl };
    if (award) Object.assign(award,fields);
    else { ctx.state.counters.award = (ctx.state.counters.award ?? 0) + 1; state.items.push({ ...fields, id: ctx.state.counters.award, sortOrder: Math.max(-1,...state.items.map(a => a.sortOrder))+1, projectIds: [] }); }
   }

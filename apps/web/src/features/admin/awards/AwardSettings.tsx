@@ -1,4 +1,5 @@
-import { awardTone } from '../../../components/project/awardTone';
+import { AwardColorEditor } from './AwardColorEditor';
+import { awardStyle, awardTone } from '../../../components/project/awardTone';
 import { matchesSearch } from '../../../lib/utils/search';
 import { useMe } from '../../auth';
 import { IconPlus } from '@tabler/icons-react';
@@ -304,7 +305,7 @@ function AwardCard({
 					{String(index + 1).padStart(2, '0')}
 				</span>
 				<div className="award-card__identity">
-					<div className="award-badge" data-award-tone={awardTone(award)}>
+					<div className="award-badge" data-award-tone={awardTone(award)} style={awardStyle(award)}>
 						<AwardIcon award={award} />
 						{expanded ? (
 							<AwardNameEditor exhibitionId={exhibitionId} state={state} award={award} save={save} busy={busy} />
@@ -356,11 +357,11 @@ function AwardCard({
 				{iconMode === 'laurel' ? (
 					<div className="award-card__laurels" role="group" aria-label={`${award.name} 월계관 색상`}>
 						{laurelIcons.map(icon => (
-							<Button className="award-card__icon-tile" key={icon.key} variant="secondary" size="small" aria-pressed={award.builtinKey === icon.key} disabled={busy || uploadActive} onClick={() => {
-								if (award.builtinKey === icon.key) return;
-								void save(() => awardApi.edit(exhibitionId, state.version, { id: award.id, name: award.name, builtinKey: icon.key, assetId: null }));
+							<Button className="award-card__icon-tile" key={icon.key} variant="secondary" size="small" aria-pressed={award.builtinKey === icon.key && (!award.color || award.color.toLowerCase() === icon.color.toLowerCase())} disabled={busy || uploadActive} onClick={() => {
+								if (award.builtinKey === icon.key && award.color?.toLowerCase() === icon.color.toLowerCase()) return;
+								void save(() => awardApi.edit(exhibitionId, state.version, { id: award.id, name: award.name, builtinKey: icon.key, color: icon.color, assetId: null }));
 							}}>
-								<AwardIcon award={{ ...award, builtinKey: icon.key, assetId: null, imageUrl: undefined }} />
+								<AwardIcon award={{ ...award, builtinKey: icon.key, color: icon.color, assetId: null, imageUrl: undefined }} />
 								{icon.label}
 							</Button>
 						))}
@@ -387,6 +388,8 @@ function AwardCard({
 					</div>
 				)}
 			</div>
+
+			<AwardColorEditor key={`${award.id}:${award.color ?? "default"}:${award.builtinKey}`} exhibitionId={exhibitionId} state={state} award={award} busy={busy || uploadActive} save={save} />
 
 			<ProjectUploadDialog
 				open={uploadOpen}

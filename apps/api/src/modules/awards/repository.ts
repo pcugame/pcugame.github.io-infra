@@ -25,8 +25,8 @@ export function createAwardRepository(client: PrismaClient): AwardRepository {
    await tx.$queryRaw`SELECT id FROM assets WHERE exhibition_id = ${exhibitionId} AND project_id IS NULL AND kind = 'IMAGE' AND status = 'READY' ORDER BY id FOR UPDATE`;
    const snapshot = await read(tx, exhibitionId);
    const change = validate({ ...snapshot, exhibitionId, projects: projects.map(p => ({ ...p, staging: p.changeRequestDraft !== null || p.hiddenCancelled })) });
-   if (change.kind === 'create') await tx.exhibitionAward.create({ data: { exhibitionId, name: change.name, builtinKey: change.builtinKey, assetId: change.assetId, sortOrder: snapshot.items.length ? Math.max(...snapshot.items.map(a => a.sortOrder)) + 1 : 0 } });
-   if (change.kind === 'edit') await tx.exhibitionAward.update({ where: { id: change.awardId! }, data: { name: change.name, builtinKey: change.builtinKey, assetId: change.assetId } });
+   if (change.kind === 'create') await tx.exhibitionAward.create({ data: { exhibitionId, name: change.name, color: change.color, builtinKey: change.builtinKey, assetId: change.assetId, sortOrder: snapshot.items.length ? Math.max(...snapshot.items.map(a => a.sortOrder)) + 1 : 0 } });
+   if (change.kind === 'edit') await tx.exhibitionAward.update({ where: { id: change.awardId! }, data: { name: change.name, color: change.color, builtinKey: change.builtinKey, assetId: change.assetId } });
    if (change.kind === 'delete') await tx.exhibitionAward.delete({ where: { id: change.awardId } });
    if (change.kind === 'order') for (const [sortOrder, id] of change.awardIds.entries()) await tx.exhibitionAward.update({ where: { id }, data: { sortOrder } });
    if (change.kind === 'recipients') {

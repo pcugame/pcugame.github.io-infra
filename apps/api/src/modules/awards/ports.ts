@@ -1,5 +1,5 @@
 export interface AwardRecord {
- id: number; exhibitionId: number; name: string; sortOrder: number; builtinKey: string | null; assetId: number | null;
+ id: number; exhibitionId: number; name: string; color?: string | null; sortOrder: number; builtinKey: string | null; assetId: number | null;
  recipients: { projectId: number }[];
  asset?: AwardAsset | null;
 }
@@ -9,7 +9,7 @@ export interface AwardAsset {
 }
 export interface AwardSnapshot { candidates: { id: number; title: string; members: { name: string; studentId: string }[] }[]; version: number; items: AwardRecord[]; assets: AwardAsset[] }
 export type AwardChange =
- | { kind: 'create' | 'edit'; awardId?: number; name: string; builtinKey: string | null; assetId: number | null }
+ | { kind: 'create' | 'edit'; awardId?: number; name: string; color?: string | null; builtinKey: string | null; assetId: number | null }
  | { kind: 'delete'; awardId: number }
  | { kind: 'order'; awardIds: number[] }
  | { kind: 'recipients'; awardId: number; addProjectIds: number[]; removeProjectIds: number[] }

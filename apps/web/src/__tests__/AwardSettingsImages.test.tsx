@@ -55,7 +55,7 @@ it('applies a laurel color directly without uploading an image', async () => {
   api.edit.mockImplementation(async () => { api.read.mockResolvedValue(updated); return updated; });
   renderSettings();
   fireEvent.click(await screen.findByRole('button', { name: '브론즈' }));
-  await waitFor(() => expect(api.edit).toHaveBeenCalledWith(12, 3, { id: 7, name: '대상', builtinKey: 'laurel-bronze', assetId: null }));
+  await waitFor(() => expect(api.edit).toHaveBeenCalledWith(12, 3, { id: 7, name: '대상', builtinKey: 'laurel-bronze', color: '#e0ac7a', assetId: null }));
   await waitFor(() => expect(screen.getByRole('button', { name: '브론즈' }).getAttribute('aria-pressed')).toBe('true'));
   expect(screen.queryByLabelText('업로드 대상')).toBeNull();
   expect(document.querySelector('.award-card__identity svg')?.getAttribute('stroke')).toBe('#e0ac7a');
@@ -155,4 +155,38 @@ it('searches all recipient members by name and student ID while preserving selec
   fireEvent.change(search, { target: { value: '   ' } });
   expect(screen.getAllByRole('checkbox')).toHaveLength(3);
   expect((screen.getByRole('checkbox', { name: /^Space Game/ }) as HTMLInputElement).checked).toBe(true);
+});
+
+it('previews, validates, saves and resets a custom award color without saving incomplete input', async () => {
+  let state: AwardState = { ...initial, items: [{ ...initial.items[0], builtinKey: 'laurel-gold' }] };
+  api.edit.mockImplementation(async (_id, _version, edit) => {
+    state = { ...state, version: state.version + 1, items: [{ ...state.items[0], ...edit }] };
+    api.read.mockResolvedValue(state);
+    return state;
+  });
+  renderSettings(state);
+  const input = await screen.findByRole('textbox', { name: '색상 코드' });
+  fireEvent.change(input, { target: { value: '#12' } });
+  expect((screen.getByRole('button', { name: '색상 저장' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(api.edit).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { value: '#7c3aed' } });
+  expect(screen.getByLabelText('색상 미리보기').querySelector('svg')?.getAttribute('stroke')).toBe('#7C3AED');
+  expect(screen.getByLabelText('색상 미리보기').style.getPropertyValue('--award-border')).toBe('#7C3AED');
+  fireEvent.click(screen.getByRole('button', { name: '색상 저장' }));
+  await waitFor(() => expect(api.edit).toHaveBeenCalledWith(12, 3, { id: 7, name: '대상', builtinKey: 'laurel-gold', assetId: null, color: '#7C3AED' }));
+  await waitFor(() => expect(document.querySelector('.award-card__identity svg')?.getAttribute('stroke')).toBe('#7C3AED'));
+  fireEvent.click(screen.getByRole('button', { name: '기본 색상 복원' }));
+  await waitFor(() => expect(api.edit).toHaveBeenLastCalledWith(12, 4, { id: 7, name: '대상', builtinKey: 'laurel-gold', assetId: null, color: null }));
+  await waitFor(() => expect(document.querySelector('.award-card__identity svg')?.getAttribute('stroke')).toBe('#f1c46c'));
+});
+
+it('keeps a custom color draft when saving fails', async () => {
+  api.edit.mockRejectedValue(new Error('색상 저장 실패'));
+  renderSettings();
+  const input = await screen.findByRole('textbox', { name: '색상 코드' });
+  fireEvent.change(input, { target: { value: '#123456' } });
+  fireEvent.click(screen.getByRole('button', { name: '색상 저장' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('색상 저장 실패');
+  expect((input as HTMLInputElement).value).toBe('#123456');
+  expect((screen.getByRole('button', { name: '색상 저장' }) as HTMLButtonElement).disabled).toBe(false);
 });
