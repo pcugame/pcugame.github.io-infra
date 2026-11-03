@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "npm --prefix ../.. run build -w @pcu/contracts",
-    "dev": "tsx watch src/server.ts",
+    "predev": "npm --prefix ../.. run build -w @pcu/contracts && npm run db:generate",
+    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
     "prebuild": "npm --prefix ../.. run build -w @pcu/contracts",
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.release.json",
     "start": "node dist/server.js",
