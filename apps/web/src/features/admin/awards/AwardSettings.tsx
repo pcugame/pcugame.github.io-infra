@@ -541,7 +541,18 @@ function AwardRecipientsEditor({
 					{candidates.slice(page * 20, (page + 1) * 20).map((p) => (
 						<CheckboxField
 							key={p.id}
-							label={p.title}
+							label={
+								<span className="award-card__project-label">
+									<span>{p.title}</span>
+									{!!p.members?.length && (
+										<span className="award-card__project-members">
+											{p.members.map((member) => member.studentId
+												? `${member.name} (${member.studentId})`
+												: member.name).join(' · ')}
+										</span>
+									)}
+								</span>
+							}
 							checked={selected.includes(p.id)}
 							onChange={(e) =>
 								setSelected(

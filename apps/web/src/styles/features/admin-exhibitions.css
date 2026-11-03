@@ -701,6 +701,16 @@
 	cursor: pointer;
 	overflow-wrap: anywhere;
 }
+.award-card__project-label {
+	display: grid;
+	gap: 0.25rem;
+	min-width: 0;
+}
+.award-card__project-members {
+	color: var(--color-text-muted);
+	font-size: 0.75rem;
+	font-weight: 400;
+}
 .award-card__projects .form-choice:has(:checked) {
 	background: var(--color-bg);
 	border-color: var(--color-primary);
