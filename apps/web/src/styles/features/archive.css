@@ -689,7 +689,7 @@ button.archive-card {
 /* Rank-colored framing carries the emphasis without covering the poster. */
 .archive-card[data-award-tone],
 [data-theme='dark'] .archive-card[data-award-tone]:hover {
-  border: 2px solid var(--award-border);
+  border: 3px solid var(--award-border);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--award-border) 35%, transparent),
     0 4px 16px color-mix(in srgb, var(--award-border) 16%, transparent);
 }

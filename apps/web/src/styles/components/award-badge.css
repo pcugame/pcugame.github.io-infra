@@ -49,10 +49,10 @@
 .award-badge { display: inline-flex; flex-direction: column; align-items: center; max-width: 5rem; padding: .2rem; border-radius: .4rem; background: #fffef0; color: #30250c; font-size: .7rem; overflow-wrap: anywhere; }
 .award-badge :is(img, svg) { width: 2.5rem; height: 2.5rem; object-fit: contain; }
 
-[data-award-tone='gold'] { --award-border: #D4A437; }
-[data-award-tone='silver'] { --award-border: #A8B2C1; }
-[data-award-tone='bronze'] { --award-border: #B97A45; }
-[data-award-tone='sky'] { --award-border: #69BCE8; }
+[data-award-tone='gold'] { --award-border: #D4A437; --award-glint: #fff0ad; }
+[data-award-tone='silver'] { --award-border: #A8B2C1; --award-glint: #e3eeff; }
+[data-award-tone='bronze'] { --award-border: #B97A45; --award-glint: #ffd0a8; }
+[data-award-tone='sky'] { --award-border: #69BCE8; --award-glint: #b5f5ff; }
 .project-award[data-award-tone], .award-badge[data-award-tone] {
   border: 2px solid var(--award-border);
 }

@@ -571,8 +571,8 @@
   box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
 }
 .modal-visual[data-award-tone] {
-  outline: 2px solid var(--award-border);
-  outline-offset: -2px;
+  outline: 3px solid var(--award-border);
+  outline-offset: -3px;
 }
 .modal-visual__frame:has(> .project-awards) .modal-visual__zoom {
   top: .75rem;

@@ -20,6 +20,7 @@
 @import './features/upload.css';
 @import './features/archive.css';
 @import './features/project-modal.css';
+@import './components/award-effects.css';
 @import './features/project.css';
 @import './features/auth-pages.css';
 @import './features/profile.css';

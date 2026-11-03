@@ -1,0 +1,79 @@
+/* A thin moving highlight stays on the frame; foil light stays on the poster. */
+@property --award-orbit {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+:is(.archive-card, .modal-visual)[data-award-tone] {
+  position: relative;
+  isolation: isolate;
+}
+
+:is(.archive-card, .modal-visual)[data-award-tone]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(from var(--award-orbit),
+    transparent 0deg, var(--award-border) 55deg, var(--award-glint) 85deg,
+    transparent 120deg, transparent 180deg, var(--award-border) 235deg,
+    var(--award-glint) 265deg, transparent 300deg);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.archive-card[data-award-tone] .archive-card__image::after,
+.modal-visual[data-award-tone] .modal-visual__frame::after {
+  content: '';
+  position: absolute;
+  inset: -35%;
+  z-index: 1;
+  background: linear-gradient(115deg,
+    transparent 25%, color-mix(in srgb, var(--award-border) 18%, transparent) 40%,
+    color-mix(in srgb, var(--award-glint) 50%, transparent) 49%,
+    color-mix(in srgb, var(--award-border) 24%, transparent) 56%, transparent 70%);
+  opacity: 0;
+  transform: translateX(-70%) rotate(-8deg);
+  pointer-events: none;
+}
+
+.archive-card[data-award-tone] .archive-card__awards,
+.modal-visual[data-award-tone] .project-awards {
+  z-index: 2;
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  :is(.archive-card, .modal-visual)[data-award-tone]:is(:hover, :focus-visible, :focus-within)::before {
+    opacity: 1;
+    animation: award-frame-orbit 3.6s linear infinite;
+  }
+
+  .archive-card[data-award-tone]:is(:hover, :focus-visible) .archive-card__image::after,
+  .modal-visual[data-award-tone]:is(:hover, :focus-within) .modal-visual__frame::after {
+    animation: award-foil-wave 3.6s ease-in-out infinite;
+  }
+}
+
+@keyframes award-frame-orbit {
+  to { --award-orbit: 360deg; }
+}
+
+@keyframes award-foil-wave {
+  0% { opacity: 0; transform: translateX(-70%) rotate(-8deg); }
+  18% { opacity: 0.65; }
+  55% { opacity: 0.4; }
+  75%, 100% { opacity: 0; transform: translateX(70%) rotate(8deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .archive-card[data-award-tone],
+  .archive-card[data-award-tone] .archive-card__image > img {
+    transition: none;
+    transform: none;
+  }
+}
