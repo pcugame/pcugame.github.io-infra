@@ -72,6 +72,29 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('awards produ
   }
   const reopened=database.createClient();expect(await reopened.projectAward.count({where:{projectId:p.id}})).toBe(2);
  });
+ it('serializes candidate members on authenticated award reads and writes',async()=>{
+  const {e,p,base}=await fixture();
+  const empty=await request('GET',base);
+  expect(empty.statusCode,empty.body).toBe(200);
+  expect(empty.json().data.projects).toEqual([{id:p.id,title:p.title,members:[]}]);
+  const members=[{name:'김학생',studentId:'2023001'},{name:'이참여',studentId:'2023002'}];
+  await db.projectMember.createMany({data:members.map(m=>({...m,projectId:p.id}))});
+  for(const role of ['ADMIN','OPERATOR']){
+   const response=await request('GET',base,undefined,role);
+   expect(response.statusCode,response.body).toBe(200);
+   expect(response.json().data.projects).toEqual([{id:p.id,title:p.title,members}]);
+  }
+  const created=await request('POST',base,{expectedVersion:0,name:'Gold',builtinKey:'medal',assetId:null});
+  expect(created.statusCode,created.body).toBe(200);
+  expect(created.json().data.projects[0].members).toEqual(members);
+  const saved=await request('PATCH',`${base}/${created.json().data.items[0].id}/recipients`,{expectedVersion:1,addProjectIds:[p.id],removeProjectIds:[]});
+  expect(saved.statusCode,saved.body).toBe(200);
+  expect(saved.json().data.projects[0].members).toEqual(members);
+  const other=await db.exhibition.create({data:{year:2099,title:randomUUID()}});
+  const none=await request('GET',`/api/admin/exhibitions/${other.id}/awards`);
+  expect(none.statusCode,none.body).toBe(200);
+  expect(none.json().data.projects).toEqual([]);
+ });
  it('rejects every award mutation from project owners and anonymous callers without changing data',async()=>{
   const {e,p,base}=await fixture();
   // fixture() assigns the USER session's account as this project's creator.

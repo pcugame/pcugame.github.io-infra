@@ -7,7 +7,7 @@ import { bodyObject, allowMethod, parseInput } from './common';
 export function awardState(ctx: MockContext, id: number): AwardState {
  const states = ctx.state.awards ??= {};
  const state = states[id] ??= { version: 0, items: [], assets: [], projects: [] };
- state.projects = Object.values(ctx.state.projects).filter(p => p.exhibitionId === id && !p.isChangeRequestDraft).map(p => ({ id: p.id, title: p.title }));
+ state.projects = Object.values(ctx.state.projects).filter(p => p.exhibitionId === id && !p.isChangeRequestDraft).map(p => ({ id: p.id, title: p.title, members: p.members.map(m => ({ name: m.name, studentId: m.studentId ?? '' })) }));
  return state;
 }
 export function projectAwards(ctx: MockContext, p: MockProject): Award[] {

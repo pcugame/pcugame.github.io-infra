@@ -1,3 +1,4 @@
+import { matchesSearch } from '../../../lib/utils/search';
 import { useMe } from '../../auth';
 import { IconPlus } from '@tabler/icons-react';
 import { ProjectUploadDialog } from '../../../components/common/ProjectUploadDialog';
@@ -515,7 +516,7 @@ function AwardRecipientsEditor({
 	const added = selected.filter((id) => !award.projectIds.includes(id));
 	const removed = award.projectIds.filter((id) => !selected.includes(id));
 	const candidates = state.projects.filter((p) =>
-		p.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
+		matchesSearch([p.title, ...(p.members ?? []).flatMap(member => [member.name, member.studentId])], search),
 	);
 	return (
 		<div className="award-card__recipients-editor">
@@ -529,7 +530,7 @@ function AwardRecipientsEditor({
 				<TextField
 					label="작품 검색"
 					type="search"
-					placeholder="작품명으로 검색"
+					placeholder="작품명, 학생 이름, 학번으로 검색"
 					value={search}
 					onChange={(e) => {
 						setSearch(e.target.value);

@@ -14,7 +14,7 @@ export const AwardEditSchema = AwardVersionSchema.extend({
 export const AwardOrderSchema = AwardVersionSchema.extend({ awardIds: ids });
 export const AwardRecipientsSchema = AwardVersionSchema.extend({ addProjectIds: ids, removeProjectIds: ids }).refine(v => !v.addProjectIds.some(id => v.removeProjectIds.includes(id)), 'Conflicting changes');
 export const AwardStateSchema = z.object({
- projects: z.array(z.object({ id: z.number().int(), title: z.string() })),
+ projects: z.array(z.object({ id: z.number().int(), title: z.string(), members: z.array(z.object({ name: z.string(), studentId: z.string() })).optional() })),
  version: z.number().int(), items: z.array(AwardSchema.extend({ projectIds: z.array(z.number().int()) })),
  assets: z.array(z.object({ id: z.number().int(), name: z.string(), imageUrl: z.string().optional() })),
 });

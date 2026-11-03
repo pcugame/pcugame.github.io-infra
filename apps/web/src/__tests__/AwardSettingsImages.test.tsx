@@ -134,3 +134,25 @@ it.each(['OPERATOR', 'ADMIN'])('allows %s to open award settings', async (role) 
   expect(await screen.findByRole('heading', { name: '상 및 수상작' })).toBeTruthy();
   expect(api.read).toHaveBeenCalledWith(12);
 });
+
+it('searches all recipient members by name and student ID while preserving selections', async () => {
+  renderSettings({ ...initial, projects: [
+    { id: 21, title: 'Space Game', members: [{ name: '김학생', studentId: '2023001' }, { name: '이참여', studentId: '2023002' }] },
+    { id: 22, title: '다른 작품', members: [] },
+    { id: 23, title: '이전 API 작품' },
+  ] });
+  fireEvent.click(await screen.findByRole('button', { name: '수정' }));
+  const search = screen.getByRole('searchbox', { name: '작품 검색' });
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Space Game' }));
+  for (const query of ['space', '김학생', '이참여', '2023002', '  이참여  2023002  ']) {
+    fireEvent.change(search, { target: { value: query } });
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    expect((screen.getByRole('checkbox', { name: 'Space Game' }) as HTMLInputElement).checked).toBe(true);
+  }
+  fireEvent.change(search, { target: { value: '없는 학생' } });
+  expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  expect(screen.getByText('검색 결과가 없습니다.')).toBeTruthy();
+  fireEvent.change(search, { target: { value: '   ' } });
+  expect(screen.getAllByRole('checkbox')).toHaveLength(3);
+  expect((screen.getByRole('checkbox', { name: 'Space Game' }) as HTMLInputElement).checked).toBe(true);
+});
