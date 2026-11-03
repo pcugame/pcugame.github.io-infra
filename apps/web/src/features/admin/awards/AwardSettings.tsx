@@ -541,18 +541,7 @@ function AwardRecipientsEditor({
 					{candidates.slice(page * 20, (page + 1) * 20).map((p) => (
 						<CheckboxField
 							key={p.id}
-							label={
-								<span className="award-card__project-label">
-									<span>{p.title}</span>
-									{!!p.members?.length && (
-										<span className="award-card__project-members">
-											{p.members.map((member) => member.studentId
-												? `${member.name} (${member.studentId})`
-												: member.name).join(' · ')}
-										</span>
-									)}
-								</span>
-							}
+							label={<AwardCandidateLabel project={p} search={search} />}
 							checked={selected.includes(p.id)}
 							onChange={(e) =>
 								setSelected(
@@ -658,5 +647,24 @@ function AwardRecipientsEditor({
 				</span>
 			</div>
 		</div>
+	);
+}
+
+function AwardCandidateLabel({ project, search }: { project: AwardState['projects'][number]; search: string }) {
+	const members = project.members ?? [];
+	const ordered = search.trim()
+		? [...members].sort((a, b) => Number(matchesSearch([b.name, b.studentId], search)) - Number(matchesSearch([a.name, a.studentId], search)))
+		: members;
+	const memberText = (member: typeof members[number]) => member.studentId ? `${member.studentId} ${member.name}` : member.name;
+	return (
+		<span className="award-card__project-label">
+			<span className="award-card__project-title" title={project.title}>{project.title}</span>
+			<span className="award-card__project-members" title={members.map(memberText).join(' · ')}>
+				{ordered.slice(0, 2).map((member, index) => (
+					<span key={index} className="archive-card__member-pill" title={memberText(member)}>{memberText(member)}</span>
+				))}
+				{members.length > 2 && <span className="archive-card__member-pill award-card__project-more" aria-label={`참여자 ${members.length - 2}명 더 있음`}>+{members.length - 2}</span>}
+			</span>
+		</span>
 	);
 }
