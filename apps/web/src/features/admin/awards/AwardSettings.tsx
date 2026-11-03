@@ -351,22 +351,13 @@ function AwardCard({
 			</div>
 			<div className="award-card__icon-picker">
 				<div className="award-card__icon-modes" role="group" aria-label={`${award.name} 아이콘 방식`}>
-					<Button variant="secondary" size="small" aria-pressed={iconMode === 'laurel'} disabled={busy || uploadActive} onClick={() => setIconMode('laurel')}>월계관</Button>
+					<Button variant="secondary" size="small" aria-pressed={iconMode === 'laurel'} disabled={busy || uploadActive} onClick={() => {
+						if (laurelIcons.some(icon => icon.key === award.builtinKey)) { setIconMode('laurel'); return; }
+						void save(() => awardApi.edit(exhibitionId, state.version, { id: award.id, name: award.name, builtinKey: 'laurel-gold', assetId: null })).then(result => { if (result) setIconMode('laurel'); });
+					}}>월계관</Button>
 					<Button variant="secondary" size="small" aria-pressed={iconMode === 'photo'} disabled={busy || uploadActive} onClick={() => setIconMode('photo')}>커스텀</Button>
 				</div>
-				{iconMode === 'laurel' ? (
-					<div className="award-card__laurels" role="group" aria-label={`${award.name} 월계관 색상`}>
-						{laurelIcons.map(icon => (
-							<Button className="award-card__icon-tile" key={icon.key} variant="secondary" size="small" aria-pressed={award.builtinKey === icon.key && (!award.color || award.color.toLowerCase() === icon.color.toLowerCase())} disabled={busy || uploadActive} onClick={() => {
-								if (award.builtinKey === icon.key && award.color?.toLowerCase() === icon.color.toLowerCase()) return;
-								void save(() => awardApi.edit(exhibitionId, state.version, { id: award.id, name: award.name, builtinKey: icon.key, color: icon.color, assetId: null }));
-							}}>
-								<AwardIcon award={{ ...award, builtinKey: icon.key, color: icon.color, assetId: null, imageUrl: undefined }} />
-								{icon.label}
-							</Button>
-						))}
-					</div>
-				) : (
+				{iconMode === 'photo' && (
 					<div className="award-card__photos" role="group" aria-label={`${award.name} 커스텀 아이콘`}>
 						<Button className="award-card__icon-tile" variant="secondary" size="small" disabled={busy || uploadActive} onClick={() => imageInput.current?.click()}>
 							<IconPlus aria-hidden="true" /><span>업로드</span>
@@ -387,9 +378,8 @@ function AwardCard({
 						))}
 					</div>
 				)}
+				<AwardColorEditor key={`${award.id}:${award.color ?? "default"}:${award.builtinKey}`} exhibitionId={exhibitionId} state={state} award={award} busy={busy || uploadActive} save={save} />
 			</div>
-
-			<AwardColorEditor key={`${award.id}:${award.color ?? "default"}:${award.builtinKey}`} exhibitionId={exhibitionId} state={state} award={award} busy={busy || uploadActive} save={save} />
 
 			<ProjectUploadDialog
 				open={uploadOpen}

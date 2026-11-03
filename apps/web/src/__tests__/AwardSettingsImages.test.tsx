@@ -50,19 +50,20 @@ it('keeps custom file uploads in the existing exhibition upload widget', async (
   expect(api.edit).not.toHaveBeenCalled();
 });
 
-it('applies a laurel color directly without uploading an image', async () => {
-  const updated: AwardState = { ...initial, version: 4, items: [{ ...initial.items[0], builtinKey: 'laurel-bronze' }] };
+it('selects the laurel shape and offers unrestricted color controls instead of four preset tiles', async () => {
+  const updated: AwardState = { ...initial, version: 4, items: [{ ...initial.items[0], builtinKey: 'laurel-gold' }] };
   api.edit.mockImplementation(async () => { api.read.mockResolvedValue(updated); return updated; });
   renderSettings();
-  fireEvent.click(await screen.findByRole('button', { name: '브론즈' }));
-  await waitFor(() => expect(api.edit).toHaveBeenCalledWith(12, 3, { id: 7, name: '대상', builtinKey: 'laurel-bronze', color: '#e0ac7a', assetId: null }));
-  await waitFor(() => expect(screen.getByRole('button', { name: '브론즈' }).getAttribute('aria-pressed')).toBe('true'));
-  expect(screen.queryByLabelText('업로드 대상')).toBeNull();
-  expect(document.querySelector('.award-card__identity svg')?.getAttribute('stroke')).toBe('#e0ac7a');
+  fireEvent.click(await screen.findByRole('button', { name: '월계관' }));
+  await waitFor(() => expect(api.edit).toHaveBeenCalledWith(12, 3, { id: 7, name: '대상', builtinKey: 'laurel-gold', assetId: null }));
+  await waitFor(() => expect(document.querySelector('.award-card__identity svg')).not.toBeNull());
+  for (const name of ['골드', '실버 블루', '브론즈', '슬레이트']) expect(screen.queryByRole('button', { name })).toBeNull();
+  expect(screen.getByLabelText('대상 색상 선택').getAttribute('type')).toBe('color');
+  expect(screen.getByRole('textbox', { name: '색상 코드' })).toBeTruthy();
 });
 
 it('shows upload and existing image tiles inline without opening a dialog', async () => {
-  renderSettings();
+  renderSettings({ ...initial, items: [{ ...initial.items[0], builtinKey: 'laurel-gold' }] });
   fireEvent.click(await screen.findByRole('button', { name: '커스텀' }));
   expect(screen.queryByRole('dialog')).toBeNull();
   const group = screen.getByRole('group', { name: '대상 커스텀 아이콘' });
@@ -74,7 +75,7 @@ it('shows upload and existing image tiles inline without opening a dialog', asyn
   expect(chooseFile).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole('button', { name: '월계관' }));
   expect(screen.queryByRole('group', { name: '대상 커스텀 아이콘' })).toBeNull();
-  expect(screen.getByRole('group', { name: '대상 월계관 색상' }).querySelectorAll('.award-card__icon-tile')).toHaveLength(4);
+  expect(screen.getByLabelText('대상 색상 선택').closest('.award-card__icon-picker')).not.toBeNull();
 });
 
 it('edits the name in its original location and preserves recipient drafts during name save', async () => {

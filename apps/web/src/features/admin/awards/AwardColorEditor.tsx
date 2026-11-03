@@ -33,7 +33,7 @@ export function AwardColorEditor({ exhibitionId, state, award, busy, save }: Pro
   return <div className="award-color-editor">
     <div className="award-color-editor__controls">
       <label className="form-field award-color-editor__picker">
-        <span className="form-field__label">상 색상</span>
+        <span className="form-field__label">직접 색상 선택</span>
         <input type="color" aria-label={`${award.name} 색상 선택`} value={valid ? normalized : award.color ?? fallback}
           disabled={busy} onChange={event => update(event.target.value)} />
       </label>
