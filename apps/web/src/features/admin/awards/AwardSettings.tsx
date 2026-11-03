@@ -1,3 +1,6 @@
+import { AwardColorEditor } from './AwardColorEditor';
+import { awardStyle, awardTone } from '../../../components/project/awardTone';
+import { matchesSearch } from '../../../lib/utils/search';
 import { useMe } from '../../auth';
 import { IconPlus } from '@tabler/icons-react';
 import { ProjectUploadDialog } from '../../../components/common/ProjectUploadDialog';
@@ -302,7 +305,7 @@ function AwardCard({
 					{String(index + 1).padStart(2, '0')}
 				</span>
 				<div className="award-card__identity">
-					<div className="award-badge">
+					<div className="award-badge" data-award-tone={awardTone(award)} style={awardStyle(award)}>
 						<AwardIcon award={award} />
 						{expanded ? (
 							<AwardNameEditor exhibitionId={exhibitionId} state={state} award={award} save={save} busy={busy} />
@@ -348,22 +351,13 @@ function AwardCard({
 			</div>
 			<div className="award-card__icon-picker">
 				<div className="award-card__icon-modes" role="group" aria-label={`${award.name} 아이콘 방식`}>
-					<Button variant="secondary" size="small" aria-pressed={iconMode === 'laurel'} disabled={busy || uploadActive} onClick={() => setIconMode('laurel')}>월계관</Button>
+					<Button variant="secondary" size="small" aria-pressed={iconMode === 'laurel'} disabled={busy || uploadActive} onClick={() => {
+						if (laurelIcons.some(icon => icon.key === award.builtinKey)) { setIconMode('laurel'); return; }
+						void save(() => awardApi.edit(exhibitionId, state.version, { id: award.id, name: award.name, builtinKey: 'laurel-gold', assetId: null })).then(result => { if (result) setIconMode('laurel'); });
+					}}>월계관</Button>
 					<Button variant="secondary" size="small" aria-pressed={iconMode === 'photo'} disabled={busy || uploadActive} onClick={() => setIconMode('photo')}>커스텀</Button>
 				</div>
-				{iconMode === 'laurel' ? (
-					<div className="award-card__laurels" role="group" aria-label={`${award.name} 월계관 색상`}>
-						{laurelIcons.map(icon => (
-							<Button className="award-card__icon-tile" key={icon.key} variant="secondary" size="small" aria-pressed={award.builtinKey === icon.key} disabled={busy || uploadActive} onClick={() => {
-								if (award.builtinKey === icon.key) return;
-								void save(() => awardApi.edit(exhibitionId, state.version, { id: award.id, name: award.name, builtinKey: icon.key, assetId: null }));
-							}}>
-								<AwardIcon award={{ ...award, builtinKey: icon.key, assetId: null, imageUrl: undefined }} />
-								{icon.label}
-							</Button>
-						))}
-					</div>
-				) : (
+				{iconMode === 'photo' && (
 					<div className="award-card__photos" role="group" aria-label={`${award.name} 커스텀 아이콘`}>
 						<Button className="award-card__icon-tile" variant="secondary" size="small" disabled={busy || uploadActive} onClick={() => imageInput.current?.click()}>
 							<IconPlus aria-hidden="true" /><span>업로드</span>
@@ -384,6 +378,7 @@ function AwardCard({
 						))}
 					</div>
 				)}
+				<AwardColorEditor key={`${award.id}:${award.color ?? "default"}:${award.builtinKey}`} exhibitionId={exhibitionId} state={state} award={award} busy={busy || uploadActive} save={save} />
 			</div>
 
 			<ProjectUploadDialog
@@ -515,7 +510,7 @@ function AwardRecipientsEditor({
 	const added = selected.filter((id) => !award.projectIds.includes(id));
 	const removed = award.projectIds.filter((id) => !selected.includes(id));
 	const candidates = state.projects.filter((p) =>
-		p.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
+		matchesSearch([p.title, ...(p.members ?? []).flatMap(member => [member.name, member.studentId])], search),
 	);
 	return (
 		<div className="award-card__recipients-editor">
@@ -529,7 +524,7 @@ function AwardRecipientsEditor({
 				<TextField
 					label="작품 검색"
 					type="search"
-					placeholder="작품명으로 검색"
+					placeholder="작품명, 학생 이름, 학번으로 검색"
 					value={search}
 					onChange={(e) => {
 						setSearch(e.target.value);
@@ -540,7 +535,7 @@ function AwardRecipientsEditor({
 					{candidates.slice(page * 20, (page + 1) * 20).map((p) => (
 						<CheckboxField
 							key={p.id}
-							label={p.title}
+							label={<AwardCandidateLabel project={p} search={search} />}
 							checked={selected.includes(p.id)}
 							onChange={(e) =>
 								setSelected(
@@ -646,5 +641,24 @@ function AwardRecipientsEditor({
 				</span>
 			</div>
 		</div>
+	);
+}
+
+function AwardCandidateLabel({ project, search }: { project: AwardState['projects'][number]; search: string }) {
+	const members = project.members ?? [];
+	const ordered = search.trim()
+		? [...members].sort((a, b) => Number(matchesSearch([b.name, b.studentId], search)) - Number(matchesSearch([a.name, a.studentId], search)))
+		: members;
+	const memberText = (member: typeof members[number]) => member.studentId ? `${member.studentId} ${member.name}` : member.name;
+	return (
+		<span className="award-card__project-label">
+			<span className="award-card__project-title" title={project.title}>{project.title}</span>
+			<span className="award-card__project-members" title={members.map(memberText).join(' · ')}>
+				{ordered.slice(0, 2).map((member, index) => (
+					<span key={index} className="archive-card__member-pill" title={memberText(member)}>{memberText(member)}</span>
+				))}
+				{members.length > 2 && <span className="archive-card__member-pill award-card__project-more" aria-label={`참여자 ${members.length - 2}명 더 있음`}>+{members.length - 2}</span>}
+			</span>
+		</span>
 	);
 }

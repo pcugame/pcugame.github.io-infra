@@ -50,19 +50,20 @@ it('keeps custom file uploads in the existing exhibition upload widget', async (
   expect(api.edit).not.toHaveBeenCalled();
 });
 
-it('applies a laurel color directly without uploading an image', async () => {
-  const updated: AwardState = { ...initial, version: 4, items: [{ ...initial.items[0], builtinKey: 'laurel-bronze' }] };
+it('selects the laurel shape and offers unrestricted color controls instead of four preset tiles', async () => {
+  const updated: AwardState = { ...initial, version: 4, items: [{ ...initial.items[0], builtinKey: 'laurel-gold' }] };
   api.edit.mockImplementation(async () => { api.read.mockResolvedValue(updated); return updated; });
   renderSettings();
-  fireEvent.click(await screen.findByRole('button', { name: '브론즈' }));
-  await waitFor(() => expect(api.edit).toHaveBeenCalledWith(12, 3, { id: 7, name: '대상', builtinKey: 'laurel-bronze', assetId: null }));
-  await waitFor(() => expect(screen.getByRole('button', { name: '브론즈' }).getAttribute('aria-pressed')).toBe('true'));
-  expect(screen.queryByLabelText('업로드 대상')).toBeNull();
-  expect(document.querySelector('.award-card__identity svg')?.getAttribute('stroke')).toBe('#e0ac7a');
+  fireEvent.click(await screen.findByRole('button', { name: '월계관' }));
+  await waitFor(() => expect(api.edit).toHaveBeenCalledWith(12, 3, { id: 7, name: '대상', builtinKey: 'laurel-gold', assetId: null }));
+  await waitFor(() => expect(document.querySelector('.award-card__identity svg')).not.toBeNull());
+  for (const name of ['골드', '실버 블루', '브론즈', '슬레이트']) expect(screen.queryByRole('button', { name })).toBeNull();
+  expect(screen.getByLabelText('대상 색상 선택').getAttribute('type')).toBe('color');
+  expect(screen.getByRole('textbox', { name: '색상 코드' })).toBeTruthy();
 });
 
 it('shows upload and existing image tiles inline without opening a dialog', async () => {
-  renderSettings();
+  renderSettings({ ...initial, items: [{ ...initial.items[0], builtinKey: 'laurel-gold' }] });
   fireEvent.click(await screen.findByRole('button', { name: '커스텀' }));
   expect(screen.queryByRole('dialog')).toBeNull();
   const group = screen.getByRole('group', { name: '대상 커스텀 아이콘' });
@@ -74,7 +75,7 @@ it('shows upload and existing image tiles inline without opening a dialog', asyn
   expect(chooseFile).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole('button', { name: '월계관' }));
   expect(screen.queryByRole('group', { name: '대상 커스텀 아이콘' })).toBeNull();
-  expect(screen.getByRole('group', { name: '대상 월계관 색상' }).querySelectorAll('.award-card__icon-tile')).toHaveLength(4);
+  expect(screen.getByLabelText('대상 색상 선택').closest('.award-card__icon-picker')).not.toBeNull();
 });
 
 it('edits the name in its original location and preserves recipient drafts during name save', async () => {
@@ -133,4 +134,60 @@ it.each(['OPERATOR', 'ADMIN'])('allows %s to open award settings', async (role) 
   renderSettings();
   expect(await screen.findByRole('heading', { name: '상 및 수상작' })).toBeTruthy();
   expect(api.read).toHaveBeenCalledWith(12);
+});
+
+it('searches all recipient members by name and student ID while preserving selections', async () => {
+  renderSettings({ ...initial, projects: [
+    { id: 21, title: 'Space Game', members: [{ name: '김학생', studentId: '2023001' }, { name: '이참여', studentId: '2023002' }] },
+    { id: 22, title: '다른 작품', members: [] },
+    { id: 23, title: '이전 API 작품' },
+  ] });
+  fireEvent.click(await screen.findByRole('button', { name: '수정' }));
+  const search = screen.getByRole('searchbox', { name: '작품 검색' });
+  fireEvent.click(screen.getByRole('checkbox', { name: /^Space Game/ }));
+  for (const query of ['space', '김학생', '이참여', '2023002', '  이참여  2023002  ']) {
+    fireEvent.change(search, { target: { value: query } });
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    expect((screen.getByRole('checkbox', { name: /^Space Game/ }) as HTMLInputElement).checked).toBe(true);
+  }
+  fireEvent.change(search, { target: { value: '없는 학생' } });
+  expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  expect(screen.getByText('검색 결과가 없습니다.')).toBeTruthy();
+  fireEvent.change(search, { target: { value: '   ' } });
+  expect(screen.getAllByRole('checkbox')).toHaveLength(3);
+  expect((screen.getByRole('checkbox', { name: /^Space Game/ }) as HTMLInputElement).checked).toBe(true);
+});
+
+it('previews, validates, saves and resets a custom award color without saving incomplete input', async () => {
+  let state: AwardState = { ...initial, items: [{ ...initial.items[0], builtinKey: 'laurel-gold' }] };
+  api.edit.mockImplementation(async (_id, _version, edit) => {
+    state = { ...state, version: state.version + 1, items: [{ ...state.items[0], ...edit }] };
+    api.read.mockResolvedValue(state);
+    return state;
+  });
+  renderSettings(state);
+  const input = await screen.findByRole('textbox', { name: '색상 코드' });
+  fireEvent.change(input, { target: { value: '#12' } });
+  expect((screen.getByRole('button', { name: '색상 저장' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(api.edit).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { value: '#7c3aed' } });
+  expect(screen.getByLabelText('색상 미리보기').querySelector('svg')?.getAttribute('stroke')).toBe('#7C3AED');
+  expect(screen.getByLabelText('색상 미리보기').style.getPropertyValue('--award-border')).toBe('#7C3AED');
+  fireEvent.click(screen.getByRole('button', { name: '색상 저장' }));
+  await waitFor(() => expect(api.edit).toHaveBeenCalledWith(12, 3, { id: 7, name: '대상', builtinKey: 'laurel-gold', assetId: null, color: '#7C3AED' }));
+  await waitFor(() => expect(document.querySelector('.award-card__identity svg')?.getAttribute('stroke')).toBe('#7C3AED'));
+  fireEvent.click(screen.getByRole('button', { name: '기본 색상 복원' }));
+  await waitFor(() => expect(api.edit).toHaveBeenLastCalledWith(12, 4, { id: 7, name: '대상', builtinKey: 'laurel-gold', assetId: null, color: null }));
+  await waitFor(() => expect(document.querySelector('.award-card__identity svg')?.getAttribute('stroke')).toBe('#f1c46c'));
+});
+
+it('keeps a custom color draft when saving fails', async () => {
+  api.edit.mockRejectedValue(new Error('색상 저장 실패'));
+  renderSettings();
+  const input = await screen.findByRole('textbox', { name: '색상 코드' });
+  fireEvent.change(input, { target: { value: '#123456' } });
+  fireEvent.click(screen.getByRole('button', { name: '색상 저장' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('색상 저장 실패');
+  expect((input as HTMLInputElement).value).toBe('#123456');
+  expect((screen.getByRole('button', { name: '색상 저장' }) as HTMLButtonElement).disabled).toBe(false);
 });

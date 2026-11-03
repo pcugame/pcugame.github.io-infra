@@ -23,3 +23,10 @@ describe('award image selection', () => {
   expect(serializeAwards([{ award }], origin, bucket)).toEqual([{ id: 1, name: 'Winner', sortOrder: 0, builtinKey: 'medal', assetId: null }]);
  });
 });
+
+it('ranks against all exhibition awards including gaps and unassigned awards', () => {
+ const awards = [{ id: 3, sortOrder: 90 }, { id: 2, sortOrder: 20 }, { id: 1, sortOrder: 20 }];
+ const award = { id: 3, name: 'Third', sortOrder: 90, builtinKey: 'medal', assetId: null, exhibition: { awards } };
+ expect(serializeAwards([{ award }], origin, bucket)[0]!.displayRank).toBe(3);
+ expect(awards.map(a => a.id)).toEqual([3, 2, 1]);
+});

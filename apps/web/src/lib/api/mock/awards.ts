@@ -7,11 +7,12 @@ import { bodyObject, allowMethod, parseInput } from './common';
 export function awardState(ctx: MockContext, id: number): AwardState {
  const states = ctx.state.awards ??= {};
  const state = states[id] ??= { version: 0, items: [], assets: [], projects: [] };
- state.projects = Object.values(ctx.state.projects).filter(p => p.exhibitionId === id && !p.isChangeRequestDraft).map(p => ({ id: p.id, title: p.title }));
+ state.projects = Object.values(ctx.state.projects).filter(p => p.exhibitionId === id && !p.isChangeRequestDraft).map(p => ({ id: p.id, title: p.title, members: p.members.map(m => ({ name: m.name, studentId: m.studentId ?? '' })) }));
+ state.items.sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id).forEach((award, index) => { award.displayRank = index + 1; });
  return state;
 }
 export function projectAwards(ctx: MockContext, p: MockProject): Award[] {
- return (ctx.state.awards?.[p.exhibitionId]?.items ?? []).filter(a => a.projectIds.includes(p.id)).map(({ projectIds: _ids, ...award }) => { void _ids; return award; }).sort((a,b) => a.sortOrder-b.sortOrder||a.id-b.id);
+ return awardState(ctx, p.exhibitionId).items.filter(a => a.projectIds.includes(p.id)).map(({ projectIds: _ids, ...award }) => { void _ids; return award; }).sort((a,b) => a.sortOrder-b.sortOrder||a.id-b.id);
 }
 export function compareMockProjects(ctx: MockContext, a: MockProject, b: MockProject): number {
  const group = (ctx.state.exhibitions.find(e => e.id === a.exhibitionId)?.sortOrder ?? 0) - (ctx.state.exhibitions.find(e => e.id === b.exhibitionId)?.sortOrder ?? 0) || a.exhibitionId-b.exhibitionId;
@@ -60,14 +61,14 @@ export function handleAwards(ctx: MockContext, path: string, method: string, opt
    award!.projectIds = [...new Set([...award!.projectIds.filter(id => !removeProjectIds.includes(id)), ...addProjectIds])];
   } else if (method === 'DELETE' && award) state.items = state.items.filter(a => a.id !== award.id);
   else {
-   allowMethod(method,award ? 'PATCH' : 'POST'); const { name, builtinKey, assetId } = parseInput(AwardEditSchema,body);
+   allowMethod(method,award ? 'PATCH' : 'POST'); const { name, builtinKey, assetId, color } = parseInput(AwardEditSchema,body);
    if (state.items.some(a => a.name === name && a.id !== awardId)) throw new MockHttpError(409,'CONFLICT','같은 이름의 상이 있습니다.');
    const asset = state.assets.find(a => a.id === assetId);
    if (assetId !== null && !asset) fail('Invalid image');
-   const fields = { name, builtinKey, assetId, imageUrl: asset?.imageUrl };
+   const fields = { name, builtinKey, assetId, ...(color !== undefined ? { color } : {}), imageUrl: asset?.imageUrl };
    if (award) Object.assign(award,fields);
    else { ctx.state.counters.award = (ctx.state.counters.award ?? 0) + 1; state.items.push({ ...fields, id: ctx.state.counters.award, sortOrder: Math.max(-1,...state.items.map(a => a.sortOrder))+1, projectIds: [] }); }
   }
  }
- state.items.sort((a,b) => a.sortOrder-b.sortOrder||a.id-b.id); state.version++; return state;
+ state.items.sort((a,b) => a.sortOrder-b.sortOrder||a.id-b.id); state.version++; return awardState(ctx, id);
 }

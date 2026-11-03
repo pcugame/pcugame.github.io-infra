@@ -1,1 +1,1 @@
-export const awardInclude = { include: { award: { include: { asset: { include: { representations: true } } } } } } as const;
+export const awardInclude = { include: { award: { include: { exhibition: { select: { awards: { select: { id: true, sortOrder: true } } } }, asset: { include: { representations: true } } } } } } as const;

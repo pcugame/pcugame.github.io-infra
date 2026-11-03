@@ -53,3 +53,13 @@ it.each(laurelIcons)('renders the saved $key color without inferring it from the
   expect(container.querySelector('img')).toBeNull();
   expect(screen.getByText('특별상')).toBeTruthy();
 });
+
+it('uses the highest award custom color on the card and each award own color on its laurel', () => {
+  const awards: Award[] = [
+    { id: 2, name: '특별상', sortOrder: 1, displayRank: 2, builtinKey: 'laurel-gold', assetId: null, color: '#00AA88' },
+    { id: 1, name: '대상', sortOrder: 0, displayRank: 1, builtinKey: 'laurel-gold', assetId: null, color: '#7C3AED' },
+  ];
+  const { container } = render(<ProjectCard year={2026} project={{ slug: 'test', title: '작품', members: [], awards }} />);
+  expect((container.querySelector('.archive-card') as HTMLElement).style.getPropertyValue('--award-border')).toBe('#7C3AED');
+  expect([...container.querySelectorAll('.project-award svg')].map(svg => svg.getAttribute('stroke'))).toEqual(['#7C3AED', '#00AA88']);
+});

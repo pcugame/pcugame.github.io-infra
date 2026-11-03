@@ -11,3 +11,11 @@ it('keeps photos mutually exclusive with builtin icons and rejects unknown keys'
  expect(AwardEditSchema.safeParse({ ...input, builtinKey: 'laurel-gold' }).success).toBe(false);
  expect(AwardEditSchema.safeParse({ ...input, builtinKey: 'laurel-invalid', assetId: null }).success).toBe(false);
 });
+
+it('normalizes custom HEX colors, supports default reset and preserves omitted colors for older clients', () => {
+ const edit = { expectedVersion: 0, name: 'Custom', builtinKey: 'laurel-gold', assetId: null };
+ expect(AwardEditSchema.parse({ ...edit, color: '#7c3aed' }).color).toBe('#7C3AED');
+ expect(AwardEditSchema.parse({ ...edit, color: null }).color).toBeNull();
+ expect(AwardEditSchema.parse(edit)).not.toHaveProperty('color');
+ for (const color of ['red', '#123', '#12345678', '#12345G', 'url(x)', '']) expect(AwardEditSchema.safeParse({ ...edit, color }).success).toBe(false);
+});

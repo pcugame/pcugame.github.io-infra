@@ -1,4 +1,5 @@
 import { ProjectAwards } from './AwardBadge';
+import { awardStyle, awardTone, orderedAwards } from './awardTone';
 import { useViewerKey } from '../../lib/query';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -147,7 +148,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 						<div className="modal-content">
 						{/* 메인 미디어 표시 — 16:9 고정 비율 */}
 						{current && (
-							<div className="modal-visual">
+							<div className="modal-visual" style={current.type === 'poster' ? awardStyle(orderedAwards(project.awards)[0]) : undefined} data-award-tone={current.type === 'poster' && project.awards?.length ? awardTone(orderedAwards(project.awards)[0]) : undefined}>
 								<div className={`modal-visual__frame${current.type === 'video' ? ' modal-visual__frame--video' : ''}`}>
 									{current.type === 'video' ? (
 										<ProjectVideo
@@ -165,6 +166,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 											decoding="async"
 										/>
 									)}
+									{current.type === 'poster' && <ProjectAwards awards={project.awards} />}
 									{/* 사진/포스터일 때 확대 버튼 */}
 									{isImageType && (
 										<button
@@ -257,10 +259,11 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 						{/* 본문 */}
 						<div className="modal-body">
-							<div className="modal-title-row">
-								<h1 className="modal-title">{project.title}</h1>
-								<ProjectAwards awards={project.awards} />
-							</div>
+							<h1 className="modal-title">
+								{project.title}
+							</h1>
+
+							{current?.type !== 'poster' && <ProjectAwards awards={project.awards} />}
 
 							<ProjectPublicMeta githubUrl={project.githubUrl} externalLinks={project.externalLinks} platforms={project.platforms} hardwareRequirements={project.hardwareRequirements} />
 
