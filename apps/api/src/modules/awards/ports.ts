@@ -7,7 +7,7 @@ export interface AwardAsset {
  id: number; originalName: string; status: string; kind: string; exhibitionId: number | null; projectId: number | null;
  representations: { role: string; state: string; bucket: string; objectKey: string }[];
 }
-export interface AwardSnapshot { candidates: { id: number; title: string }[]; version: number; items: AwardRecord[]; assets: AwardAsset[] }
+export interface AwardSnapshot { candidates: { id: number; title: string; members: { name: string; studentId: string }[] }[]; version: number; items: AwardRecord[]; assets: AwardAsset[] }
 export type AwardChange =
  | { kind: 'create' | 'edit'; awardId?: number; name: string; builtinKey: string | null; assetId: number | null }
  | { kind: 'delete'; awardId: number }

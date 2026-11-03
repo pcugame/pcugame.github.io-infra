@@ -4,7 +4,7 @@ import { notFound } from '../../shared/errors.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
 async function read(tx: Prisma.TransactionClient, id: number) {
  const e = await tx.exhibition.findUnique({ where: { id }, include: {
-  projects: { where: { changeRequestDraft: null, hiddenCancelled: false }, select: { id: true, title: true }, orderBy: { id: 'asc' } },
+  projects: { where: { changeRequestDraft: null, hiddenCancelled: false }, select: { id: true, title: true, members: { select: { name: true, studentId: true }, orderBy: { id: 'asc' } } }, orderBy: { id: 'asc' } },
   awards: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }], include: { recipients: true, asset: { include: { representations: true } } } },
   assets: { where: { kind: 'IMAGE', projectId: null, status: 'READY' }, include: { representations: true } },
  } });
