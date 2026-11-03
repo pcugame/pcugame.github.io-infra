@@ -324,18 +324,6 @@
   margin-bottom: 1rem;
 }
 
-.modal-title-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: .5rem .75rem;
-  margin-bottom: 1rem;
-}
-.modal-title-row .modal-title { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.modal-title-row .project-awards { margin: 0; min-width: 0; gap: .35rem; }
-.modal-title-row .project-award { padding: .15rem .4rem; font-size: .75rem; }
-.modal-title-row .project-award__icon { width: 1.75rem; height: 1.75rem; }
-
 /* 참여 학생 칩 */
 .modal-members {
   display: flex;
@@ -564,4 +552,29 @@
 .modal-visual__frame--video .project-video {
   position: relative;
   height: auto;
+}
+
+/* Keep poster awards clear of the zoom control and media navigation. */
+.modal-visual__frame > .project-awards {
+  position: absolute;
+  right: .75rem;
+  bottom: .75rem;
+  left: .75rem;
+  justify-content: flex-end;
+  gap: .3rem;
+  margin: 0;
+  pointer-events: none;
+}
+.modal-visual__frame > .project-awards .project-award {
+  padding: .25rem .45rem;
+  font-size: .75rem;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
+}
+.modal-visual[data-award-tone] {
+  outline: 2px solid var(--award-border);
+  outline-offset: -2px;
+}
+.modal-visual__frame:has(> .project-awards) .modal-visual__zoom {
+  top: .75rem;
+  bottom: auto;
 }

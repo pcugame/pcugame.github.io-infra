@@ -2,6 +2,7 @@ import { z } from 'zod';
 export const AwardBuiltinKeySchema = z.enum(['medal', 'trophy', 'ribbon', 'laurel-gold', 'laurel-silver', 'laurel-bronze', 'laurel-slate']);
 export const AwardSchema = z.object({
  id: z.number().int(), name: z.string(), sortOrder: z.number().int(),
+ displayRank: z.number().int().positive().optional(),
  builtinKey: AwardBuiltinKeySchema.nullable(), assetId: z.number().int().nullable(), imageUrl: z.string().optional(),
 });
 export type Award = z.infer<typeof AwardSchema>;

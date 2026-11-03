@@ -61,14 +61,14 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('awards produ
   for(const [i,role] of ['ADMIN','OPERATOR'].entries()){
    const result=await request('POST',base,{...body,expectedVersion:i,name:role},role);expect(result.statusCode,result.body).toBe(200);
   }
-  const state=(await request('GET',base)).json().data;
+  const state=(await request('GET',base)).json().data;expect(state.items.map((a:{displayRank:number})=>a.displayRank)).toEqual([1,2]);
   for(const ids of [[state.items[0]!.id],state.items.map((a:{id:number})=>a.id)]){
    const version=(await request('GET',base)).json().data.version;
    const saved=await request('PUT',`${detail}/awards`,{expectedVersion:version,awardIds:ids});expect(saved.statusCode,saved.body).toBe(200);
-   for(const path of [detail,pub]){const response=await request('GET',path);expect(response.statusCode,response.body).toBe(200);expect(response.json().data.awards).toHaveLength(ids.length);expect(response.json().data.awards[0]).not.toHaveProperty('projectIds');}
-   const savedProject=await request('PATCH',detail,{title:`Saved ${ids.length}`});expect(savedProject.statusCode,savedProject.body).toBe(200);expect(savedProject.json().data.awards).toHaveLength(ids.length);
-   const adminList=await request('GET','/api/admin/projects?limit=100');expect(adminList.json().data.items.find((item:{id:number})=>item.id===p.id).awards).toHaveLength(ids.length);
-   const publicList=await request('GET',`/api/public/exhibitions/${e.id}/projects`);expect(publicList.statusCode,publicList.body).toBe(200);expect(publicList.json().data.items.find((item:{id:number})=>item.id===p.id).awards).toHaveLength(ids.length);
+   for(const path of [detail,pub]){const response=await request('GET',path);expect(response.statusCode,response.body).toBe(200);expect(response.json().data.awards).toHaveLength(ids.length);expect(response.json().data.awards.map((a:{displayRank:number})=>a.displayRank)).toEqual(ids.map((_:number,index:number)=>index+1));expect(response.json().data.awards[0]).not.toHaveProperty('projectIds');}
+   const savedProject=await request('PATCH',detail,{title:`Saved ${ids.length}`});expect(savedProject.statusCode,savedProject.body).toBe(200);expect(savedProject.json().data.awards).toHaveLength(ids.length);expect(savedProject.json().data.awards[0].displayRank).toBe(1);
+   const adminList=await request('GET','/api/admin/projects?limit=100');expect(adminList.json().data.items.find((item:{id:number})=>item.id===p.id).awards).toHaveLength(ids.length);expect(adminList.json().data.items.find((item:{id:number})=>item.id===p.id).awards[0].displayRank).toBe(1);
+   const publicList=await request('GET',`/api/public/exhibitions/${e.id}/projects`);expect(publicList.statusCode,publicList.body).toBe(200);expect(publicList.json().data.items.find((item:{id:number})=>item.id===p.id).awards).toHaveLength(ids.length);expect(publicList.json().data.items.find((item:{id:number})=>item.id===p.id).awards[0].displayRank).toBe(1);
   }
   const reopened=database.createClient();expect(await reopened.projectAward.count({where:{projectId:p.id}})).toBe(2);
  });
@@ -86,7 +86,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('awards produ
   }
   const created=await request('POST',base,{expectedVersion:0,name:'Gold',builtinKey:'medal',assetId:null});
   expect(created.statusCode,created.body).toBe(200);
-  expect(created.json().data.projects[0].members).toEqual(members);
+  expect(created.json().data.projects[0].members).toEqual(members);expect(created.json().data.items[0].displayRank).toBe(1);
   const saved=await request('PATCH',`${base}/${created.json().data.items[0].id}/recipients`,{expectedVersion:1,addProjectIds:[p.id],removeProjectIds:[]});
   expect(saved.statusCode,saved.body).toBe(200);
   expect(saved.json().data.projects[0].members).toEqual(members);

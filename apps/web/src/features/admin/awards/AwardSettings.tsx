@@ -1,3 +1,4 @@
+import { awardTone } from '../../../components/project/awardTone';
 import { matchesSearch } from '../../../lib/utils/search';
 import { useMe } from '../../auth';
 import { IconPlus } from '@tabler/icons-react';
@@ -303,7 +304,7 @@ function AwardCard({
 					{String(index + 1).padStart(2, '0')}
 				</span>
 				<div className="award-card__identity">
-					<div className="award-badge">
+					<div className="award-badge" data-award-tone={awardTone(award)}>
 						<AwardIcon award={award} />
 						{expanded ? (
 							<AwardNameEditor exhibitionId={exhibitionId} state={state} award={award} save={save} busy={busy} />
