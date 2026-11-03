@@ -39,13 +39,14 @@
   background-image:
     radial-gradient(ellipse at center, #fff 0 0.7px, var(--award-glint) 1px, transparent 2.5px),
     radial-gradient(ellipse at center, var(--award-glint) 0 1px, transparent 3px),
-    repeating-linear-gradient(45deg, transparent 0 24px,
-      color-mix(in srgb, var(--award-glint) 55%, transparent) 25px, transparent 26px 50px),
-    repeating-linear-gradient(-45deg, transparent 0 24px,
-      color-mix(in srgb, var(--award-border) 65%, transparent) 25px, transparent 26px 50px),
+    linear-gradient(45deg, transparent calc(50% - 0.6px),
+      color-mix(in srgb, var(--award-glint) 55%, transparent) 50%, transparent calc(50% + 0.6px)),
+    linear-gradient(-45deg, transparent calc(50% - 0.6px),
+      color-mix(in srgb, var(--award-border) 65%, transparent) 50%, transparent calc(50% + 0.6px)),
     conic-gradient(from 45deg, transparent, color-mix(in srgb, var(--award-glint) 25%, transparent),
       transparent, color-mix(in srgb, var(--award-border) 35%, transparent), transparent);
-  background-size: 47px 71px, 83px 109px, 100px 100px, 100px 100px, 100px 100px;
+  /* The diagonals and facet shading share one tile, so their edges stay aligned. */
+  background-size: 47px 71px, 83px 109px, 72px 72px, 72px 72px, 72px 72px;
   background-position: 0 0, 23px 31px, 0 0, 0 0, 0 0;
   mix-blend-mode: screen;
   opacity: 0;
@@ -80,7 +81,7 @@
 
   .archive-card[data-award-tone]:is(:hover, :focus-visible) .archive-card__image::before,
   .modal-visual[data-award-tone]:is(:hover, :focus-within) .modal-visual__frame::before {
-    animation: award-facet-drift 7s linear infinite;
+    animation: award-facet-shimmer 7s linear infinite, award-pattern-drift 9s linear infinite;
   }
 
   .archive-card[data-award-tone]:is(:hover, :focus-visible) .archive-card__image::after,
@@ -93,12 +94,16 @@
   to { --award-orbit: 360deg; }
 }
 
-@keyframes award-facet-drift {
+@keyframes award-facet-shimmer {
   0%, 100% { opacity: 0.3; }
   35% { opacity: 0.65; }
   70% { opacity: 0.45; }
+}
+
+/* Move all three facet layers by one full tile for a seamless, aligned loop. */
+@keyframes award-pattern-drift {
   from { background-position: 0 0, 23px 31px, 0 0, 0 0, 0 0; }
-  to { background-position: 47px 71px, -60px 140px, 100px 0, -100px 0, 100px 0; }
+  to { background-position: 0 0, 23px 31px, 72px 72px, 72px 72px, 72px 72px; }
 }
 
 @keyframes award-foil-wave {
