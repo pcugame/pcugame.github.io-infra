@@ -1,4 +1,4 @@
-/* A thin moving highlight stays on the frame; foil light stays on the poster. */
+/* Layered foil, facets and sparkles stay on the poster, beneath labels and controls. */
 @property --award-orbit {
   syntax: '<angle>';
   inherits: false;
@@ -16,13 +16,38 @@
   inset: 0;
   z-index: 3;
   border-radius: inherit;
-  padding: 2px;
+  padding: 3px;
   background: conic-gradient(from var(--award-orbit),
-    transparent 0deg, var(--award-border) 55deg, var(--award-glint) 85deg,
-    transparent 120deg, transparent 180deg, var(--award-border) 235deg,
-    var(--award-glint) 265deg, transparent 300deg);
+    transparent 0deg, var(--award-border) 30deg, var(--award-glint) 62deg,
+    #fff 68deg, var(--award-border) 75deg, transparent 95deg,
+    transparent 120deg, var(--award-border) 150deg, var(--award-glint) 182deg,
+    #fff 188deg, var(--award-border) 195deg, transparent 215deg,
+    transparent 240deg, var(--award-border) 270deg, var(--award-glint) 302deg,
+    #fff 308deg, var(--award-border) 315deg, transparent 335deg);
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.archive-card[data-award-tone] .archive-card__image::before,
+.modal-visual[data-award-tone] .modal-visual__frame::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background-image:
+    radial-gradient(ellipse at center, #fff 0 0.7px, var(--award-glint) 1px, transparent 2.5px),
+    radial-gradient(ellipse at center, var(--award-glint) 0 1px, transparent 3px),
+    repeating-linear-gradient(45deg, transparent 0 24px,
+      color-mix(in srgb, var(--award-glint) 55%, transparent) 25px, transparent 26px 50px),
+    repeating-linear-gradient(-45deg, transparent 0 24px,
+      color-mix(in srgb, var(--award-border) 65%, transparent) 25px, transparent 26px 50px),
+    conic-gradient(from 45deg, transparent, color-mix(in srgb, var(--award-glint) 25%, transparent),
+      transparent, color-mix(in srgb, var(--award-border) 35%, transparent), transparent);
+  background-size: 47px 71px, 83px 109px, 100px 100px, 100px 100px, 100px 100px;
+  background-position: 0 0, 23px 31px, 0 0, 0 0, 0 0;
+  mix-blend-mode: screen;
   opacity: 0;
   pointer-events: none;
 }
@@ -34,9 +59,9 @@
   inset: -35%;
   z-index: 1;
   background: linear-gradient(115deg,
-    transparent 25%, color-mix(in srgb, var(--award-border) 18%, transparent) 40%,
-    color-mix(in srgb, var(--award-glint) 50%, transparent) 49%,
-    color-mix(in srgb, var(--award-border) 24%, transparent) 56%, transparent 70%);
+    transparent 25%, color-mix(in srgb, var(--award-border) 30%, transparent) 40%,
+    color-mix(in srgb, var(--award-glint) 72%, transparent) 49%,
+    color-mix(in srgb, var(--award-border) 40%, transparent) 56%, transparent 70%);
   opacity: 0;
   transform: translateX(-70%) rotate(-8deg);
   pointer-events: none;
@@ -50,7 +75,12 @@
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
   :is(.archive-card, .modal-visual)[data-award-tone]:is(:hover, :focus-visible, :focus-within)::before {
     opacity: 1;
-    animation: award-frame-orbit 3.6s linear infinite;
+    animation: award-frame-orbit 4.8s linear infinite;
+  }
+
+  .archive-card[data-award-tone]:is(:hover, :focus-visible) .archive-card__image::before,
+  .modal-visual[data-award-tone]:is(:hover, :focus-within) .modal-visual__frame::before {
+    animation: award-facet-drift 7s linear infinite;
   }
 
   .archive-card[data-award-tone]:is(:hover, :focus-visible) .archive-card__image::after,
@@ -61,6 +91,14 @@
 
 @keyframes award-frame-orbit {
   to { --award-orbit: 360deg; }
+}
+
+@keyframes award-facet-drift {
+  0%, 100% { opacity: 0.3; }
+  35% { opacity: 0.65; }
+  70% { opacity: 0.45; }
+  from { background-position: 0 0, 23px 31px, 0 0, 0 0, 0 0; }
+  to { background-position: 47px 71px, -60px 140px, 100px 0, -100px 0, 100px 0; }
 }
 
 @keyframes award-foil-wave {
