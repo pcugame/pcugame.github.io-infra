@@ -4,7 +4,16 @@ import { fileURLToPath } from 'node:url';
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'tbh-never-build-for-publication',
+      apply: 'build',
+      buildStart() {
+        this.error('TBH_NON_PRODUCTION_ONLY: this variant must never be built or deployed. Use dev:mock for local preview.');
+      },
+    },
+  ],
   test: {
     // Node 26 Web Storage globals shadow jsdom's browser Storage implementation.
     execArgv: ['--no-webstorage'],

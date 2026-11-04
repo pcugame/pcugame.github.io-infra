@@ -3,11 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Unity WebGL 빌드 가이드 · PCU GAME</title>
+    <title>Unity Web 빌드 업로드 가이드 · PCU GAME</title>
     <script type="module" src="./main.js"></script>
   </head>
   <body class="webgl-guide" id="top">
-    <a class="skip" href="#start">본문으로 이동</a>
+    <a class="skip" href="#help">본문으로 이동</a>
     <!-- Site header and document actions -->
     <header class="guide-header">
       <div class="header-inner">
@@ -16,7 +16,7 @@
           <span class="home-topnav__logo-divider" aria-hidden="true"></span>
           <span class="home-topnav__logo-dept">소프트웨어공학부<br />게임공학전공</span>
         </a>
-        <span class="guide-header-title">Unity WebGL 빌드 가이드</span>
+        <span class="guide-header-title">Unity Web 빌드 업로드 가이드</span>
       </div>
     </header>
     <div class="wrap">
@@ -65,27 +65,16 @@
         <div>
           <div class="eyebrow">UNITY → WEB → PLAY</div>
           <h1>
-            Unity 웹페이지용
+            Unity Web
             <br />
-            <em>빌드·업로드 가이드</em>
+            <em>빌드 업로드 가이드</em>
           </h1>
-          <p class="lead">
-            플랫폼·씬 → 빌드·Player 설정 → 업로드 → 실행·성능 확인까지.
-            <br />
-            서버 지식 없이 따라가는 WebGL 배포 설정 가이드입니다.
-          </p>
-          <div class="meta">
-            <span class="pill">Unity 6 + 2022 LTS 화면 안내</span>
-            <span class="pill">데스크톱 브라우저 우선</span>
-            <span class="pill">공식 화면 + 선택 위치 안내</span>
-          </div>
-          <div class="hero-actions">
-            <a class="btn btn--primary" href="#required">설정 시작 →</a>
-          </div>
         </div>
       </div>
       <div class="layout">
         <nav class="toc" aria-label="문서 목차">
+<strong>FAQ</strong>
+<a href="#help">자주 묻는 질문</a>
 <strong>프로젝트 준비</strong>
 <a href="#start">01 · 버전과 플랫폼</a>
 <a href="#scenes">02 · 씬 포함·순서</a>
@@ -100,12 +89,59 @@
 <strong>실행·성능 확인</strong>
 <a href="#verify">09 · 업로드본 실행</a>
 <a href="#measure">10 · FPS·메모리 측정</a>
-<a href="#performance-help">11 · 성능 분석·개선</a>
 
-<strong>트러블슈팅</strong>
-<a href="#help">문제 해결·문의</a>
         </nav>
         <main>
+<section class="step" id="help">
+            <h2>FAQ</h2>
+            <details>
+              <summary>꼭 해야하나요?</summary>
+              <p>니 게임을 공짜로 서빙해준다는데 마다할거 같으면 어떻게 벌어먹고 살래</p>
+            </details>
+            <details>
+              <summary>유니티 빌드가 아니에요</summary>
+              <p>어떻게 해야할지 본인이 더 잘 아시리라고 봅니다.</p>
+            </details>
+            <details>
+              <summary>제 컴퓨터에서는 영상·사진이 나오는데, 업로드하면 안 나와요</summary>
+              <p>니 컴퓨터에만 있고 서버에 없으니까요</p>
+            </details>
+            <details>
+              <summary>사진을 File.ReadAllBytes로 읽었는데 Web 빌드에서는 안 보여요</summary>
+              <p>퍽도 보이겠다</p>
+            </details>
+            <details>
+              <summary>VideoPlayer에 영상을 넣었는데 Web 빌드에서는 재생이 안 돼요</summary>
+              <p>에러코드를 좀 읽어봐라</p>
+              <pre><code class="language-plaintext">Embedded video clips are not supported by the Web player: intro.mp4.
+Use the Video Player component's URL option instead</code></pre>
+              <p>VideoPlayer.url()쓰래잖아</p>
+            </details>
+            <details>
+              <summary>게임이 멈춰요</summary>
+              <p>Github에 있던 WebGL 검증 예제는 다 잘 돌던데 누가 잘못한걸까?</p>
+            </details>
+            <details>
+              <summary>리듬 게임을 웹에 올리니 음악과 노트·판정이 어긋나요</summary>
+              <p>당신의 리듬게임은 잘못된 Source of Truth에서 시간을 판정하고 있습니다.</p>
+            </details>
+            <details>
+              <summary>JSON파일이 파싱이 안돼요</summary>
+              <p>그냥 웹에서는 고정된거만 나오게 따로 하나 데모 시나리오 박아서 해라 좀...</p>
+            </details>
+            <details>
+              <summary>키보드는 되는데 전용 컨트롤러가 웹에서 안 먹어요</summary>
+              <p>컨트롤러 값이 아깝다 그냥 돌려다놓자 환불하자</p>
+            </details>
+            <details>
+              <summary>웹을 따로 지원하기 귀찮아요</summary>
+              <pre><code class="language-csharp">#if UNITY_WEBGL &amp;&amp; !UNITY_EDITOR
+    // 이게 귀찮아서
+#else
+    // 숨은 어떻게 쉬냐
+#endif</code></pre>
+            </details>
+          </section>
 <div class="zone-heading" id="required">
             <span class="eyebrow">SET UP → BUILD → TEST</span>
             <h2>Unity 설정부터 업로드·성능 확인까지</h2>
@@ -132,7 +168,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Web Build Support 설치
-                  <a class="source" href="https://learn.unity.com/tutorial/publish-on-unity-play" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://learn.unity.com/tutorial/publish-on-unity-play" target="_blank" rel="noopener">출처(영어) ↗</a>
                 </figcaption>
               </figure>
               </div>
@@ -160,7 +196,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Build Profiles → Scene List
-                  <a class="source" href="https://learn.unity.com/tutorial/publish-on-unity-play" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://learn.unity.com/tutorial/publish-on-unity-play" target="_blank" rel="noopener">출처(영어) ↗</a>
                 </figcaption>
               </figure>
               </div>
@@ -175,7 +211,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Scenes In Build · 시작 씬은 0번
-                  <a class="source" href="https://docs.unity3d.com/2022.3/Documentation/Manual/webgl-building.html" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/2022.3/Manual/webgl-building.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
               </div>
@@ -203,7 +239,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Web Settings
-                  <a class="source" href="https://learn.unity.com/tutorial/getting-started-with-unity-web" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://learn.unity.com/tutorial/getting-started-with-unity-web" target="_blank" rel="noopener">출처(영어) ↗</a>
                 </figcaption>
               </figure>
               </div>
@@ -218,7 +254,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Build Settings
-                  <a class="source" href="https://docs.unity3d.com/2022.3/Documentation/Manual/webgl-building.html" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/2022.3/Manual/webgl-building.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
               </div>
@@ -302,7 +338,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Player → Other Settings → Rendering
-                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-texture-compression.html" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/6000.0/Manual/webgl-texture-compression.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
               <details>
@@ -317,7 +353,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Quality · 품질 단계 이름은 프로젝트마다 다릅니다.
-                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-QualitySettings.html" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/6000.0/Manual/class-QualitySettings.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
                 <p class="micro">Web에 사용할 품질 단계의 Render Pipeline Asset을 선택하세요. 없으면 Graphics의 기본 에셋을 확인합니다. Built-in 프로젝트는 Quality의 설정을 사용합니다.</p>
@@ -328,7 +364,7 @@
                   <li>HDR·Opaque Texture는 필요한 효과가 없을 때만 끕니다.</li>
                 </ul>
                 <p class="micro">한 번에 하나씩 바꾸고 같은 장면에서 비교하세요. 효과가 없거나 표현이 깨지면 되돌립니다.
-                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/urp/configure-for-better-performance.html" target="_blank" rel="noopener">URP 성능 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/6000.0/Manual/urp/configure-for-better-performance.html" target="_blank" rel="noopener">URP 성능 ↗</a>
                 </p>
               </details>
               <div class="step-done">
@@ -346,7 +382,7 @@
               <ol class="steps">
                 <li><span data-version-content="6">Build Profiles의 활성 Web 프로필에서</span><span data-version-content="2022">Build Settings의 WebGL에서</span> <b>Build</b>를 누릅니다.</li>
                 <li><b>새 빈 폴더</b>를 만들어 저장 위치로 선택합니다. 예: <code>MyGame-Web-01</code>.</li>
-                <li>완료 후 결과 폴더의 <b>index.html과 Build 폴더</b>를 확인합니다. 중단되면 <a href="#help-build">빌드 도움말</a>로 이동하세요.</li>
+                <li>완료 후 결과 폴더의 <b>index.html과 Build 폴더</b>를 확인합니다. 중단되면 <a href="#help">빌드 도움말</a>로 이동하세요.</li>
               </ol>
               <p class="micro">다음 단계에서는 Assets·Packages가 있는 프로젝트 원본이 아닌 <b>빌드 결과물</b>을 압축합니다. index.html을 더블클릭하지 말고 업로드 후 실행을 확인하세요.</p>
               <div class="step-done">
@@ -410,7 +446,7 @@ MyGame-Web-01.zip
               <h2>업로드본 실행·기능 확인</h2>
               <ol class="steps">
                 <li>로그인 → <b>전시 목록</b> → 제출한 전시회 → 내 작품을 엽니다.</li>
-                <li><b>플레이해보기</b>를 누르고 로딩을 기다립니다. 버튼이 없거나 실행이 멈추면 <a href="#help-load">실행 도움말</a>로 이동하세요.</li>
+                <li><b>플레이해보기</b>를 누르고 로딩을 기다립니다. 버튼이 없거나 실행이 멈추면 <a href="#help">실행 도움말</a>로 이동하세요.</li>
                 <li><b>이번 업로드본</b>에서 게임 시작·주요 조작·장면 전환을 확인합니다. 실제 플레이 구간까지 진행하세요.</li>
                 <li>ZIP 파일명·실행 주소를 기록합니다. 멈추면 화면과 직전 행동을 함께 적으세요.</li>
                 <li>수정했다면 <a href="#build">새로 빌드 → ZIP → 업로드 → 실행 확인</a>을 반복합니다.</li>
@@ -442,7 +478,7 @@ MyGame-Web-01.zip
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>진단 표시 순서
-                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/6000.0/Manual/class-PlayerSettingsWebGL.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
               <p class="micro">측정은 선택 사항이며 공통 FPS 합격선은 없습니다. 커스텀 템플릿에는 진단 버튼이 없을 수 있습니다.</p>
@@ -450,181 +486,8 @@ MyGame-Web-01.zip
               <div class="step-done">
                 <b>한줄요약</b>
                 <p>FPS·메모리와 끊기는 구간을 같은 조건에서 비교합니다.</p>
-                <a href="#performance-help">다음: 성능 분석·개선 →</a>
               </div>
 </section>
-<section class="step reference-step" id="performance-help">
-            <div class="step-top">
-              <span class="step-no">11</span>
-              <span class="category">실행·성능 확인</span>
-            </div>
-            <h2>초기 로딩·플레이 성능·메모리 구분</h2>
-            <details>
-              <summary>처음 게임이 뜨기까지 오래 걸려요</summary>
-              <p>
-                기본 경로의 Brotli + Fallback OFF로 빌드하고, 초기 씬에 넣은
-                에셋의 크기를 줄여 비교합니다. Disk Size with LTO도 비교
-                후보입니다. 플레이 중 FPS와 별도로 시간을 기록하세요.
-              </p>
-            </details>
-            <details>
-              <summary>로딩은 끝났는데 게임이 버벅거려요</summary>
-              <p>
-                릴리스 빌드인지 확인하고, 같은 장면에서 Render
-                Scale·그림자·MSAA를 하나씩 낮춰 비교합니다. 효과가 없다면
-                Profiler로 CPU 처리를 확인합니다. Brotli로 바꾸는 것만으로
-                해결될 종류의 문제는 아닐 수 있습니다.
-              </p>
-            </details>
-            <details>
-              <summary>30 FPS 근처에 일정하게 머물러요</summary>
-              <p>
-                개발자가 설정한 목표 FPS, 브라우저·디스플레이의 프레임 동작도
-                확인해야 합니다. 일정한 제한인지, 처리 시간이 길어 목표를 못
-                맞추는지 구분한 후 최적화하세요.
-              </p>
-            </details>
-            <details>
-              <summary>압축 파일 파싱 오류 또는 검은 화면이 나와요</summary>
-              <p>
-                실제 실행 페이지의 오류 메시지와 선택한 압축 조합을 기록하세요.
-                기본 설정의 조합으로 만든 빌드에서 반복된다면 실행 주소·Unity
-                버전·오류 화면을 카카오톡 <code>Bipolar_</code>로
-                전달하세요. 원인 비교가 필요할 때만 Disabled로 한 번 더 빌드할
-                수 있습니다. 파일 이름을 바꾸거나 생성된 JavaScript를 편집하는
-                방식으로 해결하지 마세요.
-              </p>
-            </details>
-            <details>
-              <summary>메모리를 최대치로 키우면 빨라지나요?</summary>
-              <p>
-                아닙니다. 메모리 사용량을 측정하고 필요한 만큼 조정합니다.
-                텍스처와 초기 에셋 규모부터 살피세요. 허용 최대치를 늘리는 것과
-                실제 사용량을 줄이는 것은 다릅니다.
-              </p>
-            </details>
-          <div class="step-done"><b>한줄요약</b><p>로딩·플레이·메모리 중 병목을 구분했습니다. 설정을 바꿨다면 다시 빌드·업로드해 같은 조건으로 비교하세요.</p></div>
-</section>
-
-<div class="zone-heading" id="help-zone"><h2>트러블슈팅</h2><p>빌드·업로드·실행 중 문제가 생겼다면 해당 증상부터 확인하세요.</p></div>
-<section class="step" id="help">
-            <div class="step-top">
-              <span class="step-no">?</span>
-              <span class="category">트러블슈팅</span>
-            </div>
-            <h2>문제 발생 단계별 도움말</h2>
-            <details id="help-build">
-              <summary>Unity에서 빌드가 완료되지 않습니다</summary>
-              <p>
-                <b>먼저 확인:</b>
-                Web/WebGL 플랫폼과 설치 모듈을 확인하고, Unity Console에 오류가
-                보이면 그 문구를 캡처하세요. 빌드가 끝나지 않은 결과물은
-                압축·업로드하지 마세요.
-              </p>
-              <p>
-                <b>계속 안 되면:</b>
-                Unity 버전, 오류 화면, Build를 누르기 전후의 행동을
-                <a href="#request-info">문의 정보</a>와 함께 정리해 카카오톡 <code>Bipolar_</code>로
-                문의하세요.
-              </p>
-            </details>
-            <details id="help-upload">
-              <summary>ZIP 업로드가 거절되거나 완료되지 않습니다</summary>
-              <p>
-                <b>먼저 확인:</b>
-                7단계의 전체 결과물 ZIP인지, 기타 파일에서 WebGL로 골랐는지
-                확인하세요. 화면에 표시된 파일 제한·입력 오류·전시회 잠금 안내를
-                읽습니다. 업로드가 끊겨 같은 원본 파일을 다시 고르라는 안내가
-                나오면 바로 그 ZIP을 선택하세요.
-              </p>
-              <p>
-                <b>계속 안 되면:</b>
-                ZIP 파일명·크기, 막힌 화면, 표시된 오류와 직전 행동을 정리해
-                카카오톡 <code>Bipolar_</code>로 문의하세요.
-                전시회가 없거나 잠긴 경우에도 같은 경로로 문의하세요.
-                <a href="#request-info">기록할 정보와 문의 경로</a>를 확인하세요. 실행 주소는 아직 없으면 쓰지 않아도 됩니다.
-              </p>
-            </details>
-            <details id="help-load">
-              <summary>
-                업로드는 됐지만 로딩이 멈추거나 검은 화면이 나옵니다
-              </summary>
-              <p>
-                <b>먼저 확인:</b>
-                이번 업로드의 처리가 완료됐는지 확인하고 작품의 플레이해보기로
-                다시 엽니다. 브라우저를 최신 상태로 사용하고, 그래픽 가속 안내가
-                나오면 그 안내를 따르세요. 생성된 파일을 직접 고치지 마세요.
-              </p>
-              <p>
-                <b>계속 안 되면:</b>
-                카카오톡 <code>Bipolar_</code>로 작품명, 실행
-                주소가 있다면 그 주소, 브라우저 이름·버전, 오류 문구 또는 멈춘
-                화면을 전달합니다. 실행 버튼이 없는 경우에는 그 작품 화면을
-                기록합니다. 원인을 추측하지 않고
-                <a href="#request-info">진행한 순서</a>를 알려주세요.
-              </p>
-            </details>
-            <details id="help-action">
-              <summary>
-                게임 화면은 나오지만 시작 버튼 이후 또는 특정 행동에서 멈춥니다
-              </summary>
-              <p>
-                <b>먼저 확인:</b>
-                어떤 버튼·조작 뒤 멈추는지 다시 확인하고 순서대로 적습니다. 씬
-                전환에서 멈췄다면 필요한 씬이 2단계의 목록에 체크되어 있는지
-                확인하세요.
-              </p>
-              <p>
-                <b>계속 안 되면:</b>
-                멈춘 화면과 재현 순서를
-                <a href="#request-info">문의 정보</a>에 포함해 카카오톡 <code>Bipolar_</code>로
-                문의하세요. 코드·서버 문제를 미리 판정할 필요는 없습니다.
-              </p>
-            </details>
-            <details id="help-slow">
-              <summary>게임은 실행되지만 느리거나 끊깁니다</summary>
-              <p>
-                <b>먼저 확인:</b>
-                Development Build가 꺼진 이번 업로드본인지, 브라우저 그래픽 가속
-                안내가 있는지 확인합니다. 느려지는 장면과 그때의 조작을
-                기록하세요.
-              </p>
-              <p>
-                <b>계속 안 되면:</b>
-                브라우저·사용 기기, 느려지는 장면, 재현 순서를
-                <a href="#request-info">문의 정보</a>와 함께 카카오톡 <code>Bipolar_</code>로
-                전달하세요. 직접 개선하려면
-                <a href="#measure">FPS·메모리 참고</a>와
-                <a href="#graphics">그래픽 참고</a>를 읽습니다. 측정부터 마쳐야 문의할 수 있는 것은 아닙니다.
-              </p>
-            </details>
-            <div class="callout" id="request-info">
-              <strong>문의할 때 전달할 내용</strong>
-              <ul>
-                <li>막힌 단계와 작품명</li>
-                <li>
-                  Unity 버전, 브라우저 이름·버전(브라우저 실행 전이면 ‘아직 실행
-                  전’)
-                </li>
-                <li>
-                  실행 주소가 생성됐다면 그 주소. 빌드·업로드 단계에서 주소가
-                  없으면 생략
-                </li>
-                <li>
-                  오류 문구가 있으면 문구가 보이는 화면, 문구 없이 멈추면 멈춘
-                  화면
-                </li>
-                <li>멈추기 직전에 한 행동과 다시 재현하는 순서</li>
-              </ul>
-              <p>
-                <b>문의 경로:</b>
-                <b>카카오톡 ID <code>Bipolar_</code></b
-                >로 문의하세요. 카카오톡 ID 검색에서 <code>Bipolar_</code>를 찾아 연락하세요. 위의 문의
-                정보를 함께 보내주세요. 서버 설정이나 HTTP 헤더를 조사할 필요는
-                없습니다.
-              </p>
-            </div>
-          </section>
           <footer>
             <p>화면 이미지 출처: Unity 공식 문서·Unity Learn. © Unity Technologies.</p>
             <a href="https://github.com/pcugame/pcugame.github.io-infra" target="_blank" rel="noopener noreferrer">GitHub ↗</a>

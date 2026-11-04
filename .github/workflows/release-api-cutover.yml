@@ -31,6 +31,8 @@ permissions:
 # are never automatically retried. Their existing command timeouts remain separate.
 jobs:
   authorize:
+    # tbh is an archival variant. Never run production or publish release images.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     outputs:
       final_image: ${{ steps.release.outputs.final_image }}

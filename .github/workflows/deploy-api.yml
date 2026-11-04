@@ -29,6 +29,8 @@ permissions:
 
 jobs:
   build-and-push:
+    # tbh is an archival variant. Never run production or publish release images.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.manifest.outputs.image }}
