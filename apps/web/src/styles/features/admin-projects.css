@@ -57,10 +57,6 @@
   max-width: 22.5rem;
 }
 
-.admin-filter-input {
-  width: 7.5rem;
-}
-
 .admin-bulk-actions {
   display: flex;
   align-items: center;

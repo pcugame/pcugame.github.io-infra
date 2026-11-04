@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { IconDots, IconFile, IconMovie, IconPhoto, IconPackage, IconWorld } from '@tabler/icons-react';
+import { StatusBadge, type StatusBadgeProps } from '../../ui';
 import type { ProjectUploadKind } from '../../../lib/upload/project-files';
 
 export type MaterialAction = { label: string; onClick: () => void; disabled?: boolean };
@@ -30,15 +31,15 @@ function FileMenu({ name, actions }: { name: string; actions: MaterialAction[] }
  </div>;
 }
 
-export function MaterialFileRow({ name, kind, size, status, error, failed, icon, actions = [], primaryAction, children }: {
- name: string; kind: ProjectUploadKind; size?: number; status: string; error?: string | null; failed?: boolean;
+export function MaterialFileRow({ name, kind, size, status, error, failed, statusTone = failed ? 'danger' : 'neutral', icon, actions = [], primaryAction, children }: {
+ name: string; kind: ProjectUploadKind; size?: number; status: string; error?: string | null; failed?: boolean; statusTone?: StatusBadgeProps['tone'];
  icon?: ReactNode; actions?: MaterialAction[]; primaryAction?: ReactNode; children?: ReactNode;
 }) {
  const Icon = kind === 'VIDEO' ? IconMovie : kind === 'POSTER' || kind === 'IMAGE' ? IconPhoto : kind === 'GAME' ? IconPackage : kind === 'WEBGL' ? IconWorld : IconFile;
  return <div className="material-file" data-failed={failed || undefined}>
   <div className="material-file__icon">{icon ?? <Icon size={24} aria-hidden="true" />}</div>
   <strong className="material-file__name" title={name}>{name}</strong>
-  <span className="material-file__status" role="status">{status}</span>
+  <StatusBadge className="material-file__status" size="sm" tone={statusTone} role="status">{status}</StatusBadge>
   <div className="material-file__actions">{primaryAction}{actions.length > 0 && <FileMenu name={name} actions={actions} />}</div>
   {children && <div className="material-file__progress">{children}</div>}
   <details className="material-file__details"><summary>{error ? '실패 이유 · 파일 정보' : '파일 정보'}</summary><p>{name}</p><p>{size === undefined ? '크기 확인 중' : `${(size / 1024 / 1024).toFixed(2)} MB`}</p>{error && <p className="field-error">{error}</p>}</details>

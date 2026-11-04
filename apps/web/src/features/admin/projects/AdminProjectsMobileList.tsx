@@ -1,3 +1,4 @@
+import { StatusBadge } from '../../../components/ui';
 import { ProjectRequiredAssets } from './ProjectRequiredAssets';
 import { Link } from 'react-router-dom';
 import type { AdminProjectItem, ProjectStatus } from '../../../contracts';
@@ -8,11 +9,6 @@ const STATUS_LABELS: Record<ProjectStatus, string> = {
 	ARCHIVED: '비공개',
 };
 
-const STATUS_COLORS: Record<ProjectStatus, string> = {
-	DRAFT: 'badge--draft',
-	PUBLISHED: 'badge--published',
-	ARCHIVED: 'badge--archived',
-};
 
 interface AdminProjectsMobileListProps {
 	projects: AdminProjectItem[];
@@ -80,9 +76,9 @@ export function AdminProjectsMobileList({
 					>
 						<div className="admin-pcard__top">
 							<h3 className="admin-pcard__title">{p.title}</h3>
-							<span className={`badge ${STATUS_COLORS[p.publicationStatus === 'PUBLIC' ? 'PUBLISHED' : 'DRAFT']}`}>
+							<StatusBadge tone={p.publicationStatus === 'PUBLIC' ? 'success' : 'neutral'}>
 								{STATUS_LABELS[p.publicationStatus === 'PUBLIC' ? 'PUBLISHED' : 'DRAFT']}
-							</span>
+							</StatusBadge>
 						</div>
 						<ProjectRequiredAssets summary={p.requiredAssets} />
 						<div className="admin-pcard__meta">

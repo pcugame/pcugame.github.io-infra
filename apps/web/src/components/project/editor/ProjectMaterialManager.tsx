@@ -1,4 +1,4 @@
-import '../../../styles/features/material-manager.css';
+import { ProgressBar } from '../../ui';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { ProjectUploadKind } from '../../../lib/upload/project-files';
 import type { FileUploadRowState } from '../../../lib/upload/fileUploadQueue';
@@ -83,5 +83,5 @@ export function MaterialUploadSummary({ rows, children }: { rows: readonly FileU
  const total = rows.reduce((sum, row) => sum + (row.size ?? row.progress?.totalBytes ?? 0), 0);
  const loaded = rows.reduce((sum, row) => sum + (['transferred', 'completing', 'verifying', 'ready'].includes(row.phase) ? row.size ?? row.progress?.totalBytes ?? 0 : row.progress?.uploadedBytes ?? 0), 0);
  const percent = known && total > 0 ? Math.min(100, Math.floor(loaded / total * 100)) : undefined;
- return <><div className="material-upload-summary" role="status"><span>{percent === 100 ? '전송 완료' : percent === undefined ? '전송량 확인 중' : `전송 ${percent}%`}{known && ` · ${(loaded / 1024 / 1024).toFixed(1)} / ${(total / 1024 / 1024).toFixed(1)} MB`}</span><span>검증 {rows.filter(row => row.phase === 'ready').length}/{rows.length}개 완료</span><progress max={100} value={percent} aria-label="전체 파일 전송률" /></div>{children}</>;
+ return <><div className="material-upload-summary" role="status"><span>{percent === 100 ? '전송 완료' : percent === undefined ? '전송량 확인 중' : `전송 ${percent}%`}{known && ` · ${(loaded / 1024 / 1024).toFixed(1)} / ${(total / 1024 / 1024).toFixed(1)} MB`}</span><span>검증 {rows.filter(row => row.phase === 'ready').length}/{rows.length}개 완료</span><ProgressBar size="sm" value={percent} aria-label="전체 파일 전송률" /></div>{children}</>;
 }

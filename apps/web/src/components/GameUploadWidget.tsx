@@ -1,3 +1,4 @@
+import { ProgressBar } from './ui';
 import { usePreventWindowClose } from './common/usePreventWindowClose';
 import { useContext } from 'react';
 import { LinearUploadContext } from '../lib/upload/linearPresentation';
@@ -35,6 +36,8 @@ interface Props {
 	/** An enclosing row provides the heading, chooser, and selected file summary. */
 	displayNames?: string[];
 	compact?: boolean;
+	/** Surface only; does not hide controls or change upload behavior. */
+	variant?: 'panel' | 'plain';
 	onSkip?: () => void;
 	uploadKind?: UploadKind;
 	submissionItem?: SubmissionBinding;
@@ -56,6 +59,7 @@ function GameUploadSession({
 	onCancelled,
 	displayNames,
 	compact = false,
+	variant = 'panel',
 	onSkip,
 	uploadKind = 'GAME',
 	submissionItem,
@@ -445,7 +449,7 @@ function GameUploadSession({
 			</div>);
 
 	return (
-		<div className={`game-upload${linear ? ' game-upload--linear' : ''}`} data-phase={state}>
+		<div className={`game-upload${linear ? ' game-upload--linear' : compact ? ' game-upload--compact' : variant === 'plain' ? ' game-upload--plain' : ''}`} data-phase={state}>
 			{linear && <UploadFileRows actions={uploadActions} names={[file?.name ?? displayNames?.[0] ?? labels.noun]} phase={state === 'idle' && error && file ? 'error' : state} percent={progress?.percent} />}
 			{!linear && !compact && <h3 className="game-upload__title">{labels.title}</h3>}
 			{!linear && session && state === 'idle' && (
@@ -462,10 +466,8 @@ function GameUploadSession({
 			)}
 			{!linear && progress && (state === 'uploading' || state === 'verifying' || state === 'completed') && (
 				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
-					<div className="game-upload__progress-track" role="progressbar" aria-label={`${labels.noun} 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
-						<div className={`game-upload__progress-bar ${state === 'completed' ? 'game-upload__progress-bar--done' : ''}`} style={{ width: `${progress.percent}%` }} />
-						<span className="game-upload__progress-label">{progress.percent}% ({progress.uploadedChunks}/{progress.totalChunks})</span>
-					</div>
+					<ProgressBar aria-label={`${labels.noun} 업로드 진행률`} value={progress.percent} tone={state === 'completed' ? 'success' : 'info'} />
+					<span className="game-upload__progress-label">{progress.percent}% ({progress.uploadedChunks}/{progress.totalChunks})</span>
 					<p className="game-upload__progress-status">
 						{state === 'verifying' && '백그라운드 검증 중… 이 페이지를 닫아도 다음 방문 때 상태를 이어서 확인합니다.'}
 						{state === 'completed' && '업로드 완료!'}

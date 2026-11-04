@@ -6,7 +6,6 @@
 .material-manager__failure { color: var(--color-danger); }
 .material-manager__summary { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; padding: .85rem 0; border-bottom: 1px solid var(--color-border); }
 .material-upload-summary { flex: 1 1 14rem; display: flex; flex-wrap: wrap; gap: .25rem .75rem; font-size: .85rem; }
-.material-upload-summary progress { width: 100%; height: .35rem; accent-color: var(--color-primary); }
 .material-panel { position: relative; padding-block: 1rem; min-width: 0; }
 .material-panel__heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .material-panel__heading h3 { margin: 0; font-size: 1rem; }
@@ -19,14 +18,13 @@
 .material-file { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr) auto auto; align-items: center; gap: .4rem .6rem; padding: .85rem 0; border-bottom: 1px solid var(--color-border); min-width: 0; }
 .material-file__icon { grid-column: 1; grid-row: 1 / 3; align-self: start; color: var(--color-text-muted); }
 .material-file__name { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .9rem; }
-.material-file__status { grid-column: 3; color: var(--color-text-muted); font-size: .8rem; }
-.material-file[data-failed] .material-file__status { color: var(--color-danger); }
+.material-file__status { grid-column: 3; justify-self: start; max-width: 100%; }
 .material-file__actions { grid-column: 4; grid-row: 1 / 3; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .3rem; max-width: 12rem; }
 .material-file__details { grid-column: 2 / -1; font-size: .8rem; min-width: 0; }
 .material-file__details summary { cursor: pointer; color: var(--color-text-muted); width: fit-content; }
 .material-file__details p { overflow-wrap: anywhere; margin: .4rem 0; }
 .material-file__progress { grid-column: 2 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; font-size: .75rem; color: var(--color-text-muted); }
-.material-file__progress progress { width: 8rem; max-width: 100%; height: .35rem; accent-color: var(--color-primary); }
+.material-file__meter { width: 8rem; max-width: 100%; }
 .material-file__menu { position: relative; }
 .material-file__menu-items { position: absolute; right: 0; top: 100%; z-index: 10; min-width: 9rem; max-width: 14rem; border: 1px solid var(--color-border); border-radius: .4rem; padding: .3rem; background: var(--color-surface); box-shadow: 0 .35rem 1rem #0002; }
 .material-file__menu-items button { display: block; width: 100%; border: 0; padding: .65rem .7rem; background: transparent; color: var(--color-text); font: inherit; font-size: .85rem; text-align: left; cursor: pointer; }

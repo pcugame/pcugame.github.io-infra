@@ -29,10 +29,6 @@
 .network-request__project { color: var(--color-text-muted); font-size: .8rem; margin-bottom: .4rem; overflow-wrap: anywhere; }
 .network-request h3 { line-height: 1.5; overflow-wrap: anywhere; }
 .network-request__meta { color: var(--color-text-muted); font-size: .75rem; line-height: 1.65; margin: .75rem 0 1rem; }
-.network-status { flex-shrink: 0; font-size: .75rem; font-weight: 700; padding: .3rem .6rem; border-radius: 6px; border: 1px solid currentColor; }
-.network-status--pending { color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 8%, transparent); }
-.network-status--approved { color: var(--color-success); background: color-mix(in srgb, var(--color-success) 8%, transparent); }
-.network-status--rejected, .network-status--revoked { color: var(--color-text-muted); }
 .network-request__details { display: grid; gap: .9rem; }
 .network-request__details dt { font-size: .75rem; font-weight: 700; color: var(--color-text-muted); margin-bottom: .3rem; }
 .network-request__details dd { margin: 0; font-size: .88rem; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }

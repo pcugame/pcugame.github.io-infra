@@ -1,3 +1,4 @@
+import { ProgressBar, StatusBadge, type StatusBadgeProps } from '../ui';
 import { useEffect } from 'react';
 import type { ExportResult } from '../../lib/api';
 import type { ExportFileStatus, ExportPhase, ExportStatusResponse } from '../../contracts';
@@ -24,6 +25,10 @@ const FILE_STATUS_LABEL: Record<ExportFileStatus, string> = {
 	saved: '완료',
 	skipped: '스킵',
 	failed: '실패',
+};
+
+const FILE_STATUS_TONE: Record<ExportFileStatus, StatusBadgeProps['tone']> = {
+ pending: 'neutral', saving: 'info', saved: 'success', skipped: 'warning', failed: 'danger',
 };
 
 export function ExportProgressModal({
@@ -110,9 +115,8 @@ export function ExportProgressModal({
 						<div className="export-progress">
 							<div className="export-progress__phase">
 								<div
-									className="spinner"
+									className="spinner spinner--small"
 									aria-label="진행 중"
-									style={{ width: 28, height: 28, borderWidth: 3 }}
 								/>
 								<strong>{phaseLabel}</strong>
 							</div>
@@ -122,19 +126,7 @@ export function ExportProgressModal({
 									<span>전체 진행률</span>
 									<strong>{progressPercent}%</strong>
 								</div>
-								<div
-									className="export-progress__bar-track"
-									role="progressbar"
-									aria-label="NAS 내보내기 진행률"
-									aria-valuemin={0}
-									aria-valuemax={100}
-									aria-valuenow={progressPercent}
-								>
-									<div
-										className="export-progress__bar-fill"
-										style={{ width: `${progressPercent}%` }}
-									/>
-								</div>
+								<ProgressBar aria-label="NAS 내보내기 진행률" value={progressPercent} />
 							</div>
 
 							<dl className="export-progress__stats">
@@ -198,11 +190,7 @@ export function ExportProgressModal({
 														</span>
 													)}
 												</div>
-												<span
-													className={`export-progress__file-status export-progress__file-status--${file.status}`}
-												>
-													{FILE_STATUS_LABEL[file.status]}
-												</span>
+												<StatusBadge tone={FILE_STATUS_TONE[file.status]}>{FILE_STATUS_LABEL[file.status]}</StatusBadge>
 											</li>
 										))}
 									</ul>
@@ -222,37 +210,24 @@ export function ExportProgressModal({
 
 					{!isRunning && error && (
 						<div
-							style={{
-								background: 'var(--color-error-bg, #fce4ec)',
-								padding: '1rem',
-								borderRadius: 10,
-								marginBottom: '1rem',
-							}}
+							className="notice notice--danger"
 						>
 							<strong>{year}년도 내보내기 실패</strong>
-							<p style={{ margin: '0.35rem 0 0' }}>{error}</p>
+							<p>{error}</p>
 						</div>
 					)}
 
 					{!isRunning && result && !error && (
 						<div
-							style={{
-								background:
-									result.failed > 0 || (result.missingFiles?.length ?? 0) > 0
-										? 'var(--color-warning-bg, #fff3e0)'
-										: 'var(--color-success-bg, #e8f5e9)',
-								padding: '1rem',
-								borderRadius: 10,
-								marginBottom: '1rem',
-							}}
+							className={`notice ${result.failed > 0 || (result.missingFiles?.length ?? 0) > 0 ? 'notice--warning' : 'notice--success'}`}
 						>
 							<strong>{year}년도 내보내기 완료{result.missingFiles?.length ? ' (일부 파일 누락)' : ''}</strong>
-							<p style={{ margin: '0.35rem 0 0' }}>
+							<p>
 								다운로드 {result.downloaded}개 · 스킵 {result.skipped}개
 								{result.failed > 0 && (
 									<>
 										{' · '}
-										<span style={{ color: 'var(--color-danger, #c62828)' }}>
+										<span className="export-progress__danger">
 											실패 {result.failed}개
 										</span>
 									</>
@@ -266,7 +241,7 @@ export function ExportProgressModal({
 										{result.missingFiles.map((file) => (
 											<li key={file.path}>
 												<strong>{file.projectTitle}</strong> (작품 #{file.projectId}) · {file.originalName}
-												<div style={{ overflowWrap: 'anywhere' }}>{file.path} — 원본 파일 없음</div>
+												<div>{file.path} — 원본 파일 없음</div>
 											</li>
 										))}
 									</ul>
@@ -274,10 +249,7 @@ export function ExportProgressModal({
 							)}
 							{result.aborted && (
 								<p
-									style={{
-										margin: '0.35rem 0 0',
-										color: 'var(--color-text-muted)',
-									}}
+									className="export-progress__muted"
 								>
 									(중단되어 일부만 처리되었습니다.)
 								</p>
@@ -287,11 +259,7 @@ export function ExportProgressModal({
 
 					{!isRunning && (
 						<div
-							style={{
-								display: 'flex',
-								justifyContent: 'flex-end',
-								marginTop: '0.5rem',
-							}}
+							className="form-actions form-actions--end"
 						>
 							<button className="btn btn--primary" onClick={onClose}>
 								닫기

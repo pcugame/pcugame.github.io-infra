@@ -1,3 +1,4 @@
+import { ProgressBar } from '../ui';
 import { usePreventWindowClose } from './usePreventWindowClose';
 
 interface UploadProgressModalProps {
@@ -37,12 +38,7 @@ export function UploadProgressModal({
 					<strong>{title}</strong>
 					<span>진행 중</span>
 				</div>
-				<div className="upload-progress-modal__bar-track" aria-hidden="true">
-					<div
-						className="upload-progress-modal__bar-fill"
-						style={{ width: `${hasKnownTotal ? safePercent : 32}%` }}
-					/>
-				</div>
+				<ProgressBar className="upload-progress-modal__progress" aria-label={title} value={hasKnownTotal ? safePercent : undefined} />
 				<div className="upload-progress-modal__meta">
 					<span>{hasKnownTotal ? `${safePercent}%` : '전송 준비 중'}</span>
 					{hasKnownTotal && (

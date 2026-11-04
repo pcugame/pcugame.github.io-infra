@@ -1,0 +1,36 @@
+/* Native dialogs stay mounted; display is changed only while open. */
+.dialog-frame {
+  --dialog-width: 34rem;
+  --dialog-padding: 1.25rem;
+  width: min(var(--dialog-width), calc(100vw - 2rem));
+  max-width: none;
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-lg);
+}
+.dialog-frame--sm { --dialog-width: 32rem; }
+.dialog-frame--lg { --dialog-width: 62rem; }
+.dialog-frame[open] { display: flex; flex-direction: column; }
+.dialog-frame::backdrop { background: rgb(15 23 42 / 42%); backdrop-filter: blur(3px); }
+.dialog-frame__header,
+.dialog-frame__footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: var(--dialog-padding);
+}
+.dialog-frame__header { border-bottom: 1px solid var(--color-border); }
+.dialog-frame__footer { justify-content: flex-end; gap: .5rem; border-top: 1px solid var(--color-border); }
+.dialog-frame__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--dialog-padding); }
+@media (max-width: 50em) {
+  .dialog-frame { --dialog-padding: 1rem; }
+}

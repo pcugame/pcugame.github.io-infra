@@ -1,3 +1,4 @@
+import { StatusBadge } from '../components/ui';
 import { ConnectionConflicts } from '../features/webgl/ConnectionRuleSummary';
 import { ConnectionRule, describeConnectionRule } from '@pcu/contracts';
 import { ConnectionBatchForm } from '../features/webgl/ConnectionBatchForm';
@@ -28,8 +29,8 @@ function ReviewActions({ item, onReviewed }: { item: WebglNetworkRequest; onRevi
 		<h4>{item.state === 'PENDING' ? '신청 검토' : '승인 관리'}</h4>
 		<p className="field-hint">{item.state === 'PENDING' ? '사용 목적과 서버 설정 계획을 확인한 뒤, 처리 사유를 남겨 주세요.' : '철회하면 이 주소를 사용하는 이후 파일 요청과 갱신이 거절됩니다.'}</p>
 		<div className="form-field">
-			<label htmlFor={`reason-${item.id}`}>검토 사유</label>
-			<textarea id={`reason-${item.id}`} value={reason} onChange={event => setReason(event.target.value)} maxLength={2000} rows={3} placeholder="신청자에게 전달할 처리 사유를 입력하세요." required />
+			<label className="form-field__label" htmlFor={`reason-${item.id}`}>검토 사유</label>
+			<textarea className="form-control" id={`reason-${item.id}`} value={reason} onChange={event => setReason(event.target.value)} maxLength={2000} rows={3} placeholder="신청자에게 전달할 처리 사유를 입력하세요." required />
 		</div>
 		<div className="form-actions">
 			{item.state === 'PENDING' ? <>
@@ -48,7 +49,7 @@ function RequestCard({ item, admin, items, onReviewed }: { item: WebglNetworkReq
 	return <article className="admin-card network-request">
 		<div className="network-request__header">
 			<div><p className="network-request__project">{admin && item.projectId !== null ? <Link to={`/admin/projects/${item.projectId}/network`}>{item.projectTitle}</Link> : item.projectTitle}{item.projectId === null && ' · 삭제된 작품'}</p><h3>{rule ? rule.hostname : '기존 연결 신청'}</h3></div>
-			<span className={`network-status network-status--${item.state.toLowerCase()}`}>{stateLabels[item.state]}</span>
+			<StatusBadge tone={item.state === 'APPROVED' ? 'success' : item.state === 'PENDING' ? 'info' : 'neutral'}>{stateLabels[item.state]}</StatusBadge>
 		</div>
 		<p className="network-request__meta">{item.mode === 'HTTPS' ? 'HTTPS API / Addressables' : 'WSS'} · 신청자 #{item.requesterId} · 신청 {dateLabel(item.createdAt)}</p>
 		<details><summary>CSP 문자열 상세 (읽기 전용)</summary><code>{item.origin}</code></details>

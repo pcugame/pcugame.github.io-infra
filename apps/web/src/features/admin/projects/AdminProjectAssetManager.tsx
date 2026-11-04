@@ -170,7 +170,7 @@ export function AdminProjectPosterUpload({
 	if (studio) return null; // The Studio manager includes the poster tab.
 	const selected = queue.entries.filter(entry => entry.kind === 'POSTER' && (entry.status === 'pending' || entry.status === 'active')).at(-1)?.file;
 	return (
-		<FormSection legend="포스터">
+		<FormSection variant="plain" legend="포스터">
 			<StoredFiles poster canEditContent={canEditContent} />
 			<UploadDropZone zone="poster" canEditContent={canEditContent}>
 				<ProjectPosterPreview image={project.poster} title={project.title} localFile={selected instanceof File ? selected : undefined} />
@@ -181,7 +181,7 @@ export function AdminProjectPosterUpload({
 export function AdminProjectAssetManager({ canEditContent, studio = false, webglActions, canRetryVideos = false, videoRetryDisabled = false }: { canEditContent: boolean; studio?: boolean; webglActions?: ReactNode; canRetryVideos?: boolean; videoRetryDisabled?: boolean }) {
 	const queue = useAdminProjectUploadQueue();
 	return (
-		studio ? <StudioEditMaterials queue={queue} canEditContent={canEditContent} webglActions={webglActions} canRetryVideos={canRetryVideos} videoRetryDisabled={videoRetryDisabled} /> : <fieldset className="form-section">
+		studio ? <StudioEditMaterials queue={queue} canEditContent={canEditContent} webglActions={webglActions} canRetryVideos={canRetryVideos} videoRetryDisabled={videoRetryDisabled} /> : <fieldset className="form-section form-section--plain">
 			<legend className="submission-file-heading"><span>게임·미디어·자료</span><WebglBuildGuideLink /></legend>
 			<StoredFiles poster={false} canEditContent={canEditContent} />
 			<UploadDropZone zone="files" canEditContent={canEditContent} />

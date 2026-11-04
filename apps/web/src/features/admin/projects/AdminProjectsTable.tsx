@@ -1,3 +1,4 @@
+import { StatusBadge } from '../../../components/ui';
 import { RequiredAssetMark } from './ProjectRequiredAssets';
 import type React from 'react';
 import { Link } from 'react-router-dom';
@@ -9,11 +10,6 @@ const STATUS_LABELS: Record<ProjectStatus, string> = {
 	ARCHIVED: '비공개',
 };
 
-const STATUS_COLORS: Record<ProjectStatus, string> = {
-	DRAFT: 'badge--draft',
-	PUBLISHED: 'badge--published',
-	ARCHIVED: 'badge--archived',
-};
 
 function titleStyle(title: string): React.CSSProperties {
 	const len = title.length;
@@ -92,9 +88,9 @@ export function AdminProjectsTable({
 							<td className="admin-table__title-cell"><strong style={titleStyle(p.title)}>{p.title}</strong></td>
 							<td><span className="admin-year-badge">{p.year}</span></td>
 							<td>
-								<span className={`badge ${STATUS_COLORS[p.publicationStatus === 'PUBLIC' ? 'PUBLISHED' : 'DRAFT']}`}>
+								<StatusBadge tone={p.publicationStatus === 'PUBLIC' ? 'success' : 'neutral'}>
 									{STATUS_LABELS[p.publicationStatus === 'PUBLIC' ? 'PUBLISHED' : 'DRAFT']}
-								</span>
+								</StatusBadge>
 							</td>
 							<td className="admin-projects-table__asset"><RequiredAssetMark label="네이티브 빌드" status={p.requiredAssets?.nativeBuild} /></td>
 							<td className="admin-projects-table__asset"><RequiredAssetMark label="웹빌드" status={p.requiredAssets?.webBuild} /></td>

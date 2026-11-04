@@ -39,23 +39,6 @@
   font-size: 0.875rem;
 }
 
-.upload-progress-modal__bar-track {
-  position: relative;
-  height: 0.75rem;
-  margin: 1rem 0 0.55rem;
-  overflow: hidden;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-border) 70%, var(--color-surface));
-}
-
-.upload-progress-modal__bar-fill {
-  height: 100%;
-  min-width: 0.75rem;
-  border-radius: inherit;
-  background: var(--color-primary-btn, var(--color-primary));
-  transition: width 0.2s ease;
-}
-
 .upload-progress-modal__status {
   margin: 0.9rem 0 0;
   line-height: 1.5;
@@ -92,12 +75,6 @@
   font-size: 0.88rem;
 }
 
-.game-upload__resume-hint {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-}
-
 .game-upload__file-input {
   margin-bottom: 0.85rem;
 }
@@ -114,34 +91,10 @@
   margin-bottom: 0.85rem;
 }
 
-.game-upload__progress-track {
-  background: var(--color-border);
-  border-radius: 6px;
-  overflow: hidden;
-  height: 1.625rem;
-  position: relative;
-}
-
-.game-upload__progress-bar {
-  background: var(--color-primary-btn);
-  height: 100%;
-  transition: width 0.3s ease;
-  border-radius: 6px;
-}
-
-.game-upload__progress-bar--done {
-  background: var(--color-success);
-}
-
 .game-upload__progress-label {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 0.78rem;
+  font-size: .78rem;
   font-weight: 700;
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  color: var(--color-text);
 }
 
 .game-upload__progress-status {
@@ -175,7 +128,7 @@
 
 /* ── Dark — game upload overrides ────────────────────────── */
 
-[data-theme='dark'] .game-upload {
+[data-theme='dark'] .game-upload:not(.game-upload--linear):not(.game-upload--compact):not(.game-upload--plain) {
   background: var(--color-surface);
 }
 
@@ -188,10 +141,6 @@
   border-color: rgba(248, 113, 113, 0.2);
 }
 
-[data-theme='dark'] .game-upload__progress-track {
-  background: #2e2e33;
-}
-
 @media (max-width: 50em) {
   .game-upload {
     padding: 1rem;
@@ -200,34 +149,18 @@
 }
 
 /* Upload progress uses the studio palette with a single linear file list. */
-.project-upload-dialog {
- width: min(32rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem);
- margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--color-border);
- border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-lg);
-}
-.project-upload-dialog[open] { display: flex; flex-direction: column; }
-.project-upload-dialog::backdrop { background: rgb(15 23 42 / 42%); backdrop-filter: blur(3px); }
-.project-upload-dialog__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--color-border); }
 .project-upload-dialog h2 { margin: 0; font-size: 1rem; outline: none; }
 .project-upload-dialog__count { color: var(--color-text-muted); font-size: .85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.project-upload-dialog__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: .5rem 1.5rem; }
 .project-upload-dialog .project-upload-queue { margin: 0; padding: 0; list-style: none; }
 .project-upload-dialog .project-upload-queue > li { padding: 0; border: 0; }
 .upload-file-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .65rem .75rem; min-height: 2.4rem; padding: 1rem 0; border-bottom: 1px solid var(--color-border); font-size: .8rem; }
+.upload-file-row > .status-badge { justify-self: end; }
 .upload-file-row__name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; color: var(--color-text); }
-.upload-file-row__state { justify-self: end; padding: .2rem .55rem; border-radius: 99px; color: var(--color-text-muted); background: var(--color-bg); font-size: .75rem; font-weight: 600; }
-.upload-file-row[data-phase='failed'] { --upload-progress-color: var(--color-danger); }
-.upload-file-row[data-phase='failed'] .upload-file-row__state { color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 10%, transparent); }
-.upload-file-row[data-phase='ready'] .upload-file-row__state { color: var(--color-success); background: color-mix(in srgb, var(--color-success) 10%, transparent); }
 .upload-file-row .btn { font-size: .8rem; padding: .4rem .65rem; min-height: 2.25rem; }
-.project-upload-dialog__header { flex-wrap: wrap; }
-.project-upload-dialog__progress { display: block; flex-basis: 100%; width: 100%; height: .35rem; border: 0; border-radius: 99px; overflow: hidden; background: var(--color-border); accent-color: var(--color-primary-btn); }
-.project-upload-dialog__progress::-webkit-progress-bar { background: var(--color-border); }
-.project-upload-dialog__progress::-webkit-progress-value { background: var(--color-primary-btn); }
-.project-upload-dialog__progress::-moz-progress-bar { background: var(--color-primary-btn); }
+.project-upload-dialog__progress { flex-basis: 100%; }
 .project-upload-dialog__body { max-height: 50dvh; }
 .project-upload-dialog .game-upload__error { font-size: .7rem; padding: .35rem .5rem; margin: .25rem 0; }
-.project-upload-dialog .game-upload--linear { padding: 0; margin: 0; border: 0; background: none; box-shadow: none; }
+.game-upload--linear, .game-upload--compact, .game-upload--plain { padding: 0; margin: 0; border: 0; background: none; box-shadow: none; }
 .game-upload--linear[data-phase=uploading] .game-upload__actions,
 .game-upload--linear[data-phase=verifying] .game-upload__actions,
 .game-upload--linear .game-upload__complete-text { display: none; }
@@ -235,30 +168,21 @@
 .project-upload-dialog .field-hint, .project-upload-dialog .game-upload__resume-text { font-size: .75rem; }
 .project-upload-dialog__body > :is(.field-hint, .field-error, .success-message, .error-box) { margin-block: .5rem; line-height: 1.6; overflow-wrap: anywhere; }
 .project-upload-dialog input[type=file] { max-width: 100%; font-size: .8rem; }
-.project-upload-dialog__footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; padding: .85rem 1.5rem; border-top: 1px solid var(--color-border); }
-@media (max-width: 50em) {
- .project-upload-dialog { width: calc(100vw - 1.25rem); max-height: calc(100dvh - 1.25rem); }
- .project-upload-dialog__header, .project-upload-dialog__footer { padding: 1rem; }
- .project-upload-dialog__body { padding: .4rem 1rem; }
-}
 
 .project-upload-dialog__recovery { margin: .5rem 0; color: var(--color-text-muted); font-size: .7rem; line-height: 1.5; }
 
 /* Row styling is self-contained because upload dialogs render outside the editor. */
 .upload-file-row__meter { grid-column: 1 / -1; min-width: 0; display: flex; flex-direction: column; gap: .4rem; font-variant-numeric: tabular-nums; color: var(--color-text-muted); font-size: .75rem; }
-.upload-file-row__meter progress { display: block; width: 100%; height: .4rem; appearance: none; border: 0; border-radius: 99px; overflow: hidden; background: var(--color-border); accent-color: var(--upload-progress-color, var(--color-primary-btn)); }
-.upload-file-row__meter progress::-webkit-progress-bar { background: var(--color-border); }
-.upload-file-row__meter progress::-webkit-progress-value { background: var(--upload-progress-color, var(--color-primary-btn)); }
-.upload-file-row__meter progress::-moz-progress-bar { background: var(--upload-progress-color, var(--color-primary-btn)); }
 .upload-file-row__actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .5rem; }
 .upload-file-row__error { grid-column: 1 / -1; margin: 0; padding: .65rem .75rem; border: 1px solid color-mix(in srgb, var(--color-danger) 25%, transparent); border-radius: var(--radius); background: color-mix(in srgb, var(--color-danger) 6%, transparent); color: var(--color-danger); font-size: .8rem; line-height: 1.65; overflow-wrap: anywhere; }
 .upload-file-row__actions:empty { display: none; }
 @media (max-width: 50em) {
  .upload-file-row { gap: .35rem .5rem; padding-block: .5rem; }
- .upload-file-row__state { padding: .15rem .45rem; font-size: .7rem; }
  .upload-file-row__meter { display: grid; grid-template-columns: minmax(2rem, 1fr) auto; align-items: center; gap: .5rem; font-size: .7rem; }
  .upload-file-row__meter > span { white-space: nowrap; }
  .upload-file-row__actions { gap: .4rem; }
  .upload-file-row .btn { min-height: 2rem; padding: .3rem .55rem; font-size: .75rem; }
  .upload-file-row__error { padding: .45rem .6rem; font-size: .75rem; line-height: 1.5; }
 }
+
+.upload-progress-modal__progress { margin: 1rem 0 .55rem; }
