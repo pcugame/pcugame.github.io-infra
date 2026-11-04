@@ -3,11 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Unity WebGL 빌드 가이드 · PCU GAME</title>
+    <title>Unity Web 빌드 업로드 가이드 · PCU GAME</title>
     <script type="module" src="./main.js"></script>
   </head>
   <body class="webgl-guide" id="top">
-    <a class="skip" href="#start">본문으로 이동</a>
+    <a class="skip" href="#help">본문으로 이동</a>
     <!-- Site header and document actions -->
     <header class="guide-header">
       <div class="header-inner">
@@ -16,7 +16,7 @@
           <span class="home-topnav__logo-divider" aria-hidden="true"></span>
           <span class="home-topnav__logo-dept">소프트웨어공학부<br />게임공학전공</span>
         </a>
-        <span class="guide-header-title">Unity WebGL 빌드 가이드</span>
+        <span class="guide-header-title">Unity Web 빌드 업로드 가이드</span>
       </div>
     </header>
     <div class="wrap">
@@ -65,27 +65,16 @@
         <div>
           <div class="eyebrow">UNITY → WEB → PLAY</div>
           <h1>
-            Unity 웹페이지용
+            Unity Web
             <br />
-            <em>빌드·업로드 가이드</em>
+            <em>빌드 업로드 가이드</em>
           </h1>
-          <p class="lead">
-            플랫폼·씬 → 빌드·Player 설정 → 업로드 → 실행·성능 확인까지.
-            <br />
-            서버 지식 없이 따라가는 WebGL 배포 설정 가이드입니다.
-          </p>
-          <div class="meta">
-            <span class="pill">Unity 6 + 2022 LTS 화면 안내</span>
-            <span class="pill">데스크톱 브라우저 우선</span>
-            <span class="pill">공식 화면 + 선택 위치 안내</span>
-          </div>
-          <div class="hero-actions">
-            <a class="btn btn--primary" href="#required">설정 시작 →</a>
-          </div>
         </div>
       </div>
       <div class="layout">
         <nav class="toc" aria-label="문서 목차">
+<strong>FAQ</strong>
+<a href="#help">자주 묻는 질문</a>
 <strong>프로젝트 준비</strong>
 <a href="#start">01 · 버전과 플랫폼</a>
 <a href="#scenes">02 · 씬 포함·순서</a>
@@ -100,12 +89,532 @@
 <strong>실행·성능 확인</strong>
 <a href="#verify">09 · 업로드본 실행</a>
 <a href="#measure">10 · FPS·메모리 측정</a>
-<a href="#performance-help">11 · 성능 분석·개선</a>
 
-<strong>트러블슈팅</strong>
-<a href="#help">문제 해결·문의</a>
         </nav>
         <main>
+<section class="step" id="help">
+            <h2>FAQ</h2>
+            <details>
+              <summary>꼭 해야하나요?</summary>
+              <p>
+                기본적으로 많은 사람들이 게임을 쉽게 즐겨볼 수 있게 하자는 취지에서 만들어진 기능입니다.
+                업로드를 권장합니다. 매 해 제반 상황이 다를 수 있으므로, 만약 정말 하기 어려운 상황이라면
+                담임 교수님께 여쭤보세요.
+              </p>
+            </details>
+            <details>
+              <summary>유니티 빌드가 아니에요</summary>
+              <p>직접 호스팅한 뒤 링크 추가 기능으로 등록하거나, 업로드하지 않아도 됩니다.</p>
+            </details>
+            <details>
+              <summary>제 컴퓨터에서는 영상·사진이 나오는데, 업로드하면 안 나와요</summary>
+              <p>
+                코드에 <code>C:/Users/...</code>, <code>file://...</code>처럼 내 컴퓨터의 경로를 적었는지 확인하세요.
+                웹에서 실행하는 게임은 그 경로로 개발자 PC의 파일을 읽을 수 없습니다.
+                <code>Assets/...</code>라는 프로젝트 경로를 적는 것만으로도 웹에서 파일을 불러올 수는 없습니다.
+              </p>
+              <p>
+                파일을 빌드에 포함하고, 웹에서 읽을 수 있는 방식으로 불러오도록 코드를 수정하세요.
+                원본 파일을 그대로 읽어야 한다면 <code>Assets/StreamingAssets</code>에 넣고
+                <code>Application.streamingAssetsPath</code>를 기준으로 주소를 만드세요.
+                빌드 결과의 <code>StreamingAssets</code> 폴더도 ZIP에 포함해야 합니다.
+                수정 후에는 다시 빌드·업로드하세요.
+              </p>
+              <pre><code class="language-csharp">// 잘못된 예: 개발자 PC나 프로젝트 폴더를 직접 가리킵니다.
+string wrongPath = "C:/Users/Me/Pictures/photo.png";
+
+// 수정 예: Assets/StreamingAssets/photo.png를 빌드에 포함합니다.
+string imageUrl = Application.streamingAssetsPath + "/photo.png";
+// 이 주소를 아래의 이미지 다운로드 코드에 사용하세요.</code></pre>
+              <p class="micro">참고: <a href="https://docs.unity.com/en-us/engine/6000.0/script-reference/unityengine/application/streamingassetspath" target="_blank" rel="noopener noreferrer">Unity 파일 경로 안내(영어) ↗</a></p>
+            </details>
+            <details>
+              <summary>사진을 File.ReadAllBytes로 읽었는데 Web 빌드에서는 안 보여요</summary>
+              <p>
+                Web 빌드의 <code>StreamingAssets</code> 경로는 웹 주소입니다.
+                <code>File.ReadAllBytes</code> 같은 파일 읽기 코드로 직접 접근할 수 없습니다.
+                PNG·JPG를 실행 중 불러오려면 <code>UnityWebRequestTexture.GetTexture</code>로 요청하고,
+                다운로드 완료와 성공 여부를 확인한 뒤 받은 텍스처를 화면에 적용하세요.
+              </p>
+              <p>
+                파일 주소와 실제 파일명의 대소문자도 확인하세요.
+                다운로드가 끝나기 전에 이미지를 사용하거나, 요청 실패를 확인하지 않으면 빈 화면만 보일 수 있습니다.
+              </p>
+              <p>
+                <code>WebImageLoader.cs</code>로 저장해 활성 게임 오브젝트에 붙이고,
+                Inspector의 Target에 UI의 <code>RawImage</code>를 연결하세요.
+                사진은 <code>Assets/StreamingAssets/photo.png</code>에 넣습니다.
+              </p>
+              <pre><code class="language-csharp">using System.Collections;
+using UnityEngine;
+using UnityEngine.Networking;
+using UnityEngine.UI;
+
+public class WebImageLoader : MonoBehaviour
+{
+    [SerializeField] private RawImage target;
+    private Texture2D loadedTexture;
+
+    private IEnumerator Start()
+    {
+        string url = Application.streamingAssetsPath + "/photo.png";
+        using (var request = UnityWebRequestTexture.GetTexture(url))
+        {
+            yield return request.SendWebRequest();
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogError(request.error);
+                yield break;
+            }
+
+            loadedTexture = DownloadHandlerTexture.GetContent(request);
+            target.texture = loadedTexture;
+        }
+    }
+
+    private void OnDestroy()
+    {
+        if (loadedTexture != null) Destroy(loadedTexture);
+    }
+}</code></pre>
+              <p class="micro">참고: <a href="https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Networking.UnityWebRequestTexture.GetTexture.html" target="_blank" rel="noopener noreferrer">Unity 이미지 다운로드 안내(영어) ↗</a></p>
+            </details>
+            <details>
+              <summary>VideoPlayer에 영상을 넣었는데 Web 빌드에서는 재생이 안 돼요</summary>
+              <p>
+                <code>VideoPlayer.clip</code>에 VideoClip을 넣어 재생하는 방식은 WebGL에서 지원되지 않습니다.
+                <code>VideoPlayer</code>의 Source를 <code>URL</code>로 바꾸고,
+                <code>videoPlayer.url</code>에 웹에서 접근할 수 있는 영상 주소를 지정하세요.
+              </p>
+              <p>
+                빌드에 포함할 영상은 <code>Assets/StreamingAssets</code>에 넣고,
+                <code>Application.streamingAssetsPath</code>를 기준으로 영상 주소를 만드세요.
+                내 컴퓨터의 절대 경로를 넣지 말고, 빌드 결과의 영상 파일까지 함께 압축해 업로드하세요.
+                URL을 수정해도 재생되지 않으면 브라우저가 지원하는 영상 형식인지도 확인하세요.
+              </p>
+              <p>
+                <code>WebVideoPlayer.cs</code>로 저장하고, Inspector의 Player에
+                <code>VideoPlayer</code>를 연결하세요. 영상은
+                <code>Assets/StreamingAssets/intro.mp4</code>에 넣습니다.
+                VideoPlayer의 Play On Awake를 끄고 화면 출력 대상도 설정한 뒤,
+                UI 버튼의 On Click에 아래 <code>PlayVideo()</code>를 연결하세요.
+              </p>
+              <pre><code class="language-csharp">using UnityEngine;
+using UnityEngine.Video;
+
+public class WebVideoPlayer : MonoBehaviour
+{
+    [SerializeField] private VideoPlayer player;
+
+    private void Awake()
+    {
+        player.playOnAwake = false;
+        player.source = VideoSource.Url;
+        player.url = Application.streamingAssetsPath + "/intro.mp4";
+    }
+
+    // 사용자가 재생 버튼을 눌렀을 때 호출합니다.
+    public void PlayVideo()
+    {
+        player.Play();
+    }
+}</code></pre>
+              <p class="micro">참고: <a href="https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Video.VideoPlayer-clip.html" target="_blank" rel="noopener noreferrer">Unity VideoClip의 WebGL 제한(영어) ↗</a></p>
+            </details>
+            <details>
+              <summary>게임이 멈춰요</summary>
+              <p>
+                코드나 사용 중인 플러그인에 <code>new Thread</code>, <code>ThreadPool</code>,
+                <code>Task.Run</code>, <code>Parallel.For</code>처럼 .NET 스레드로 작업을 실행하는 코드가 있는지 확인하세요.
+                이 가이드의 Unity 6·2022 LTS Web 빌드에서는 C# 멀티스레딩을 지원하지 않습니다.
+                네이티브 C/C++ 스레드 지원 옵션을 켜도 C# 스레드 코드를 그대로 사용할 수 있는 것은 아닙니다.
+              </p>
+              <p>
+                <code>task.Wait()</code>, <code>task.Result</code>, <code>Thread.Sleep</code>,
+                완료될 때까지 반복하는 <code>while</code>도 확인하세요.
+                메인 스레드에서 동기 대기하거나 오래 계산하면 화면 갱신이 멈출 수 있습니다.
+                <code>async</code>·<code>await</code> 자체가 멀티스레딩을 뜻하지는 않으므로,
+                비동기 코드를 전부 지우기보다 작업을 실행하고 기다리는 방식을 확인하세요.
+              </p>
+              <p>
+                오래 걸리는 반복 처리는 코루틴으로 나누고 <code>yield return null</code>로 다음 프레임에 이어서 실행하세요.
+                아래는 Unity 2022 LTS와 Unity 6에서 사용할 수 있는 구조 예시입니다.
+                주석 위치에 실제 처리 코드를 넣고, 프레임마다 처리할 개수는 작업량에 맞춰 조정하세요.
+              </p>
+              <pre><code class="language-csharp">using System.Collections;
+using UnityEngine;
+
+// MonoBehaviour 안에 작성합니다.
+// 시작할 때 StartCoroutine(ProcessInFrames());를 호출하세요.
+private IEnumerator ProcessInFrames()
+{
+    for (int i = 0; i &lt; 1000; i++)
+    {
+        // 여기에 한 항목을 처리하는 짧은 코드를 작성합니다.
+        if ((i + 1) % 10 == 0)
+            yield return null; // 다음 프레임까지 양보합니다.
+    }
+}</code></pre>
+              <p>
+                Unity 6에서는 <code>Awaitable.NextFrameAsync()</code>로 다음 프레임을 기다릴 수도 있습니다.
+                <code>Awaitable</code>은 Unity 2022 LTS에 없는 API이므로 버전에 맞는 예시를 사용하세요.
+              </p>
+              <pre><code class="language-csharp">using UnityEngine;
+
+// Unity 6의 MonoBehaviour 안에 작성합니다.
+// 다른 async 메서드에서 await ProcessInFramesAsync();로 호출하세요.
+private async Awaitable ProcessInFramesAsync()
+{
+    for (int i = 0; i &lt; 1000; i++)
+    {
+        // 여기에 한 항목을 처리하는 짧은 코드를 작성합니다.
+        if ((i + 1) % 10 == 0)
+            await Awaitable.NextFrameAsync();
+    }
+}</code></pre>
+              <p>
+                두 예시는 메인 스레드의 작업을 여러 프레임에 나누는 방식이며, 병렬로 계산하지 않습니다.
+                한 항목의 처리 자체가 길면 그 작업도 더 작게 나눠야 합니다.
+                <code>Awaitable.BackgroundThreadAsync()</code>는 백그라운드 스레드를 사용하므로 웹용 대안으로 쓰지 마세요.
+              </p>
+              <p>
+                다운로드는 <code>UnityWebRequest.SendWebRequest()</code>, 씬 로딩은
+                <code>SceneManager.LoadSceneAsync()</code>처럼 Unity가 제공하는 비동기 작업을 사용하고,
+                코루틴에서 <code>yield return</code>으로 완료를 기다리세요.
+                변경 후에는 실제 Web 빌드에서 멈췄던 구간을 다시 확인하세요.
+                스레드 코드가 없다면 브라우저 콘솔의 오류와 멈추기 직전 동작을 기록해 다른 원인도 확인하세요.
+              </p>
+              <p class="micro">참고:
+                <a href="https://docs.unity3d.com/kr/6000.0/Manual/webgl-technical-overview.html" target="_blank" rel="noopener noreferrer">Unity Web 기술 제약 ↗</a> ·
+                <a href="https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Awaitable.NextFrameAsync.html" target="_blank" rel="noopener noreferrer">Awaitable.NextFrameAsync(영어) ↗</a>
+              </p>
+            </details>
+            <details>
+              <summary>리듬 게임을 웹에 올리니 음악과 노트·판정이 어긋나요</summary>
+              <p>
+                음악 재생을 요청한 시점과 실제 재생 준비가 끝난 시점을 같은 것으로 처리하지 않았는지 확인하세요.
+                브라우저에서는 오디오 로딩·디코딩과 재생 허용 상태를 확인해야 합니다.
+                시작 후 몇 프레임을 기다리거나 일정 시간 뒤에 무조건 노트·판정을 시작하는 방식은
+                기기와 브라우저가 달라졌을 때 같은 출발점을 보장하지 않습니다.
+              </p>
+              <ul>
+                <li>
+                  <b>재생 준비:</b> 채보와 오디오의 로딩 완료·실패를 확인한 뒤 시작하세요.
+                  <code>AudioClip.loadState</code>와 실제 재생 상태를 확인하고,
+                  재생이 허용되지 않았거나 실패한 상태에서는 판정 시간만 진행하지 않도록 처리하세요.
+                </li>
+                <li>
+                  <b>하나의 시간 기준:</b> 음악은 <code>PlayScheduled</code>로 예약하고,
+                  노트·판정·이동도 같은 시작 시각을 기준으로 계산하세요.
+                  <code>PlayScheduled</code>는 WebGL에서 지원되지만, 호출했다는 사실만으로
+                  로딩 완료나 사용자가 듣는 소리와 판정의 일치까지 보장하지는 않습니다.
+                </li>
+                <li>
+                  <b>재개 처리:</b> 다른 탭으로 이동했다 돌아오거나 일시정지를 해제했을 때,
+                  음악과 판정을 함께 멈추고 같은 곡 위치에서 재개하도록 구현하세요.
+                  <code>Time.timeScale</code>만 바꾸는 것으로 오디오와 별도로 계산한 DSP 시간까지 관리되지는 않습니다.
+                  탭 복귀 후 곡 시간이 건너뛰어 노트가 한꺼번에 Miss 처리되지 않는지도 확인하세요.
+                </li>
+                <li>
+                  <b>출력·입력 지연:</b> 실제 Web 빌드에서 음악과 입력의 오차를 측정하고 보정값을 제공하세요.
+                  에디터에서 맞춘 값 하나를 모든 브라우저·오디오 장치에 그대로 적용하지 마세요.
+                  재생 중이라는 상태와 사용자의 귀에 소리가 도달한 시점도 구분해야 합니다.
+                </li>
+              </ul>
+              <p>
+                첫 시작, 재시도, 곡 변경, 일시정지·재개, 탭 전환을 각각 확인하세요.
+                일정한 오차와 플레이할수록 커지는 오차를 구분해 원인을 찾고,
+                판정 범위만 넓혀 시간 기준의 불일치를 덮지 마세요.
+              </p>
+              <p><b>좋지 않은 패턴 · 재생 요청과 동시에 별도 타이머 시작</b></p>
+              <pre><code class="language-csharp">using UnityEngine;
+
+public class UncheckedSongTimer : MonoBehaviour
+{
+    [SerializeField] private AudioSource music;
+    public float SongSeconds { get; private set; }
+
+    private void Start()
+    {
+        music.Play(); // 로딩·재생 가능 여부를 확인하지 않습니다.
+    }
+
+    private void Update()
+    {
+        // 음악이 재생되지 않아도 노트·판정 시간은 진행됩니다.
+        SongSeconds += Time.deltaTime;
+    }
+}</code></pre>
+              <p>
+                다음은 <code>ScheduledSongTimer.cs</code>로 저장하는 첫 재생용 예시입니다.
+                Music에 <code>AudioSource</code>를 연결하고 Play On Awake를 끄세요.
+                클립의 Preload Audio Data를 켜고, 채보와 오디오 로딩이 끝난 뒤 시작 버튼에서
+                <code>StartFromButton()</code>을 호출하세요. 준비되지 않은 경우에는 시작을 거절합니다.
+              </p>
+              <p><b>권장 패턴 · 준비 상태 확인 후 하나의 예약 시작 시각 사용</b></p>
+              <pre><code class="language-csharp">using System;
+using UnityEngine;
+
+public class ScheduledSongTimer : MonoBehaviour
+{
+    [SerializeField] private AudioSource music;
+    private double scheduledStart;
+    private bool hasSchedule;
+
+    public void StartFromButton()
+    {
+        if (hasSchedule) return;
+        if (music == null || music.clip == null ||
+            music.clip.loadState != AudioDataLoadState.Loaded)
+        {
+            Debug.LogWarning("음악이 준비되지 않았습니다. 로딩 후 다시 시작하세요.");
+            return;
+        }
+
+        music.Stop();
+        music.playOnAwake = false;
+        music.loop = false;
+        music.pitch = 1f;
+        music.time = 0f;
+        scheduledStart = AudioSettings.dspTime + 0.25d;
+        music.PlayScheduled(scheduledStart);
+        hasSchedule = true;
+    }
+
+    public bool TryGetSongTime(out double seconds)
+    {
+        seconds = 0d;
+        if (!hasSchedule || AudioSettings.dspTime &lt; scheduledStart)
+            return false; // 예약 시작 전에는 판정하지 않습니다.
+
+        if (!music.isPlaying)
+        {
+            CancelSong(); // 재생 중이 아니면 판정도 진행하지 않습니다.
+            return false;
+        }
+
+        seconds = Math.Max(0d, AudioSettings.dspTime - scheduledStart);
+        return true;
+    }
+
+    public void CancelSong()
+    {
+        hasSchedule = false;
+        if (music != null) music.Stop();
+    }
+
+    private void OnDisable() =&gt; CancelSong();
+}</code></pre>
+              <p>
+                노트 배치·이동·판정은 모두 <code>TryGetSongTime</code>이 반환한 같은 곡 시간을 사용하고,
+                반환값이 <code>false</code>면 진행하지 않도록 연결하세요.
+                <code>0.25</code>초는 예약 준비를 위한 예시 여유 시간이며, 로딩 대기 시간이나 지연 보정값이 아닙니다.
+                이 예시는 첫 시작만 다룹니다. 일시정지·탭 복귀 시 재동기화와 출력·입력 지연 보정은 별도로 구현해야 합니다.
+                <code>isPlaying</code>만으로 실제 소리가 출력됐는지까지 확인할 수는 없습니다.
+              </p>
+              <p class="micro">참고:
+                <a href="https://docs.unity3d.com/kr/2022.3/Manual/webgl-audio.html" target="_blank" rel="noopener noreferrer">Unity WebGL 오디오 지원 범위 ↗</a> ·
+                <a href="https://docs.unity3d.com/kr/2022.3/ScriptReference/AudioSettings-dspTime.html" target="_blank" rel="noopener noreferrer">DSP 시간 기준 ↗</a>
+              </p>
+            </details>
+            <details>
+              <summary>JSON파일이 파싱이 안돼요</summary>
+              <p>
+                먼저 파일을 읽지 못한 것인지, 읽은 문자열을 데이터로 변환하지 못한 것인지 구분하세요.
+                Web 빌드에서 <code>StreamingAssets</code>는 웹 주소이므로
+                <code>File.ReadAllText</code>로 읽을 수 없습니다.
+                고정 JSON은 <code>TextAsset</code>으로 포함하거나,
+                <code>UnityWebRequest</code>로 다운로드를 완료한 뒤 파싱하세요.
+                서버에서 받은 값이 JSON 대신 오류 페이지나 로그인 화면의 HTML은 아닌지도 확인하세요.
+              </p>
+              <p>
+                문자열을 정상적으로 읽었다면 따옴표·쉼표·괄호와 필드 이름·자료형을 확인하세요.
+                <code>JsonUtility</code>를 사용한다면 데이터 클래스에 <code>[Serializable]</code>을 붙이고
+                직렬화할 필드를 선언해야 합니다. 일반 프로퍼티와 <code>Dictionary</code>는 지원하지 않으며,
+                최상위 배열은 객체로 감싸야 합니다. 파싱 중 예외가 없더라도 필수 데이터가 채워졌는지 검증하세요.
+              </p>
+              <p><b>좋지 않은 패턴 · 웹 주소를 로컬 파일 경로로 읽기</b></p>
+              <pre><code class="language-csharp">using System.IO;
+using UnityEngine;
+
+public class LocalJsonReader : MonoBehaviour
+{
+    private void Start()
+    {
+        string path = Path.Combine(Application.streamingAssetsPath, "data.json");
+        // Web에서는 path가 URL이므로 이 방식으로 읽을 수 없습니다.
+        string json = File.ReadAllText(path);
+        Debug.Log(json);
+    }
+}</code></pre>
+              <p>
+                다음은 고정 JSON을 읽는 <code>EmbeddedJsonReader.cs</code> 예시입니다.
+                Json File에 JSON 파일을 연결하세요.
+                예시 형식은 <code>{"items":[{"id":"item-1","title":"예시 항목"}]}</code>입니다.
+                최상위 객체의 <code>items</code> 필드 안에 배열을 넣습니다.
+              </p>
+              <p><b>권장 패턴 · 빌드에 포함한 TextAsset을 파싱하고 검증</b></p>
+              <pre><code class="language-csharp">using System;
+using UnityEngine;
+
+public class EmbeddedJsonReader : MonoBehaviour
+{
+    [Serializable]
+    public class Item
+    {
+        public string id;
+        public string title;
+    }
+
+    [Serializable]
+    public class Document
+    {
+        public Item[] items;
+    }
+
+    [SerializeField] private TextAsset jsonFile;
+    public Document Data { get; private set; }
+    public bool IsReady =&gt; Data != null;
+
+    private void Awake()
+    {
+        try
+        {
+            if (jsonFile == null || string.IsNullOrWhiteSpace(jsonFile.text))
+                throw new InvalidOperationException("내용이 있는 JSON 파일을 연결하세요.");
+
+            Document parsed = JsonUtility.FromJson&lt;Document&gt;(jsonFile.text);
+            if (parsed == null || parsed.items == null)
+                throw new FormatException("items 배열이 필요합니다.");
+
+            foreach (Item item in parsed.items)
+            {
+                if (item == null || string.IsNullOrWhiteSpace(item.id))
+                    throw new FormatException("각 항목에는 id가 필요합니다.");
+            }
+
+            Data = parsed; // 필수 데이터 검증까지 성공한 경우에만 사용합니다.
+        }
+        catch (Exception error)
+        {
+            Data = null;
+            Debug.LogError("JSON 로딩·파싱 실패: " + error.Message, this);
+        }
+    }
+}</code></pre>
+              <p>
+                이 예시에서는 빈 <code>items</code> 배열도 정상 데이터로 허용합니다.
+                항목 수·숫자 범위·중복 ID 등 추가 조건은 실제 데이터 규칙에 맞춰 검증하세요.
+                데이터를 사용하는 쪽에서는 <code>IsReady</code>를 확인하고, 실패 시 오류를 화면에도 표시하세요.
+                외부 JSON도 다운로드 성공을 확인한 뒤 같은 파싱·검증 절차를 적용하면 됩니다.
+              </p>
+              <p class="micro">참고:
+                <a href="https://docs.unity3d.com/kr/current/Manual/json-serialization.html" target="_blank" rel="noopener noreferrer">Unity JSON 직렬화 ↗</a> ·
+                <a href="https://docs.unity3d.com/kr/2022.3/Manual/StreamingAssets.html" target="_blank" rel="noopener noreferrer">Unity StreamingAssets의 Web 접근 방법 ↗</a>
+              </p>
+            </details>
+            <details>
+              <summary>키보드는 되는데 전용 컨트롤러가 웹에서 안 먹어요</summary>
+              <p>
+                장치 이름에 특정 문자열이 들어간 경우만 입력을 받거나,
+                PC에서 쓰던 장치 레이아웃·버튼 번호를 그대로 가정하는지 확인하세요.
+                브라우저의 Gamepad API는 운영체제의 입력 장치를 그대로 노출하지 않으며,
+                장치 식별 문자열의 형식과 지원 여부도 브라우저·운영체제에 따라 달라집니다.
+                연결된 장치가 코드의 이름 검사에서 제외되면 버튼을 눌러도 판정에 전달되지 않습니다.
+              </p>
+              <p>
+                실제 Web 빌드에서 감지된 장치와 각 버튼 입력을 먼저 표시해 확인하세요.
+                특정 이름만 허용하기보다 입력 액션과 사용자 재설정으로 연결하고,
+                표준 매핑이 없는 장치에는 별도 매핑이나 키보드 대체 조작을 제공하세요.
+                게임 화면에 포커스를 둔 상태에서 컨트롤러 버튼을 누른 뒤 감지되는지도 확인해야 합니다.
+                PC에서 인식됐다는 사실만으로 웹에서도 지원된다고 판단하지 마세요.
+              </p>
+              <p><b>좋지 않은 패턴 · PC에서 확인한 장치 이름만 허용</b></p>
+              <pre><code class="language-csharp">using UnityEngine;
+using UnityEngine.InputSystem;
+
+public class NamedPadOnly : MonoBehaviour
+{
+    private void Update()
+    {
+        var pad = Gamepad.current;
+        if (pad == null || pad.displayName != "My Rhythm Controller")
+            return; // 다른 이름으로 노출되면 입력을 전부 버립니다.
+
+        if (pad.buttonSouth.wasPressedThisFrame)
+            Debug.Log("판정 입력");
+    }
+}</code></pre>
+              <p>
+                다음은 Input System 패키지를 사용하는 <code>ActionBasedHitInput.cs</code> 예시입니다.
+                Active Input Handling에서 Input System을 활성화하고, On Hit에 게임의 판정 함수를 연결하세요.
+                장치 이름 대신 표준 게임패드 버튼과 키보드를 같은 액션에 연결합니다.
+              </p>
+              <p><b>권장 패턴 · 이름 검사 없이 입력 액션과 대체 조작 제공</b></p>
+              <pre><code class="language-csharp">using UnityEngine;
+using UnityEngine.Events;
+using UnityEngine.InputSystem;
+
+public class ActionBasedHitInput : MonoBehaviour
+{
+    [SerializeField] private UnityEvent onHit = new UnityEvent();
+    private InputAction hit;
+
+    private void Awake()
+    {
+        hit = new InputAction("Hit", InputActionType.Button);
+        hit.AddBinding("&lt;Keyboard&gt;/space");
+        hit.AddBinding("&lt;Gamepad&gt;/buttonSouth");
+    }
+
+    private void OnEnable() =&gt; hit.Enable();
+    private void OnDisable() =&gt; hit.Disable();
+    private void OnDestroy() =&gt; hit.Dispose();
+
+    private void Update()
+    {
+        if (hit.WasPressedThisFrame())
+            onHit.Invoke();
+    }
+}</code></pre>
+              <p>
+                이 예시의 <code>buttonSouth</code>는 표준 매핑 게임패드용이며, 모든 전용 컨트롤러를 지원한다는 뜻은 아닙니다.
+                브라우저에서 장치가 어떤 레이아웃·컨트롤로 감지되는지 확인한 뒤 필요한 바인딩과 사용자 재설정을 추가하세요.
+                브라우저가 노출하지 않는 장치는 바인딩을 바꾸는 것만으로 사용할 수 없습니다.
+                판정 함수에서도 게임 시작·일시정지 상태를 확인하세요.
+                이 예시는 입력 연결용이며 정밀한 리듬 판정의 입력 시각 보정까지 다루지는 않습니다.
+              </p>
+              <p class="micro">참고:
+                <a href="https://docs.unity3d.com/Packages/com.unity.inputsystem@1.11/manual/SupportedDevices.html" target="_blank" rel="noopener noreferrer">Unity Input System 장치 지원 범위(영어) ↗</a> ·
+                <a href="https://developer.mozilla.org/en-US/docs/Web/API/Gamepad/id" target="_blank" rel="noopener noreferrer">브라우저의 장치 식별 문자열(영어) ↗</a>
+              </p>
+            </details>
+            <details>
+              <summary>웹을 따로 지원하기 귀찮아요</summary>
+              <p>
+                프로젝트를 따로 만들기보다, 플랫폼마다 달라야 하는 코드만
+                <code>#if</code>·<code>#else</code>·<code>#endif</code> 전처리기로 나눠보세요.
+                Unity가 제공하는 <code>UNITY_WEBGL</code> 심볼로 Web 빌드에 포함할 코드를 선택할 수 있습니다.
+              </p>
+              <p>아래는 메서드 안에서 코드를 나누는 구조 예시입니다. 주석 위치에 각 플랫폼에서 사용할 코드를 작성하세요.</p>
+              <pre><code class="language-csharp">#if UNITY_WEBGL &amp;&amp; !UNITY_EDITOR
+    // 실제 Web 빌드: 웹에서 지원하는 방식으로 파일·영상을 불러옵니다.
+#else
+    // 에디터 및 다른 플랫폼: 기존에 사용하던 코드를 실행합니다.
+#endif</code></pre>
+              <p>
+                <code>!UNITY_EDITOR</code>는 에디터 실행을 제외하는 조건입니다.
+                Web을 빌드 대상으로 선택한 에디터에서도 웹용 분기를 사용하려면
+                <code>#if UNITY_WEBGL</code>만 쓰세요. 실제 브라우저에서의 동작은 빌드·업로드 후 확인해야 합니다.
+              </p>
+              <p>
+                전처리기는 조건에 맞는 코드만 컴파일에 포함합니다. 지원되지 않는 기능을 자동으로 바꿔주지는 않습니다.
+                웹에서 사용할 수 없는 API·플러그인의 호출이나 <code>using</code> 선언도 필요한 범위에서 함께 분리하고,
+                웹용 분기에는 대체 코드를 작성하거나 해당 기능을 생략하세요.
+              </p>
+              <p class="micro">참고: <a href="https://docs.unity3d.com/kr/2022.3/Manual/PlatformDependentCompilation.html" target="_blank" rel="noopener noreferrer">Unity 조건부 컴파일 안내 ↗</a></p>
+            </details>
+          </section>
 <div class="zone-heading" id="required">
             <span class="eyebrow">SET UP → BUILD → TEST</span>
             <h2>Unity 설정부터 업로드·성능 확인까지</h2>
@@ -132,7 +641,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Web Build Support 설치
-                  <a class="source" href="https://learn.unity.com/tutorial/publish-on-unity-play" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://learn.unity.com/tutorial/publish-on-unity-play" target="_blank" rel="noopener">출처(영어) ↗</a>
                 </figcaption>
               </figure>
               </div>
@@ -160,7 +669,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Build Profiles → Scene List
-                  <a class="source" href="https://learn.unity.com/tutorial/publish-on-unity-play" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://learn.unity.com/tutorial/publish-on-unity-play" target="_blank" rel="noopener">출처(영어) ↗</a>
                 </figcaption>
               </figure>
               </div>
@@ -175,7 +684,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Scenes In Build · 시작 씬은 0번
-                  <a class="source" href="https://docs.unity3d.com/2022.3/Documentation/Manual/webgl-building.html" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/2022.3/Manual/webgl-building.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
               </div>
@@ -203,7 +712,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Web Settings
-                  <a class="source" href="https://learn.unity.com/tutorial/getting-started-with-unity-web" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://learn.unity.com/tutorial/getting-started-with-unity-web" target="_blank" rel="noopener">출처(영어) ↗</a>
                 </figcaption>
               </figure>
               </div>
@@ -218,7 +727,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Build Settings
-                  <a class="source" href="https://docs.unity3d.com/2022.3/Documentation/Manual/webgl-building.html" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/2022.3/Manual/webgl-building.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
               </div>
@@ -302,7 +811,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Player → Other Settings → Rendering
-                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-texture-compression.html" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/6000.0/Manual/webgl-texture-compression.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
               <details>
@@ -317,7 +826,7 @@
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>Quality · 품질 단계 이름은 프로젝트마다 다릅니다.
-                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-QualitySettings.html" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/6000.0/Manual/class-QualitySettings.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
                 <p class="micro">Web에 사용할 품질 단계의 Render Pipeline Asset을 선택하세요. 없으면 Graphics의 기본 에셋을 확인합니다. Built-in 프로젝트는 Quality의 설정을 사용합니다.</p>
@@ -328,7 +837,7 @@
                   <li>HDR·Opaque Texture는 필요한 효과가 없을 때만 끕니다.</li>
                 </ul>
                 <p class="micro">한 번에 하나씩 바꾸고 같은 장면에서 비교하세요. 효과가 없거나 표현이 깨지면 되돌립니다.
-                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/urp/configure-for-better-performance.html" target="_blank" rel="noopener">URP 성능 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/6000.0/Manual/urp/configure-for-better-performance.html" target="_blank" rel="noopener">URP 성능 ↗</a>
                 </p>
               </details>
               <div class="step-done">
@@ -346,7 +855,7 @@
               <ol class="steps">
                 <li><span data-version-content="6">Build Profiles의 활성 Web 프로필에서</span><span data-version-content="2022">Build Settings의 WebGL에서</span> <b>Build</b>를 누릅니다.</li>
                 <li><b>새 빈 폴더</b>를 만들어 저장 위치로 선택합니다. 예: <code>MyGame-Web-01</code>.</li>
-                <li>완료 후 결과 폴더의 <b>index.html과 Build 폴더</b>를 확인합니다. 중단되면 <a href="#help-build">빌드 도움말</a>로 이동하세요.</li>
+                <li>완료 후 결과 폴더의 <b>index.html과 Build 폴더</b>를 확인합니다. 중단되면 <a href="#help">빌드 도움말</a>로 이동하세요.</li>
               </ol>
               <p class="micro">다음 단계에서는 Assets·Packages가 있는 프로젝트 원본이 아닌 <b>빌드 결과물</b>을 압축합니다. index.html을 더블클릭하지 말고 업로드 후 실행을 확인하세요.</p>
               <div class="step-done">
@@ -410,7 +919,7 @@ MyGame-Web-01.zip
               <h2>업로드본 실행·기능 확인</h2>
               <ol class="steps">
                 <li>로그인 → <b>전시 목록</b> → 제출한 전시회 → 내 작품을 엽니다.</li>
-                <li><b>플레이해보기</b>를 누르고 로딩을 기다립니다. 버튼이 없거나 실행이 멈추면 <a href="#help-load">실행 도움말</a>로 이동하세요.</li>
+                <li><b>플레이해보기</b>를 누르고 로딩을 기다립니다. 버튼이 없거나 실행이 멈추면 <a href="#help">실행 도움말</a>로 이동하세요.</li>
                 <li><b>이번 업로드본</b>에서 게임 시작·주요 조작·장면 전환을 확인합니다. 실제 플레이 구간까지 진행하세요.</li>
                 <li>ZIP 파일명·실행 주소를 기록합니다. 멈추면 화면과 직전 행동을 함께 적으세요.</li>
                 <li>수정했다면 <a href="#build">새로 빌드 → ZIP → 업로드 → 실행 확인</a>을 반복합니다.</li>
@@ -442,7 +951,7 @@ MyGame-Web-01.zip
                   <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
                 <figcaption>진단 표시 순서
-                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html" target="_blank" rel="noopener">출처 ↗</a>
+                  <a class="source" href="https://docs.unity3d.com/kr/6000.0/Manual/class-PlayerSettingsWebGL.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
               <p class="micro">측정은 선택 사항이며 공통 FPS 합격선은 없습니다. 커스텀 템플릿에는 진단 버튼이 없을 수 있습니다.</p>
@@ -450,181 +959,8 @@ MyGame-Web-01.zip
               <div class="step-done">
                 <b>한줄요약</b>
                 <p>FPS·메모리와 끊기는 구간을 같은 조건에서 비교합니다.</p>
-                <a href="#performance-help">다음: 성능 분석·개선 →</a>
               </div>
 </section>
-<section class="step reference-step" id="performance-help">
-            <div class="step-top">
-              <span class="step-no">11</span>
-              <span class="category">실행·성능 확인</span>
-            </div>
-            <h2>초기 로딩·플레이 성능·메모리 구분</h2>
-            <details>
-              <summary>처음 게임이 뜨기까지 오래 걸려요</summary>
-              <p>
-                기본 경로의 Brotli + Fallback OFF로 빌드하고, 초기 씬에 넣은
-                에셋의 크기를 줄여 비교합니다. Disk Size with LTO도 비교
-                후보입니다. 플레이 중 FPS와 별도로 시간을 기록하세요.
-              </p>
-            </details>
-            <details>
-              <summary>로딩은 끝났는데 게임이 버벅거려요</summary>
-              <p>
-                릴리스 빌드인지 확인하고, 같은 장면에서 Render
-                Scale·그림자·MSAA를 하나씩 낮춰 비교합니다. 효과가 없다면
-                Profiler로 CPU 처리를 확인합니다. Brotli로 바꾸는 것만으로
-                해결될 종류의 문제는 아닐 수 있습니다.
-              </p>
-            </details>
-            <details>
-              <summary>30 FPS 근처에 일정하게 머물러요</summary>
-              <p>
-                개발자가 설정한 목표 FPS, 브라우저·디스플레이의 프레임 동작도
-                확인해야 합니다. 일정한 제한인지, 처리 시간이 길어 목표를 못
-                맞추는지 구분한 후 최적화하세요.
-              </p>
-            </details>
-            <details>
-              <summary>압축 파일 파싱 오류 또는 검은 화면이 나와요</summary>
-              <p>
-                실제 실행 페이지의 오류 메시지와 선택한 압축 조합을 기록하세요.
-                기본 설정의 조합으로 만든 빌드에서 반복된다면 실행 주소·Unity
-                버전·오류 화면을 카카오톡 <code>Bipolar_</code>로
-                전달하세요. 원인 비교가 필요할 때만 Disabled로 한 번 더 빌드할
-                수 있습니다. 파일 이름을 바꾸거나 생성된 JavaScript를 편집하는
-                방식으로 해결하지 마세요.
-              </p>
-            </details>
-            <details>
-              <summary>메모리를 최대치로 키우면 빨라지나요?</summary>
-              <p>
-                아닙니다. 메모리 사용량을 측정하고 필요한 만큼 조정합니다.
-                텍스처와 초기 에셋 규모부터 살피세요. 허용 최대치를 늘리는 것과
-                실제 사용량을 줄이는 것은 다릅니다.
-              </p>
-            </details>
-          <div class="step-done"><b>한줄요약</b><p>로딩·플레이·메모리 중 병목을 구분했습니다. 설정을 바꿨다면 다시 빌드·업로드해 같은 조건으로 비교하세요.</p></div>
-</section>
-
-<div class="zone-heading" id="help-zone"><h2>트러블슈팅</h2><p>빌드·업로드·실행 중 문제가 생겼다면 해당 증상부터 확인하세요.</p></div>
-<section class="step" id="help">
-            <div class="step-top">
-              <span class="step-no">?</span>
-              <span class="category">트러블슈팅</span>
-            </div>
-            <h2>문제 발생 단계별 도움말</h2>
-            <details id="help-build">
-              <summary>Unity에서 빌드가 완료되지 않습니다</summary>
-              <p>
-                <b>먼저 확인:</b>
-                Web/WebGL 플랫폼과 설치 모듈을 확인하고, Unity Console에 오류가
-                보이면 그 문구를 캡처하세요. 빌드가 끝나지 않은 결과물은
-                압축·업로드하지 마세요.
-              </p>
-              <p>
-                <b>계속 안 되면:</b>
-                Unity 버전, 오류 화면, Build를 누르기 전후의 행동을
-                <a href="#request-info">문의 정보</a>와 함께 정리해 카카오톡 <code>Bipolar_</code>로
-                문의하세요.
-              </p>
-            </details>
-            <details id="help-upload">
-              <summary>ZIP 업로드가 거절되거나 완료되지 않습니다</summary>
-              <p>
-                <b>먼저 확인:</b>
-                7단계의 전체 결과물 ZIP인지, 기타 파일에서 WebGL로 골랐는지
-                확인하세요. 화면에 표시된 파일 제한·입력 오류·전시회 잠금 안내를
-                읽습니다. 업로드가 끊겨 같은 원본 파일을 다시 고르라는 안내가
-                나오면 바로 그 ZIP을 선택하세요.
-              </p>
-              <p>
-                <b>계속 안 되면:</b>
-                ZIP 파일명·크기, 막힌 화면, 표시된 오류와 직전 행동을 정리해
-                카카오톡 <code>Bipolar_</code>로 문의하세요.
-                전시회가 없거나 잠긴 경우에도 같은 경로로 문의하세요.
-                <a href="#request-info">기록할 정보와 문의 경로</a>를 확인하세요. 실행 주소는 아직 없으면 쓰지 않아도 됩니다.
-              </p>
-            </details>
-            <details id="help-load">
-              <summary>
-                업로드는 됐지만 로딩이 멈추거나 검은 화면이 나옵니다
-              </summary>
-              <p>
-                <b>먼저 확인:</b>
-                이번 업로드의 처리가 완료됐는지 확인하고 작품의 플레이해보기로
-                다시 엽니다. 브라우저를 최신 상태로 사용하고, 그래픽 가속 안내가
-                나오면 그 안내를 따르세요. 생성된 파일을 직접 고치지 마세요.
-              </p>
-              <p>
-                <b>계속 안 되면:</b>
-                카카오톡 <code>Bipolar_</code>로 작품명, 실행
-                주소가 있다면 그 주소, 브라우저 이름·버전, 오류 문구 또는 멈춘
-                화면을 전달합니다. 실행 버튼이 없는 경우에는 그 작품 화면을
-                기록합니다. 원인을 추측하지 않고
-                <a href="#request-info">진행한 순서</a>를 알려주세요.
-              </p>
-            </details>
-            <details id="help-action">
-              <summary>
-                게임 화면은 나오지만 시작 버튼 이후 또는 특정 행동에서 멈춥니다
-              </summary>
-              <p>
-                <b>먼저 확인:</b>
-                어떤 버튼·조작 뒤 멈추는지 다시 확인하고 순서대로 적습니다. 씬
-                전환에서 멈췄다면 필요한 씬이 2단계의 목록에 체크되어 있는지
-                확인하세요.
-              </p>
-              <p>
-                <b>계속 안 되면:</b>
-                멈춘 화면과 재현 순서를
-                <a href="#request-info">문의 정보</a>에 포함해 카카오톡 <code>Bipolar_</code>로
-                문의하세요. 코드·서버 문제를 미리 판정할 필요는 없습니다.
-              </p>
-            </details>
-            <details id="help-slow">
-              <summary>게임은 실행되지만 느리거나 끊깁니다</summary>
-              <p>
-                <b>먼저 확인:</b>
-                Development Build가 꺼진 이번 업로드본인지, 브라우저 그래픽 가속
-                안내가 있는지 확인합니다. 느려지는 장면과 그때의 조작을
-                기록하세요.
-              </p>
-              <p>
-                <b>계속 안 되면:</b>
-                브라우저·사용 기기, 느려지는 장면, 재현 순서를
-                <a href="#request-info">문의 정보</a>와 함께 카카오톡 <code>Bipolar_</code>로
-                전달하세요. 직접 개선하려면
-                <a href="#measure">FPS·메모리 참고</a>와
-                <a href="#graphics">그래픽 참고</a>를 읽습니다. 측정부터 마쳐야 문의할 수 있는 것은 아닙니다.
-              </p>
-            </details>
-            <div class="callout" id="request-info">
-              <strong>문의할 때 전달할 내용</strong>
-              <ul>
-                <li>막힌 단계와 작품명</li>
-                <li>
-                  Unity 버전, 브라우저 이름·버전(브라우저 실행 전이면 ‘아직 실행
-                  전’)
-                </li>
-                <li>
-                  실행 주소가 생성됐다면 그 주소. 빌드·업로드 단계에서 주소가
-                  없으면 생략
-                </li>
-                <li>
-                  오류 문구가 있으면 문구가 보이는 화면, 문구 없이 멈추면 멈춘
-                  화면
-                </li>
-                <li>멈추기 직전에 한 행동과 다시 재현하는 순서</li>
-              </ul>
-              <p>
-                <b>문의 경로:</b>
-                <b>카카오톡 ID <code>Bipolar_</code></b
-                >로 문의하세요. 카카오톡 ID 검색에서 <code>Bipolar_</code>를 찾아 연락하세요. 위의 문의
-                정보를 함께 보내주세요. 서버 설정이나 HTTP 헤더를 조사할 필요는
-                없습니다.
-              </p>
-            </div>
-          </section>
           <footer>
             <p>화면 이미지 출처: Unity 공식 문서·Unity Learn. © Unity Technologies.</p>
             <a href="https://github.com/pcugame/pcugame.github.io-infra" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
