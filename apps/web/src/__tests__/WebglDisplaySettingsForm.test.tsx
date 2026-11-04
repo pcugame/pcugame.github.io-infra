@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import './helpers/dialog';
+import { useState } from 'react';
+import { WebglSettingsDialog } from '../features/admin/projects/WebglSettingsDialog';
 import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { AdminProjectDetail, WebglDisplaySettings } from '@pcu/contracts';
@@ -185,6 +188,43 @@ describe('WebglDisplaySettingsForm', () => {
     setup({ canEditWebglDisplay: false, isModificationEnabled: false });
     expect(await screen.findByText(/자동 감지: 960 × 642/)).toBeTruthy();
     expect(save().disabled).toBe(true);
+  });
+
+  it('keeps popup drafts and errors, restores focus, and prevents closing during save', async () => {
+    let complete!: (value: WebglDisplaySettings) => void;
+    setWebglDisplay.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    function Popup() {
+      const [open, setOpen] = useState(false);
+      const [busy, setBusy] = useState(false);
+      return <><button onClick={() => setOpen(true)}>웹 빌드 설정</button>
+        <WebglSettingsDialog open={open} busy={busy} onClose={() => setOpen(false)}>
+          <WebglDisplaySettingsForm project={project} isPending={busy} onPendingChange={setBusy} expanded />
+        </WebglSettingsDialog></>;
+    }
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={qc}><Popup /></QueryClientProvider>);
+    const trigger = screen.getByRole('button', { name: /^웹 빌드 설정$/ });
+    trigger.focus(); fireEvent.click(trigger);
+    let dialog = screen.getByRole('dialog', { name: '웹 빌드 설정' });
+    expect(document.activeElement?.tagName).toBe('H2');
+    fireEvent.change(width(), { target: { value: '0' } }); submit();
+    expect(screen.getByRole('alert').textContent).toContain('1~8192');
+    fireEvent.click(screen.getByRole('button', { name: '웹 빌드 설정 닫기' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    fireEvent.click(trigger);
+    dialog = screen.getByRole('dialog', { name: '웹 빌드 설정' });
+    expect(width().value).toBe('0');
+    expect(screen.getByRole('alert').textContent).toContain('1~8192');
+    fireEvent.change(width(), { target: { value: '1024' } }); submit();
+    expect((screen.getByRole('button', { name: '웹 빌드 설정 닫기' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent(dialog, new Event('cancel', { bubbles: false, cancelable: true }));
+    expect(dialog.hasAttribute('open')).toBe(true);
+    await act(async () => complete({ webglDisplayMode: 'manual', webglDisplayWidth: 1024, webglDisplayHeight: 600 }));
+    await waitFor(() => expect(screen.getByText('표시 크기가 저장되었습니다.')).toBeTruthy());
+    fireEvent(dialog, new Event('cancel', { bubbles: false, cancelable: true }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 
 });

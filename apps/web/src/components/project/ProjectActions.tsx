@@ -6,6 +6,7 @@ interface ProjectActionsProps {
 	webglUrl?: string;
 	webglPlayUrl?: string;
 	className?: string;
+	pending?: { game?: string; webgl?: string };
 }
 
 export function ProjectActions({
@@ -14,8 +15,9 @@ export function ProjectActions({
 	webglUrl,
 	webglPlayUrl,
 	className = '',
+	pending,
 }: ProjectActionsProps) {
-	if (!gameDownloadUrl && !webglUrl && !webglPlayUrl) return null;
+	if (!gameDownloadUrl && !webglUrl && !webglPlayUrl && !pending?.game && !pending?.webgl) return null;
 	return (
 		<div className={`project-actions ${className}`.trim()}>
 			{gameDownloadUrl && (
@@ -33,6 +35,8 @@ export function ProjectActions({
 					플레이해보기
 				</Link>
 			)}
+			{pending?.game && <button type="button" className="btn btn--primary" disabled title={`${pending.game} — 업로드 후 다운로드할 수 있습니다.`}>게임 다운로드 (ZIP)</button>}
+			{pending?.webgl && <button type="button" className="btn btn--secondary" disabled title={`${pending.webgl} — 업로드 후 실행할 수 있습니다.`}>플레이해보기</button>}
 		</div>
 	);
 }

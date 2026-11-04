@@ -1,8 +1,6 @@
 import { AwardSettings } from '../../features/admin/awards/AwardSettings';
-import { AdminVideoRetryPanel } from '../../features/admin/projects/AdminVideoRetryPanel';
 import { publicationReadiness } from '@pcu/contracts';
 import { StudioPreview } from '../../features/project-submission/studio/StudioPreview';
-import { ProjectUploadDialog } from '../../components/common/ProjectUploadDialog';
 import { usePreventWindowClose } from '../../components/common/usePreventWindowClose';
 import { effectiveExternalLinks } from '../../components/project/externalLinks';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -15,14 +13,14 @@ import { UpdateProjectFormSchema, type UpdateProjectFormInput } from '../../cont
 import { LoadingSpinner, ErrorMessage } from '../../components/common';
 import {
 	AdminProjectAssetManager,
-	AdminProjectUploadProgress,
-	AdminProjectPosterUpload,
 	AdminProjectUploadProvider,
 	useAdminProjectUploadQueue,
 } from '../../features/admin/projects/AdminProjectAssetManager';
 import { ProjectEditStudio } from '../../components/project/editor/ProjectEditStudio';
 import { ProjectPreviewPanel, type PreviewMediaItem } from '../../components/project/ProjectPreviewModal';
 import { AdminProjectBasicInfoForm } from '../../features/admin/projects/AdminProjectBasicInfoForm';
+import { Button } from '../../components/ui';
+import { WebglSettingsDialog } from '../../features/admin/projects/WebglSettingsDialog';
 import { WebglDisplaySettingsForm } from '../../features/admin/projects/WebglDisplaySettingsForm';
 import { AdminProjectMemberEditor } from '../../features/admin/projects/AdminProjectMemberEditor';
 import { PublicationFeedback } from '../../components/project/PublicationFeedback';
@@ -81,10 +79,9 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 	const members = useProjectMemberDraft(id, project.members);
 	const [baselineStatus, setBaselineStatus] = useState(project.status);
 	const [isApplying, setIsApplying] = useState(false);
-	const [showUploadDialog, setShowUploadDialog] = useState(false);
 	const [isSavingDisplay, setIsSavingDisplay] = useState(false);
+	const [showWebglSettings, setShowWebglSettings] = useState(false);
 	const applyingRef = useRef(false);
-	const cancelAllRequested = useRef(false);
 	const [applyError, setApplyError] = useState<unknown>(null);
 	const [partialFailure, setPartialFailure] = useState(false);
 	const [isSuccess, setIsSuccess] = useState(false);
@@ -104,7 +101,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
  const needsPublication = wantsPublic && project.publicationStatus !== 'PUBLIC';
  const hasChanges = form.formState.isDirty || members.hasChanges || queue.hasChanges || needsPublication;
 	const validChanges = UpdateProjectFormSchema.safeParse(values).success && members.validationErrors.length === 0 && !queue.validationError;
-	const pending = isApplying || queue.isApplying || isSavingDisplay;
+	const pending = isApplying || queue.isApplying || !!queue.active || isSavingDisplay;
 	usePreventWindowClose(pending);
 	const formId = `project-edit-${id}`;
 	useEffect(() => {
@@ -127,8 +124,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 			setApplyError(new Error(message));
 			return;
 		}
-		setShowUploadDialog(true);
-		cancelAllRequested.current = false;
+		if (queue.entries.some(entry => entry.status !== 'done' && entry.status !== 'removed')) setStep(2);
 		applyingRef.current = true;
 		setIsApplying(true);
 		queue.setLocked(true);
@@ -172,15 +168,12 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 			await qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
 			await invalidateVisibilityQueries(qc, { preserveProjectDrafts: true });
 			setIsSuccess(true);
-			setShowUploadDialog(false);
 		} catch (error) {
 			setApplyError(error);
 			setPartialFailure(true);
-			if (cancelAllRequested.current && error instanceof Error && error.message === '파일 업로드를 취소했습니다. 남은 변경사항을 확인한 뒤 다시 적용해 주세요.') setShowUploadDialog(false);
 		} finally {
 			queue.setLocked(false);
 			applyingRef.current = false;
-			cancelAllRequested.current = false;
 			setIsApplying(false);
 		}
 	}, invalid => {
@@ -194,29 +187,39 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 	const savedGame = storedAssets.find(asset => asset.kind === 'GAME' && !(queue.removals ?? []).includes(asset.id));
 	const existingMedia = useMemo<PreviewMediaItem[]>(() => {
 		const media: PreviewMediaItem[] = [];
-		if (savedPoster) media.push({ kind: 'poster-img', url: savedPoster.original.url, label: '포스터' });
+		if (savedPoster) media.push({ kind: 'poster-img', url: savedPoster.original.url, image: savedPoster, label: '포스터' });
 		for (const asset of storedAssets) {
 			if ((queue.removals ?? []).includes(asset.id)) continue;
-			if (asset.kind === 'IMAGE') media.push({ kind: 'image', url: asset.image.original.url, label: asset.originalName });
+			if (asset.kind === 'IMAGE') media.push({ kind: 'image', url: asset.image.original.url, image: asset.image, label: asset.originalName });
 		}
 		for (const video of project.videos) {
-			if (storedAssets.some(asset => asset.id === video.assetId) && !(queue.removals ?? []).includes(video.assetId) && video.url) media.push({ kind: 'video', url: video.url, name: '등록된 동영상', label: '동영상' });
+			if (storedAssets.some(asset => asset.id === video.assetId) && !(queue.removals ?? []).includes(video.assetId) && video.url) media.push({ kind: 'video', url: video.url, video, name: '등록된 동영상', label: '동영상' });
 		}
 		return media;
 	}, [project, queue.removals, storedAssets, savedPoster]);
+ const savedPreview = {
+  id: project.id,
+  gameDownloadUrl: savedGame && 'url' in savedGame ? savedGame.url : undefined,
+  webglUrl: !queue.removeWebgl ? project.webglUrl : undefined,
+  awards: project.awards,
+  attachments: storedAssets.flatMap(asset =>
+   (asset.kind === 'DOCUMENT' || asset.kind === 'ATTACHMENT') && !(queue.removals ?? []).includes(asset.id)
+    ? [{ assetId: asset.id, kind: asset.kind, originalName: asset.originalName, mimeType: asset.mimeType, sizeBytes: asset.size, downloadUrl: asset.downloadUrl }] : []),
+ };
+
 	const info = { project, form, formId, isPending: pending, canEditContent, onSubmit: onApply };
 
 	return (
-		<div className="admin-project-edit-page" inert={showUploadDialog} aria-hidden={showUploadDialog}>
+		<div className="admin-project-edit-page">
 
 			{form.formState.errors.status && <p className="field-error" role="alert">{form.formState.errors.status.message}</p>}
-			{!canEditContent && project.canRequestChange && <div className="admin-card" style={{ marginBottom: '1rem' }}><p>이 작품이 속한 연도는 닫혀 있습니다. 변경 내용은 운영자 승인 후 반영됩니다.</p><Link className="btn btn--primary" to={`/me/projects/${id}/change-request`}>수정 요청 작성</Link></div>}
+			{!canEditContent && project.canRequestChange && <div className="admin-card" style={{ marginBottom: '1rem' }}><p className="field-hint">이 작품이 속한 연도는 닫혀 있습니다. 변경 내용은 운영자 승인 후 반영됩니다.</p><Link className="btn btn--primary" to={`/me/projects/${id}/change-request`}>수정 요청 작성</Link></div>}
 			<form id={formId} onSubmit={onApply} />
-			<ProjectEditStudio title={<>작품 수정{isPrivileged && project.isIncomplete && <span className="incomplete-badge">불완전</span>}</>} secondaryAction={<Link className="btn btn--secondary project-edit-header__back" to={isPrivileged ? '/admin/projects' : '/me/projects'} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 돌아가시겠어요?'))) event.preventDefault(); }} aria-disabled={pending}>{isPrivileged ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기'}</Link>} step={step} onStepChange={next => { setNotice(''); setStep(next); }} disabled={pending} notice={notice}
-				introduction={<><AdminProjectBasicInfoForm {...info} section="introduction" />{isPrivileged && project.exhibitionId && <AwardSettings exhibitionId={project.exhibitionId} projectId={id} />}
+			<ProjectEditStudio title={<>작품 수정{isPrivileged && project.isIncomplete && <span className="incomplete-badge">불완전</span>}</>} secondaryAction={<Link className="btn btn--secondary project-edit-header__back" to={isPrivileged ? '/admin/projects' : '/me/projects'} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 돌아가시겠어요?'))) event.preventDefault(); }} aria-disabled={pending}>{isPrivileged ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기'}</Link>} step={step} onStepChange={next => { setNotice(''); setStep(next); }} disabled={false} notice={notice}
+				introduction={<fieldset className="submission-studio__form-guard" disabled={pending}><AdminProjectBasicInfoForm {...info} section="introduction" />{isPrivileged && project.exhibitionId && <AwardSettings exhibitionId={project.exhibitionId} projectId={id} />}
      {wantsPublic && user?.role === 'ADMIN' && <div className="form-field"><label htmlFor="publication-exception">예외 공개 사유 (필수 조건 면제 시)</label><textarea id="publication-exception" value={exceptionReason} maxLength={2000} onChange={event => setExceptionReason(event.target.value)} /><p className="field-hint">파일 검증과 접근 권한은 면제되지 않습니다. 사유와 면제 항목이 기록됩니다.</p></div>}
      <PublicationFeedback readiness={currentReadiness} onStep={setStep} />
-     {project.publicationError && <p className="field-error" role="alert">{project.publicationError}</p>}</>}
+     {project.publicationError && <p className="field-error" role="alert">{project.publicationError}</p>}</fieldset>}
 				game={<AdminProjectBasicInfoForm {...info} section="game" members={<AdminProjectMemberEditor
 								members={members.members} canEditContent={canEditContent} isBusy={pending}
 								errors={showMemberErrors ? members.validationErrors : []}
@@ -224,11 +227,8 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 							/>} />}
 				files={<>
 					<p className="submission-studio__upload-recommendation">공개하려면 포스터·네이티브 게임·동영상이 필요합니다. WebGL·스크린샷·기타 자료는 선택입니다.</p>
-					<AdminProjectPosterUpload project={project} canEditContent={canEditContent} studio />
-					<AdminProjectAssetManager canEditContent={canEditContent} studio />
-					{isPrivileged && <AdminVideoRetryPanel project={project} disabled={pending || hasChanges} />}
+					<AdminProjectAssetManager canEditContent={canEditContent} studio canRetryVideos={isPrivileged} videoRetryDisabled={pending || hasChanges} webglActions={<Button variant="secondary" size="small" aria-label="웹 빌드 설정" aria-haspopup="dialog" disabled={pending} onClick={() => setShowWebglSettings(true)}>설정</Button>} />
 				</>}
-				settings={<><WebglDisplaySettingsForm project={project} isPending={pending} onPendingChange={setIsSavingDisplay} horizontal />{isPrivileged && <Link className="btn btn--secondary" to={`/admin/projects/${id}/network`} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 외부 연결 관리로 이동할까요?'))) event.preventDefault(); }}>게임 외부 연결 관리</Link>}</>}
 				preview={<StudioPreview exhibitionSelected values={{ title: values.title ?? '', summary: values.summary, members: members.members }} poster={selected('POSTER').at(-1) ?? null} savedPoster={savedPoster} assetChecks={[
 					{ label: '네이티브 빌드', ready: selected('GAME').length > 0 || !!savedGame },
 					{ label: '웹 빌드', ready: selected('WEBGL').length > 0 || !!queue.hasWebgl && !queue.removeWebgl },
@@ -236,29 +236,18 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 					{ label: '사진', ready: selected('IMAGE').length > 0 || existingMedia.some(item => item.kind === 'image') },
 				]} exhibitionLabel={`${project.year} 작품 전시`} onPreview={() => setStep(3)} note="작품 정보·학생·파일은 적용 후 반영됩니다." />}
 
-				detail={<ProjectPreviewPanel active={step === 3} values={{ title: values.title ?? '', summary: values.summary, description: values.description, externalLinks: values.externalLinks?.map(link => ({ ...link, label: link.label ?? '', url: link.url ?? '' })), platforms: values.platforms, hardwareRequirements: values.hardwareRequirements, members: members.members }} poster={selected('POSTER').at(-1) ?? null} images={selected('IMAGE')} videos={selected('VIDEO')} game={selected('GAME').at(-1) ?? (savedGame ? { name: savedGame.originalName } : null)} webgl={selected('WEBGL').at(-1) ?? (queue.hasWebgl && !queue.removeWebgl ? { name: '등록된 웹 빌드' } : null)} existingMedia={existingMedia} exhibitionLabel={`${project.year} 작품 전시`} />}
+				detail={<ProjectPreviewPanel active={step === 3} values={{ title: values.title ?? '', summary: values.summary, description: values.description, externalLinks: values.externalLinks?.map(link => ({ ...link, label: link.label ?? '', url: link.url ?? '' })), platforms: values.platforms, hardwareRequirements: values.hardwareRequirements, members: members.members }} poster={selected('POSTER').at(-1) ?? null} images={selected('IMAGE')} videos={selected('VIDEO')} game={selected('GAME').at(-1) ?? (savedGame ? { name: savedGame.originalName } : null)} webgl={selected('WEBGL').at(-1) ?? ((queue.hasWebgl || project.webglUrl) && !queue.removeWebgl ? { name: '등록된 웹 빌드' } : null)} saved={savedPreview} existingMedia={existingMedia} exhibitionLabel={`${project.year} 작품 전시`} />}
 				feedback={<>
 					{applyError != null && <p className="field-error" role="alert">{getApiErrorMessage(applyError)}{partialFailure && ' 일부 변경이 반영되었을 수 있습니다. 남은 변경사항은 다시 적용하세요.'}</p>}
-					{isSuccess && !hasChanges && <p className="success-message">적용되었습니다.</p>}
-					{!pending && !applyError && (!canEditContent ? <p>현재 작품을 직접 수정할 권한이 없습니다.</p> : !hasChanges && !isSuccess ? <p>변경사항이 없습니다.</p> : hasChanges ? <p>{queue.validationError ?? '작품 정보·학생·파일은 적용 후 반영됩니다.'}</p> : null)}
-					{pending && <p role="status">변경사항을 적용하고 있습니다…</p>}
+					{isSuccess && !hasChanges && <p className="success-message" role="status">적용되었습니다.</p>}
+					{!pending && !applyError && (!canEditContent ? <p className="field-hint">현재 작품을 직접 수정할 권한이 없습니다.</p> : !hasChanges && !isSuccess ? <p className="field-hint">변경사항이 없습니다.</p> : hasChanges ? <p className={queue.validationError ? 'field-error' : 'field-hint'} role={queue.validationError ? 'alert' : undefined}>{queue.validationError ?? '작품 정보·학생·파일은 적용 후 반영됩니다.'}</p> : null)}
+					{pending && <p className="field-hint" role="status">변경사항을 적용하고 있습니다…</p>}
 				</>}
 				actions={<button type="submit" form={formId} className="btn btn--primary" disabled={!canEditContent || !hasChanges || pending || !validChanges}>{pending ? '적용 중…' : !wantsPublic ? '저장' : project.publicationStatus === 'PUBLIC' ? '변경사항 적용' : '공개 제출'}</button>} />
-            <ProjectUploadDialog open={showUploadDialog} busy={pending}
-                title={applyError ? '변경사항을 모두 적용하지 못했어요.' : '변경사항을 적용하고 있어요.'}
-                description={`${values.title || project.title} · 파일 검증 후 작품 정보와 참여 학생을 저장합니다.`}
-                completed={(queue.entries ?? []).filter(entry => entry.status === 'done').length}
-                total={(queue.entries ?? []).filter(entry => entry.status !== 'removed').length}
-                actions={<>{!pending && applyError != null && <>
-                    <button type="button" className="btn btn--secondary" onClick={() => setShowUploadDialog(false)}>편집으로 돌아가기</button>
-                    <button type="button" className="btn btn--primary" onClick={() => void onApply()}>다시 적용</button>
-                </>}
-                    <button type="button" className="btn btn--danger btn--small" disabled={!queue.active || cancelAllRequested.current} onClick={() => { cancelAllRequested.current = true; queue.cancelAll(); }}>전체 업로드 중단</button>
-                </>}>
-                {applyError != null && <p className="field-error" role="alert">{getApiErrorMessage(applyError)} 일부 변경이 반영되었을 수 있습니다. 완료된 작업은 유지하고 남은 변경사항을 다시 적용하세요.</p>}
-                <AdminProjectUploadProgress />
-                {pending && <p role="status">변경사항을 적용하고 있습니다…</p>}
-            </ProjectUploadDialog>
+            <WebglSettingsDialog open={showWebglSettings} busy={pending} onClose={() => setShowWebglSettings(false)}>
+                <WebglDisplaySettingsForm project={project} isPending={pending} onPendingChange={setIsSavingDisplay} expanded />{isPrivileged && <Link className="btn btn--secondary" to={`/admin/projects/${id}/network`} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 외부 연결 관리로 이동할까요?'))) event.preventDefault(); }}>게임 외부 연결 관리</Link>}
+            </WebglSettingsDialog>
+
         </div>
     );
 }

@@ -64,7 +64,7 @@ function AuthorizedAwardSettings({
 	};
 	if (!query.data)
 		return (
-			<p role={query.error ? 'alert' : undefined}>
+			<p className={query.error ? 'field-error' : 'field-hint'} role={query.error ? 'alert' : 'status'}>
 				{query.error ? getApiErrorMessage(query.error) : '수상 설정 조회 중…'}
 			</p>
 		);
@@ -233,7 +233,7 @@ function ProjectAwards({
 			.map((a) => a.id),
 	);
 	if (!state.items.length)
-		return <p>전시회 설정에서 상을 먼저 등록해 주세요.</p>;
+		return <p className="field-hint">전시회 설정에서 상을 먼저 등록해 주세요.</p>;
 	return (
 		<>
 			<div className="project-award-tiles">

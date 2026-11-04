@@ -9,7 +9,7 @@ import { queryKeys, useViewerKey } from '../../../lib/query';
 interface Props {
 	project: AdminProjectDetail;
 	isPending: boolean;
-	horizontal?: boolean;
+	expanded?: boolean;
 	onPendingChange?: (pending: boolean) => void;
 }
 
@@ -19,7 +19,7 @@ const draftFrom = (settings: WebglDisplaySettings) => ({
 	height: settings.webglDisplayHeight?.toString() ?? '',
 });
 
-export function WebglDisplaySettingsForm({ project, isPending, onPendingChange, horizontal = false }: Props) {
+export function WebglDisplaySettingsForm({ project, isPending, onPendingChange, expanded = false }: Props) {
 	const qc = useQueryClient();
 	const viewerKey = useViewerKey();
 	const settingsKey = viewerKey(['webgl-display', project.id, project.webglDeployment?.id] as const);
@@ -86,10 +86,7 @@ export function WebglDisplaySettingsForm({ project, isPending, onPendingChange, 
 		}
 	}
 
-	return (
-		<form className={`project-form${horizontal ? ' webgl-display-settings--horizontal' : ''}`} aria-label="WebGL 표시 크기 설정" onSubmit={submit} noValidate>
-			<details className="project-optional-settings" open={horizontal || undefined}>
-				<summary>WebGL 표시 크기 · {baseline.mode === "manual" ? `${baseline.width} × ${baseline.height}` : baseline.mode === "auto" ? "자동 감지" : "기존 표시 방식"}{dirty && " · 저장 전 변경 있음"} · 별도 저장</summary>
+	const fields = <>
 				<p className="field-hint">이 설정은 변경사항 적용과 별도로 저장됩니다.</p>
 			<FormSection disabled={disabled} legend="표시 크기 설정">
 				<p role="status" className="field-hint">{loadingAnalysis ? '빌드 표시 크기를 확인하고 있습니다…' : analysisForbidden ? '분석 결과는 작품 등록자와 관리자만 확인할 수 있습니다.' : analysisError ? '분석 결과를 불러오지 못했습니다. 페이지를 새로고침해 다시 확인하세요.' : !analysis ? '아직 분석하지 않은 빌드입니다. 새 WebGL 빌드를 업로드하면 자동으로 분석합니다.' : analysis.kind === 'fixed' ? `자동 감지: ${analysis.width} × ${analysis.height} CSS px` : analysis.kind === 'responsive' ? '자동 감지: 반응형 빌드 · 사용 가능한 화면 영역에 맞춥니다.' : '표시 크기 지정 권장: 빌드의 표시 크기를 확실하게 감지하지 못했습니다. 자동 모드에서는 기존 방식으로 표시합니다.'}</p>
@@ -112,13 +109,19 @@ export function WebglDisplaySettingsForm({ project, isPending, onPendingChange, 
 					<input id={`${prefix}-height`} type="text" inputMode="numeric" disabled={draft.mode !== 'manual'} value={draft.height} onChange={(event) => edit({ ...draft, height: event.target.value })} />
 				</div>
 				</div>
-				<p className="field-hint">이 설정은 ‘적용’ 버튼과 별도로 저장됩니다. 모드 변경도 ‘표시 크기 저장’을 눌러야 반영됩니다.</p>
 				<button className="btn btn--primary" type="submit" disabled={!dirty || disabled}>{saving ? '표시 크기 저장 중…' : '표시 크기 저장'}</button>
 			</FormSection>
-			</details>
+	</>;
+
+	return (
+		<form className="project-form" aria-label="WebGL 표시 크기 설정" onSubmit={submit} noValidate>
+            {expanded ? fields : <details className="project-optional-settings">
+                <summary>WebGL 표시 크기 · {baseline.mode === "manual" ? `${baseline.width} × ${baseline.height}` : baseline.mode === "auto" ? "자동 감지" : "기존 표시 방식"}{dirty && " · 저장 전 변경 있음"} · 별도 저장</summary>
+                {fields}
+			</details>}
 			{project.canEditWebglDisplay !== true && <p className="field-hint">WebGL 표시 크기를 변경할 권한이 없습니다.</p>}
 			{error && <p className="field-error" role="alert">{error}</p>}
-			{saving && <p role="status">표시 크기를 저장하고 있습니다…</p>}
+			{saving && <p className="field-hint" role="status">표시 크기를 저장하고 있습니다…</p>}
 			{saved && <p className="success-message" role="status">표시 크기가 저장되었습니다.</p>}
 		</form>
 	);
