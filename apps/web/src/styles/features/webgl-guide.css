@@ -17,6 +17,24 @@
 .webgl-guide .steps li { padding: 0.3125rem 0; }
 .webgl-guide code { font: 0.8125rem/1.65 ui-monospace, Consolas, monospace; padding: 0.125rem 0.3125rem; border-radius: 0.25rem; background: var(--color-bg); color: var(--color-primary); }
 .webgl-guide pre { overflow: auto; padding: 1.125rem; border: 0.0625rem solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); font: 0.8125rem/1.8 ui-monospace, Consolas, monospace; }
+/* Keep the library's Visual Studio theme inside C# blocks. */
+.webgl-guide pre:has(> code.language-csharp) { padding: 0; background: #1e1e1e; color: #dcdcdc; }
+.webgl-guide pre > code.language-csharp { display: block; padding: 1.125rem; border-radius: 0; background: transparent; color: inherit; font: inherit; overflow: visible; }
+/* A fixed toolbar above the horizontal code scroller. */
+.webgl-guide .guide-code-block { margin: 1rem 0; overflow: hidden; border: 0.0625rem solid #3c3c3c; border-radius: var(--radius); background: #1e1e1e; }
+.webgl-guide .guide-code-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 3rem; padding: 0.375rem 0.625rem 0.375rem 1.125rem; border-bottom: 0.0625rem solid #353535; background: #252526; }
+.webgl-guide .guide-code-language { font: 600 0.75rem/1.5 ui-monospace, Consolas, monospace; color: #b7bdc8; }
+.webgl-guide .guide-code-block pre { margin: 0; border: 0; border-radius: 0; }
+.webgl-guide .guide-code-copy { display: inline-flex; align-items: center; justify-content: center; gap: 0.4375rem; min-width: 5rem; min-height: 2.25rem; padding: 0.375rem 0.625rem; border: 0.0625rem solid #505054; border-radius: 0.5rem; background: #303033; color: #e0e2e8; font-family: inherit; font-size: 0.75rem; font-weight: 500; line-height: 1.5; cursor: pointer; transition: background 150ms, border-color 150ms; }
+.webgl-guide .guide-code-copy:hover { background: #3c3c40; border-color: #777780; }
+.webgl-guide .guide-code-copy:focus-visible { outline: 0.125rem solid #9cdcfe; outline-offset: 0.1875rem; }
+.webgl-guide .guide-code-copy:disabled { cursor: wait; }
+.webgl-guide .guide-code-copy .check-icon { display: none; }
+.webgl-guide .guide-code-copy[data-state='copied'] { color: #a5e3bb; border-color: #487858; background: #243c2e; }
+.webgl-guide .guide-code-copy[data-state='copied'] .copy-icon { display: none; }
+.webgl-guide .guide-code-copy[data-state='copied'] .check-icon { display: block; }
+.webgl-guide .guide-code-copy[data-state='error'] { color: #ffb4ab; border-color: #a96961; }
+@media (prefers-reduced-motion: reduce) { .webgl-guide .guide-code-copy { transition: none; } }
 .webgl-guide .hero { padding: 4rem 0 3rem; }
 .webgl-guide .eyebrow { display: flex; align-items: center; gap: 0.625rem; color: var(--color-primary); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.125rem; }
 .webgl-guide .eyebrow::before { content: ''; width: 1.5rem; height: 0.125rem; background: currentColor; }
