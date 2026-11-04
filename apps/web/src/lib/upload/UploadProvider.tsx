@@ -1,3 +1,4 @@
+import { ProgressBar } from '../../components/ui';
 import { hasUploadDialog, subscribeUploadPresentation } from './presentation';
 import { useMemo, useSyncExternalStore } from 'react';
 import { usePreventWindowClose } from '../../components/common';
@@ -63,7 +64,6 @@ function UploadOverlay() {
 	if (!task || covered) return null;
 
 	const hasKnownTotal = task.totalBytes > 0;
-	const barPercent = hasKnownTotal ? task.percent : 32;
 
 	return (
 		<div className="upload-progress-modal" role="presentation">
@@ -77,12 +77,7 @@ function UploadOverlay() {
 					<strong>{task.title}</strong>
 					<span>{phaseLabel(task)}</span>
 				</div>
-				<div className="upload-progress-modal__bar-track" aria-hidden="true">
-					<div
-						className="upload-progress-modal__bar-fill"
-						style={{ width: `${barPercent}%` }}
-					/>
-				</div>
+				<ProgressBar className="upload-progress-modal__progress" aria-label={task.title} value={hasKnownTotal ? task.percent : undefined} />
 				<div className="upload-progress-modal__meta">
 					<span>{hasKnownTotal ? `${task.percent}%` : phaseLabel(task)}</span>
 					{hasKnownTotal && (

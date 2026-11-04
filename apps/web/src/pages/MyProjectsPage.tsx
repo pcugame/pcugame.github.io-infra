@@ -1,3 +1,4 @@
+import { StatusBadge } from '../components/ui';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -67,9 +68,9 @@ export default function MyProjectsPage() {
 										<td className="admin-table__title-cell"><strong>{p.title}</strong></td>
 										<td><span className="admin-year-badge">{p.year}</span></td>
 										<td>
-											<span className={`badge ${p.publicationStatus === 'PUBLIC' ? 'badge--published' : 'badge--draft'}`}>
+											<StatusBadge tone={p.publicationStatus === 'PUBLIC' ? 'success' : 'neutral'}>
 												{p.publicationStatus === 'PUBLIC' ? '공개' : '비공개'}
-											</span>
+											</StatusBadge>
 										</td>
 										<td>{p.memberNames.length > 0 ? p.memberNames.join(', ') : '-'}</td>
 										<td className="text-muted">{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</td>
@@ -96,9 +97,9 @@ export default function MyProjectsPage() {
 								<Link to={p.canEdit ? `/admin/projects/${p.id}/edit` : `/me/projects/${p.id}/change-request`} className="admin-pcard__link">
 									<div className="admin-pcard__top">
 										<h3 className="admin-pcard__title">{p.title}</h3>
-										<span className={`badge ${p.publicationStatus === 'PUBLIC' ? 'badge--published' : 'badge--draft'}`}>
+										<StatusBadge tone={p.publicationStatus === 'PUBLIC' ? 'success' : 'neutral'}>
 											{p.publicationStatus === 'PUBLIC' ? '공개' : '비공개'}
-										</span>
+										</StatusBadge>
 									</div>
 									<div className="admin-pcard__meta">
 										<span className="admin-year-badge">{p.year}</span>

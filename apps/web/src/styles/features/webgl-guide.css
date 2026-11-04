@@ -54,7 +54,7 @@
 .webgl-guide .version-card-check { position: absolute; right: 1.375rem; top: 1.4375rem; display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border: 0.0625rem solid var(--color-border); border-radius: 50%; color: transparent; }
 .webgl-guide .version-card[aria-pressed='true'] .version-card-check { background: var(--color-primary-btn); border-color: var(--color-primary-btn); color: white; }
 .webgl-guide .version-picker-status { margin: 0.875rem 0 0; font-size: 0.75rem; color: var(--color-text-muted); }
-.webgl-guide .layout { display: grid; grid-template-columns: 12.25rem minmax(0, 1fr); gap: 2rem; align-items: start; }
+.webgl-guide .layout { min-height: 100vh; display: grid; grid-template-columns: 12.25rem minmax(0, 1fr); gap: 2rem; align-items: start; }
 .webgl-guide main { min-width: 0; }
 .webgl-guide .toc { position: sticky; top: 7.5rem; padding: 1.25rem 0; max-height: calc(100vh - 8.125rem); overflow-y: auto; }
 .webgl-guide .toc strong { display: block; margin: 0.875rem 0.75rem 0.25rem; font-size: 0.75rem; color: var(--color-text-muted); letter-spacing: 0.0625rem; }

@@ -116,7 +116,9 @@ async function enterMetadata(visibility: 'PUBLIC' | 'STAFF' | 'AUTHENTICATED' = 
 	fireEvent.change(screen.getByLabelText('공개 범위'), { target: { value: visibility } });
 }
 function select(container: HTMLElement, zone: 'poster' | 'native' | 'web' | 'video' | 'materials', files: File[]) {
-	fireEvent.change(container.querySelector(zone === 'poster' ? '.project-upload-drop--poster input[type="file"]' : `[data-file-group="${zone}"] input[type="file"]`)!, {
+	const labels = { poster: '포스터', native: '네이티브', web: '웹 빌드', video: '동영상', materials: '기타 자료' };
+	fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^${labels[zone]}`) }));
+	fireEvent.change(container.querySelector(`[data-file-group="${zone}"] input[type="file"]`)!, {
 		target: { files },
 	});
 }
@@ -180,7 +182,7 @@ describe('submission studio', () => {
 		fireEvent.click(next);
 		await screen.findByRole('heading', { name: '게임 정보' });
 		expect(screen.getByRole('group', { name: '실행 환경' })).toBeTruthy();
-		expect(screen.queryByRole('button', { name: '네이티브 빌드 파일 선택' })).toBeNull();
+		expect(screen.queryByRole('button', { name: '네이티브 파일 선택' })).toBeNull();
 		fireEvent.click(next);
 		await screen.findByRole('heading', { name: '파일 업로드' });
 		expect(screen.queryByRole('group', { name: '실행 환경' })).toBeNull();
@@ -192,7 +194,7 @@ describe('submission studio', () => {
 		expect(controls.submit).not.toHaveBeenCalled();
 		fireEvent.click(previous);
 		await screen.findByRole('heading', { name: '파일 업로드' });
-		expect(screen.getByText('retained.zip')).toBeTruthy();
+		expect(screen.getByText('retained.zip', { selector: 'strong' })).toBeTruthy();
 		expect(container.querySelector('[data-step-direction="backward"]')).toBeTruthy();
 		expect(controls.upload).not.toHaveBeenCalled();
 	});
@@ -209,7 +211,8 @@ describe('submission studio', () => {
 		expect(next.classList.contains('is-ready')).toBe(false);
 		select(container, 'materials', [new File(['image'], 'photo.png', { type: 'image/png' })]);
 		await waitFor(() => expect(next.classList.contains('is-ready')).toBe(false));
-		fireEvent.click(within(container.querySelector('[data-file-group="materials"]')!).getByRole('button', { name: /취소/ }));
+		fireEvent.click(screen.getByRole('button', { name: 'photo.png 더보기' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: '선택 취소' }));
 		await waitFor(() => expect(next.classList.contains('is-ready')).toBe(false));
 		expect(controls.upload).not.toHaveBeenCalled();
 	});
@@ -310,8 +313,9 @@ describe('submission studio', () => {
 			const item = items.find(item => item.kind === call[2])!;
 			expect(call[4].submissionItem).toEqual({ id: item.id, clientToken: item.clientToken });
 		}
-		expect(screen.getByRole('dialog', { name: '파일 업로드' })).toBeTruthy();
-		expect(screen.queryByRole('button', { name: '공개 제출' })).toBeNull();
+		expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByRole('tab', { name: /^포스터/ }).getAttribute('aria-selected')).toBe('true');
+		expect((screen.getByRole('button', { name: '업로드 처리 중…' }) as HTMLButtonElement).disabled).toBe(true);
 	});
 
 	it('enforces the user exhibition lock even on a direct submit event', async () => {
@@ -379,7 +383,7 @@ describe('submission studio', () => {
 		const secondCall = controls.upload.mock.calls.find((call) => call[1] === second)!;
 		const secondItem = items.find((item) => item.slot === 'image:1')!;
 		expect(secondCall[4].submissionItem).toEqual({ id: secondItem.id, clientToken: secondItem.clientToken });
-		expect(document.querySelector('[aria-label="스크린샷 / 기타 자료 업로드 진행"] .upload-file-row')?.textContent).toContain('first.png');
+		expect(document.querySelector('[data-file-group="materials"] .material-file')?.textContent).toContain('first.png');
 	});
 
 	it('restores a pending upload in the saved editor without creating another project', async () => {
@@ -407,7 +411,8 @@ describe('submission studio', () => {
 		mount('admin');
 		await enterMetadata();
 		await goTo(2);
-		expect((screen.getByRole('button', { name: '네이티브 빌드 파일 선택' }) as HTMLButtonElement).disabled).toBe(false);
+		fireEvent.click(screen.getByRole('tab', { name: /^네이티브/ }));
+		expect((screen.getByRole('button', { name: '네이티브 파일 선택' }) as HTMLButtonElement).disabled).toBe(false);
 		await goTo(3);
 		fireEvent.click(screen.getByRole('button', { name: '저장' }));
 		await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
@@ -431,7 +436,8 @@ describe.each(['user', 'admin'] as const)('%s optional submission assets', mode 
   expect(within(checklist).getByText('3 / 3')).toBeTruthy();
   select(container, entry.zone, [new File(['data'], entry.name)]);
   expect(within(checklist).getByText(entry.label).closest('li')?.textContent).toContain('선택 완료');
-  fireEvent.click(screen.getByRole('button', { name: `${entry.name} 선택 취소` }));
+  fireEvent.click(screen.getByRole('button', { name: `${entry.name} 더보기` }));
+  fireEvent.click(screen.getByRole('menuitem', { name: '선택 취소' }));
   expect(within(checklist).getByText(entry.label).closest('li')?.textContent).toContain('선택 안 함');
   await goTo(3);
   const submit = screen.getByRole('button', { name: '저장' }) as HTMLButtonElement;
@@ -475,7 +481,7 @@ it('shows the fourth-step preview at the public modal size with local media and 
 	expect(screen.queryByText('제출 전 확인')).toBeNull();
 	expect(screen.queryByRole('button', { name: /^(전체 )?미리보기/ })).toBeNull();
 	expect(document.body.style.overflow).not.toBe('hidden');
-	expect((within(preview).getByRole('button', { name: '게임 실행' }) as HTMLButtonElement).disabled).toBe(true);
+	expect((within(preview).getByRole('button', { name: '플레이해보기' }) as HTMLButtonElement).disabled).toBe(true);
 	fireEvent.click(within(preview).getByRole('button', { name: /사진 1/ }));
 	expect(preview.querySelector('.modal-visual__img')?.getAttribute('src')).toBe('blob:first.png');
 	fireEvent.click(within(preview).getByRole('button', { name: '확대해서 보기' }));
@@ -486,7 +492,9 @@ it('shows the fourth-step preview at the public modal size with local media and 
 	expect(controls.submit).not.toHaveBeenCalled();
 	expect(controls.upload).not.toHaveBeenCalled();
 	await goTo(2);
-	fireEvent.click(screen.getByRole('button', { name: 'first.png 선택 취소' }));
+	fireEvent.click(screen.getByRole('tab', { name: /^기타 자료/ }));
+	fireEvent.click(screen.getByRole('button', { name: 'first.png 더보기' }));
+	fireEvent.click(screen.getByRole('menuitem', { name: '선택 취소' }));
 	expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first.png');
 	expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:clip.mp4');
 	select(container, 'materials', [new File(['image'], 'replacement.png')]);

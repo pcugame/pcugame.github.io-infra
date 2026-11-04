@@ -28,7 +28,7 @@ export function ProjectPublicMeta({ githubUrl, externalLinks, platforms = [], ha
 				</div>
 			)}
 
-			{hasHardware && <div className="project-meta__hardware"><strong>필수 하드웨어</strong><p style={{ whiteSpace: 'pre-wrap' }}>{hardwareRequirements}</p></div>}
+			{hasHardware && <div className="project-meta__hardware"><strong>필수 하드웨어</strong><p className="preserve-lines">{hardwareRequirements}</p></div>}
 			{links.map((link, index) => (
 				<a
 					key={index}

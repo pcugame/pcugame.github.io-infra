@@ -228,10 +228,12 @@ export async function waitForDirectAssetReady(
 		options.onStatus?.(status);
 		if (status.state === 'READY') return status;
 		if (['REJECTED', 'CANCELLED', 'EXPIRED'].includes(status.state)) {
-			throw new Error(`Direct upload ${status.state.toLowerCase()}`);
+			throw new Error(status.state === 'REJECTED'
+				? '파일 검증 또는 처리에 실패했습니다. 원본 파일을 확인한 뒤 다시 시도해 주세요.'
+				: status.state === 'CANCELLED' ? '업로드가 취소되었습니다.' : '업로드 유효 시간이 지났습니다. 파일을 다시 선택해 주세요.');
 		}
 		if (deadline !== undefined && Date.now() >= deadline) {
-			throw new Error('Direct upload verification is taking longer than the requested wait period');
+			throw new Error('파일 검증이 지연되고 있습니다. 잠시 후 상태를 다시 확인해 주세요.');
 		}
 		await wait(intervalMs, options.signal);
 	}

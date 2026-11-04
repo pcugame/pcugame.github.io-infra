@@ -63,7 +63,7 @@ function setup(enabled = true, detail = project, studio = false) {
 				<AdminProjectUploadProvider project={detail} projectId={7} limits={limits} canEditContent={enabled}>
 					<ApplyControl />
 					<AdminProjectPosterUpload project={detail} canEditContent={enabled} studio={studio} />
-					<AdminProjectAssetManager canEditContent={enabled} studio={studio} /><AdminProjectUploadProgress />
+					<AdminProjectAssetManager canEditContent={enabled} studio={studio} />{!studio && <AdminProjectUploadProgress />}
 				</AdminProjectUploadProvider>
 			</QueryClientProvider>,
 		),
@@ -422,19 +422,19 @@ it('binds student draft retries through the user submission endpoint', async () 
 it('stages the same ZIP as native, WebGL and attachment in separate studio areas, preserving a build on invalid replacement', async () => {
  setup(true, project, true);
  await waitFor(() => expect(publicApi.getUploadConfig).toHaveBeenCalled());
- const choose = (label: string, files: File[]) => fireEvent.change(screen.getByLabelText(label, { selector: 'input' }), { target: { files } });
+ const choose = (label: string, files: File[]) => { fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^${label.replace(' 파일 선택', '')}`) })); fireEvent.change(screen.getByLabelText(label, { selector: 'input' }), { target: { files } }); };
  const zip = file('same.zip');
- choose('네이티브 빌드 파일 선택', [zip]);
+ choose('네이티브 파일 선택', [zip]);
  choose('웹 빌드 파일 선택', [zip]);
- choose('스크린샷 / 기타 자료 파일 선택', [zip]);
+ choose('기타 자료 파일 선택', [zip]);
  expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
- choose('네이티브 빌드 파일 선택', [file('invalid.png')]);
+ choose('네이티브 파일 선택', [file('invalid.png')]);
  expect(screen.getByRole('alert').textContent).toContain('ZIP');
- expect(within(document.querySelector('.studio-files-container') as HTMLElement).getAllByText('same.zip')).toHaveLength(3);
- choose('네이티브 빌드 파일 선택', [file('a.zip'), file('b.zip')]);
- expect(within(document.querySelector('.studio-files-container') as HTMLElement).getAllByText('same.zip')).toHaveLength(3);
- choose('네이티브 빌드 파일 선택', [file('replacement.zip')]);
- expect(within(document.querySelector('.studio-files-container') as HTMLElement).getAllByText('same.zip')).toHaveLength(2);
+ expect(within(document.querySelector('.material-manager') as HTMLElement).getAllByText('same.zip', { selector: 'strong' })).toHaveLength(3);
+ choose('네이티브 파일 선택', [file('a.zip'), file('b.zip')]);
+ expect(within(document.querySelector('.material-manager') as HTMLElement).getAllByText('same.zip', { selector: 'strong' })).toHaveLength(3);
+ choose('네이티브 파일 선택', [file('replacement.zip')]);
+ expect(within(document.querySelector('.material-manager') as HTMLElement).getAllByText('same.zip', { selector: 'strong' })).toHaveLength(2);
  expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
  api.uploadDirectAssetFile.mockResolvedValue({ status: 'READY', sessionId: 'ready' });
  apply();
@@ -470,6 +470,10 @@ it('restores editor row IDs after remount and requests the missing original File
  view.unmount(); resetDirectUploadTasksForTests();
  setup(); apply();
  const chooser = await screen.findByLabelText('resume.png 원본 파일 선택');
+ expect((chooser as HTMLInputElement).hidden).toBe(true);
+ const openPicker = vi.spyOn(chooser as HTMLInputElement, 'click');
+ fireEvent.click(screen.getByRole('button', { name: 'resume.png 원본 선택' }));
+ expect(openPicker).toHaveBeenCalledOnce();
  expect(document.querySelector('.upload-file-row')!.getAttribute('data-file-id')).toBe(id);
  expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
  fireEvent.change(chooser, { target: { files: [file('wrong.png')] } });
@@ -491,4 +495,68 @@ it('restores confirmed cancelled and completed row counts from durable outcomes'
  await screen.findByText('업로드 완료'); expect(screen.getByText('취소 완료')).toBeTruthy();
  apply(); await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
  expect(api.uploadDirectAssetFile).not.toHaveBeenCalled(); expect(screen.getByTestId('dirty').textContent).toBe('true');
+});
+
+it.each(['USER', 'ADMIN'])('%s studio keeps tasks live across tabs and exposes failure without changing the active tab', async role => {
+ viewer.role = role;
+ let fail!: (error: Error) => void;
+ api.uploadDirectAssetFile.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+ const { container } = setup(true, project, true);
+ fireEvent.click(screen.getByRole('tab', { name: /^네이티브/ }));
+ fireEvent.change(screen.getByLabelText('네이티브 파일 선택', { selector: 'input' }), { target: { files: [file('live.zip')] } });
+ expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
+ apply();
+ await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
+ fireEvent.click(screen.getByRole('tab', { name: /^웹 빌드/ }));
+ expect((screen.getByRole('button', { name: '웹 빌드 파일 선택' }) as HTMLButtonElement).disabled).toBe(true);
+ await act(async () => fail(new Error('업로드 실패 원인')));
+ await screen.findByRole('button', { name: '실패 파일 보기' });
+ expect(screen.getByRole('tab', { name: /^웹 빌드/ }).getAttribute('aria-selected')).toBe('true');
+ fireEvent.click(screen.getByRole('button', { name: '실패 파일 보기' }));
+ expect(screen.getByRole('tab', { name: /^네이티브/ }).getAttribute('aria-selected')).toBe('true');
+ expect(container.querySelectorAll('[data-file-id]')).toHaveLength(1);
+ expect(screen.queryByRole('dialog')).toBeNull();
+ fireEvent.click(screen.getByRole('button', { name: 'live.zip 재시도' }));
+ await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
+ expect((screen.getByRole('button', { name: '네이티브 파일 선택' }) as HTMLButtonElement).disabled).toBe(true);
+});
+it('studio stages removal and undo in the menu without calling the server', () => {
+ const remove = vi.spyOn(adminAssetApi, 'remove').mockResolvedValue();
+ setup(true, project, true);
+ fireEvent.click(screen.getByRole('tab', { name: /^동영상/ }));
+ fireEvent.click(screen.getByRole('button', { name: 'existing.mp4 더보기' }));
+ fireEvent.click(screen.getByRole('menuitem', { name: '삭제' }));
+ expect(screen.getByText(/상태 확인 중 · 삭제 예정/)).toBeTruthy();
+ fireEvent.click(screen.getByRole('button', { name: 'existing.mp4 더보기' }));
+ fireEvent.click(screen.getByRole('menuitem', { name: '삭제 취소' }));
+ expect(remove).not.toHaveBeenCalled();
+ expect(screen.queryByText(/삭제 예정/)).toBeNull();
+});
+it('studio restores a missing original on its stable row and retries only that upload', async () => {
+ api.uploadDirectAssetFile.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ status: 'READY', sessionId: 'retried', generation: 1 });
+ const view = setup(true, project, true);
+ fireEvent.click(screen.getByRole('tab', { name: /^네이티브/ }));
+ fireEvent.change(screen.getByLabelText('네이티브 파일 선택', { selector: 'input' }), { target: { files: [file('resume.zip')] } });
+ apply(); await screen.findByRole('button', { name: 'resume.zip 재시도' });
+ const id = document.querySelector('[data-file-id]')!.getAttribute('data-file-id');
+ view.unmount(); resetDirectUploadTasksForTests();
+ setup(true, project, true); apply();
+ await waitFor(() => expect(document.querySelector('[data-file-id]')?.getAttribute('data-phase')).toBe('failed'));
+ const chooser = screen.getByLabelText('resume.zip 원본 파일 선택');
+ expect(document.querySelector('[data-file-id]')!.getAttribute('data-file-id')).toBe(id);
+ fireEvent.change(chooser, { target: { files: [file('wrong.zip')] } });
+ await screen.findByText('동일한 원본 파일을 선택해 주세요.');
+ expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
+ fireEvent.change(screen.getByLabelText('resume.zip 원본 파일 선택'), { target: { files: [file('resume.zip')] } });
+ await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
+ expect(document.querySelectorAll('[data-file-id]')).toHaveLength(1);
+});
+it('studio displays a completed recovered file once when it is already in stored assets', async () => {
+ sessionStorage.setItem('pcu.edit-upload-files:3:7', JSON.stringify([{ id: 1, uploadId: 'ready-video', kind: 'VIDEO', zone: 'files', status: 'done', file: { name: 'existing.mp4', size: 1024, type: 'video/mp4' } }]));
+ sessionStorage.setItem('pcu.file-upload:3:PROJECT:7:VIDEO:ready-video:outcome', 'ready');
+ const { container } = setup(true, project, true);
+ fireEvent.click(screen.getByRole('tab', { name: /^동영상/ }));
+ await waitFor(() => expect(container.querySelectorAll('.material-file__name')).toHaveLength(1));
+ expect(screen.getByRole('tab', { name: /^동영상/ }).textContent).toBe('동영상1');
+ expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
 });

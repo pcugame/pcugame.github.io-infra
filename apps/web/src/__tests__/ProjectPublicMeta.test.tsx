@@ -29,7 +29,8 @@ describe('ProjectPublicMeta', () => {
 		const { rerender } = render(<ProjectPublicMeta hardwareRequirements={'VR 헤드셋\n<script>컨트롤러</script>'} />);
 		const text = screen.getByText(/VR 헤드셋/);
 		expect(text.textContent).toBe('VR 헤드셋\n<script>컨트롤러</script>');
-		expect(text.style.whiteSpace).toBe('pre-wrap');
+		// The browser style probe verifies the shared class preserves line breaks.
+		expect(text.classList.contains('preserve-lines')).toBe(true);
 		expect(text.querySelector('script')).toBeNull();
 		rerender(<ProjectPublicMeta hardwareRequirements="   " />);
 		expect(screen.queryByLabelText('작품 메타 정보')).toBeNull();

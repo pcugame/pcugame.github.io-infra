@@ -29,7 +29,7 @@ export function SubmissionMembersFieldset({
 	swap,
 }: SubmissionMembersFieldsetProps) {
 	return (
-		<FormSection legend={<>참여 학생 <span className="required-mark">*</span></>}>
+		<FormSection variant="plain" className="project-members" legend={<>참여 학생 <span className="required-mark">*</span></>}>
 			{errors.members?.root && (
 				<span className="field-error">{errors.members.root.message}</span>
 			)}

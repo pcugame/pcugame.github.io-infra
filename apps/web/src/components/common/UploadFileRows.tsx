@@ -1,3 +1,4 @@
+import { StatusBadge } from '../ui';
 import { useContext, useEffect, useId, type ReactNode } from 'react';
 import { UploadProgressReporter } from '../../lib/upload/linearPresentation';
 
@@ -17,7 +18,7 @@ export function UploadFileRows({ names, completed = 0, percent = 0, phase = 'idl
   const recoverable = current && (phase === 'error' || phase === 'idle');
   return <div className="upload-file-row" key={`${index}:${name}`}>
    <span className="upload-file-row__name" title={name}>{name}</span>
-   <span className="upload-file-row__state">{done ? '완료' : current && phase === 'verifying' ? '검증 중' : current && phase === 'uploading' ? '전송 중' : phase === 'error' && current ? '실패' : '대기'}</span>
+   <StatusBadge size="sm" tone={done ? 'success' : current && phase === 'error' ? 'danger' : current && (phase === 'uploading' || phase === 'verifying') ? 'info' : 'neutral'}>{done ? '완료' : current && phase === 'verifying' ? '검증 중' : current && phase === 'uploading' ? '전송 중' : phase === 'error' && current ? '실패' : '대기'}</StatusBadge>
    {recoverable && actions}
   </div>;
  })}</div>;

@@ -4,7 +4,7 @@ import { createRef } from 'react';
 import type { FormEvent } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Button, CheckboxField, FormSection, SelectField, TextareaField, TextField } from '../components/ui';
+import { DialogFrame, ProgressBar, Button, CheckboxField, FormSection, SelectField, TextareaField, TextField } from '../components/ui';
 
 afterEach(cleanup);
 
@@ -132,5 +132,58 @@ describe('UI primitives', () => {
     // click() uses the browser's disabled-fieldset behavior, unlike synthetic fireEvent.click.
     (screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).click();
     expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('native presentation primitives', () => {
+  it('forwards dialog refs and cancellation policy, keeping unsaved input mounted when closed', () => {
+    const ref = createRef<HTMLDialogElement>();
+    const cancel = vi.fn((event: React.SyntheticEvent) => event.preventDefault());
+    const close = vi.fn();
+    const view = (open: boolean) => <DialogFrame open={open} ref={ref} aria-label="Settings" onCancel={cancel} onClose={close}>
+      <TextField label="Draft" defaultValue="original" />
+    </DialogFrame>;
+    const { rerender } = render(view(true));
+    const input = screen.getByLabelText('Draft') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'unsaved' } });
+    expect(ref.current).toBe(screen.getByRole('dialog', { name: 'Settings' }));
+    const event = new Event('cancel', { cancelable: true });
+    fireEvent(ref.current!, event);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+    fireEvent(ref.current!, new Event('close'));
+    expect(close).toHaveBeenCalledOnce();
+    rerender(view(false));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(input.isConnected).toBe(true);
+    rerender(view(true));
+    expect(screen.getByLabelText('Draft')).toBe(input);
+    expect(input.value).toBe('unsaved');
+  });
+
+  it('distinguishes indeterminate progress from zero and preserves a custom maximum', () => {
+    const ref = createRef<HTMLProgressElement>();
+    const { rerender } = render(<ProgressBar ref={ref} aria-label="Transfer" />);
+    const bar = screen.getByRole('progressbar', { name: 'Transfer' }) as HTMLProgressElement;
+    expect(ref.current).toBe(bar);
+    expect(bar.hasAttribute('value')).toBe(false);
+    expect(bar.position).toBe(-1);
+    expect(bar.max).toBe(100);
+    rerender(<ProgressBar ref={ref} aria-label="Transfer" value={0} />);
+    expect(bar.position).toBe(0);
+    rerender(<ProgressBar ref={ref} aria-label="Transfer" value={3} max={4} />);
+    expect(bar.position).toBe(.75);
+  });
+
+  it('preserves native disabled fieldsets across panel/plain presentation changes', () => {
+    const view = (variant?: 'plain') => <FormSection legend="Details" variant={variant} disabled><TextField label="Title" defaultValue="Draft" /></FormSection>;
+    const { rerender } = render(view());
+    const input = screen.getByLabelText('Title');
+    expect(input.closest('fieldset')?.classList.contains('form-section--panel')).toBe(true);
+    rerender(view('plain'));
+    expect(screen.getByLabelText('Title')).toBe(input);
+    expect(input.matches(':disabled')).toBe(true);
+    expect(input.closest('fieldset')?.classList.contains('form-section--plain')).toBe(true);
   });
 });

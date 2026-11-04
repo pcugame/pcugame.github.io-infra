@@ -120,7 +120,7 @@ export default function AdminProjectsPage() {
 			/>
 
 			{(bulkStatusMutation.error || bulkDeleteMutation.error) && (
-				<div className="admin-card" style={{ background: 'var(--color-error-bg, #fce4ec)', padding: '1rem', marginBottom: '1rem' }}>
+				<div className="notice notice--danger">
 					{getApiErrorMessage(bulkStatusMutation.error ?? bulkDeleteMutation.error)}
 				</div>
 			)}

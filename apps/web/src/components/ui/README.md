@@ -8,6 +8,8 @@ Use these conventions alongside the root repository instructions.
   `CheckboxField` from `src/components/ui` (use the appropriate relative path).
   Use these for ordinary forms in new features. They provide the shared classes,
   labels, descriptions, validation state, and native control behavior together.
+- Use `DialogFrame`, `DialogHeader`, `DialogBody`, `DialogFooter`, `ProgressBar`,
+  and `StatusBadge` for shared presentation. Domain decisions stay in features.
 - `Button` defaults to `type="button"`; specify `type="submit"` for form submission.
   Navigation remains a router `Link` or an anchor using `btn btn--secondary`
   (or the appropriate existing button variant).
@@ -25,10 +27,12 @@ Use these conventions alongside the root repository instructions.
   support to browsers that cannot run the Vite/React application itself.
 - For specialized controls, reuse `.form-control`, `.form-field__label`,
   `.field-hint`, `.field-error`, and `.form-choice` explicitly. Check their CSS
-  before changing markup. Legacy selectors remain for existing consumers.
+  before changing markup. File choosers use `.form-file`. Controls and labels
+  must carry explicit classes; `.form-field` alone does not style its children.
 - `FormSection` styles a real fieldset directly. A `project-form` ancestor is
-  needed only by legacy fieldsets. Do not invent domain-specific parent classes
-  to make a generic input or section receive styling.
+  not needed to style fieldsets. `variant="panel"` is the default; use
+  `variant="plain"` inside an existing editor surface. Do not cancel its border,
+  background, padding, or shadow with page descendant selectors.
 
 ```tsx
 import { Button, FormSection, TextField } from '../../components/ui';
@@ -57,8 +61,11 @@ import { Button, FormSection, TextField } from '../../components/ui';
   names such as `flex`, `p-4`, or `rounded-lg` have no effect unless defined here.
   Follow the existing feature class names and BEM modifiers.
 - `src/styles/index.css` orders foundation, layout, shared components, then
-  features. New feature files must be imported there. Scope new rules under a
-  feature class; avoid global `label`, `input`, `button`, or heading overrides.
+  features. `foundation/index.css` imports the font once, then tokens, reset and
+  animations. The standalone WebGL guide imports foundation, brand, buttons and
+  its own stylesheet; it does not load app feature styles. Import new app feature
+  styles in `src/styles/index.css`. Scope new rules under a feature class; avoid
+  global `label`, `input`, `button`, or heading overrides.
 - The global reset removes default margins and padding. Content sections need
   explicit spacing and heading/list styles; semantic HTML alone supplies none.
 - Reuse tokens in `foundation/tokens.css`, including theme colors. Desktop root
@@ -71,8 +78,8 @@ import { Button, FormSection, TextField } from '../../components/ui';
   secondary button roles instead of scaling every text element alike.
 - Preserve intentional page layouts. `ProjectEditorLayout` currently uses
   `admin-project-edit-*` classes on both student and admin screens; its stylesheet
-  overrides descendant fieldsets. Check those overrides when changing its
-  wrappers. Details and members precede the poster/files column in DOM order;
+  owns the column layout. Its sections explicitly use the plain variant. Details
+  and members precede the poster/files column in DOM order;
   actions belong after the grid. Keep optional content mounted when collapsed
   and keep WebGL display settings in their own form and save action.
 - Do not delete CSS based only on literal class searches: some classes are
@@ -95,3 +102,41 @@ import { Button, FormSection, TextField } from '../../components/ui';
   `EXPECT_ENHANCEMENT=0` for an actually unsupported engine (for example Firefox 141).
   It accepts the same external Playwright and browser-path settings as the CSS probe.
   See [customizable select progressive enhancement](https://developer.mozilla.org/en-US/docs/Learn_web_development/Extensions/Forms/Customizable_select).
+
+## Presentation contracts
+
+| Primitive | Options and ownership |
+| --- | --- |
+| `FormSection` | `variant="panel"` (default) or `"plain"`; forwards native fieldset props, ref and disabled semantics. |
+| `DialogFrame` | Native dialog with `size="sm"` (32rem), `"md"` (34rem, default), or `"lg"` (62rem), capped by the viewport. Header/body/footer padding is 1.25rem, or 1rem at 50em and below. |
+| `ProgressBar` | Native progress, `max={100}` by default. Omit `value` for indeterminate progress; `value={0}` means a known zero. `size="sm" \| "md"`, `tone="info" \| "success" \| "danger"`. Provide an accessible label. |
+| `StatusBadge` | `tone="neutral" \| "info" \| "success" \| "warning" \| "danger"`, `size="sm" \| "md"`. Features own wording and status-to-tone mappings. Awards and year markers keep their own designs. |
+
+The dialog frame never calls `showModal`/`close`, handles Escape/backdrop clicks,
+locks scroll, restores focus, or unmounts children. The owning feature retains
+those policies and effects, including upload recovery and unsaved form state.
+WebGL display settings use the medium dialog frame and retain a separate save action.
+The owner preserves drafts on close and blocks dismissal while saving.
+
+Form rhythm can be set at the feature root with `--form-field-gap`,
+`--form-label-size`, `--form-label-gap`, `--form-section-title-size`,
+`--form-section-title-weight`, `--form-section-heading-gap` (plain sections),
+`--form-section-gap`, and `--form-section-padding` (panels). Omit them to retain
+responsive defaults. Feature CSS owns grids, placement and domain decoration;
+shared CSS owns the primitive surface. Do not restyle primitive internals through
+page ancestors when a variant or variable expresses the requirement.
+
+Upload widgets keep their existing `compact` prop and linear context behavior;
+`game-upload--compact` and `game-upload--linear` own their undecorated surfaces.
+Use `variant="plain"` to remove the surface without hiding the heading or chooser.
+Reuse `ProjectMaterialManager`, `MaterialFileRow`, and `FileUploadRows`/`UploadFileRows`;
+do not create another file manager for a style change. Material rows and transfer
+summaries use the shared badge/progress primitives, with state mappings in features. Alerts use `.notice` with `--danger`, `--warning`, or `--success`;
+repeated preserved prose uses `.preserve-lines`.
+
+Measure authored styles with `node apps/web/scripts/measure-styles.mjs [git-ref]`
+from the repository root. This reports parsed declarations, original UTF-8 bytes,
+and JSX style attributes/object properties separately. It does not count moving
+styles to JSX or removing whitespace as structural CSS reduction. Review dynamic
+classes before removing candidate selectors, and preserve mixed selector lists,
+responsive behavior, forced-colors and browser fallbacks.

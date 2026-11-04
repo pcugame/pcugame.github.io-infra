@@ -57,30 +57,6 @@
   line-height: 1;
 }
 
-.project-github-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: var(--color-surface);
-  color: var(--color-text);
-  transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
-}
-
-.project-github-link:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-  transform: translateY(-1px);
-}
-
-.project-github-link__icon {
-  width: 1rem;
-  height: 1rem;
-}
-
 .project-detail section {
   margin-bottom: 2rem;
 }
@@ -543,7 +519,6 @@
 }
 .external-link-row .form-field { margin-bottom: 0; min-width: 0; }
 .external-link-row > button { margin-bottom: 0.1rem; }
-.external-link-row__error { grid-column: 1 / -1; }
 .project-external-link {
   max-width: 100%;
   min-height: 2.25rem;

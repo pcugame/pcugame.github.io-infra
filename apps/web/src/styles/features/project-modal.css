@@ -570,9 +570,16 @@
   font-size: .75rem;
   box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
 }
-.modal-visual[data-award-tone] {
-  outline: 3px solid var(--award-border);
-  outline-offset: -3px;
+/* Paint the award frame above positioned poster media, including on touch screens. */
+.modal-visual[data-award-tone]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 3px solid var(--award-border);
+  border-radius: inherit;
+  pointer-events: none;
 }
 .modal-visual__frame:has(> .project-awards) .modal-visual__zoom {
   top: .75rem;

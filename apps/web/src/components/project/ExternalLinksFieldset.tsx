@@ -63,7 +63,7 @@ export function ExternalLinksFieldset({ value, onChange, disabled = false, showE
 	};
 
 	return (
-		<fieldset disabled={disabled} className="project-external-links">
+		<fieldset disabled={disabled} className="form-section form-section--plain project-external-links">
 			<legend>외부 링크</legend>
 			<p className="field-hint">GitHub, 게임 소개, 다운로드 등 원하는 링크를 최대 20개 추가하세요.</p>
 			<div className="external-links__list">
@@ -74,8 +74,8 @@ export function ExternalLinksFieldset({ value, onChange, disabled = false, showE
 						const inputId = `${id}-${index}-${field}`;
 						return (
 							<div className="form-field" key={field}>
-								<label htmlFor={inputId}>{field === 'label' ? '링크 이름' : 'URL'}</label>
-								<input
+								<label className="form-field__label" htmlFor={inputId}>{field === 'label' ? '링크 이름' : 'URL'}</label>
+								<input className="form-control"
 									id={inputId}
 									aria-label={`외부 링크 ${index + 1} ${field === 'label' ? '이름' : 'URL'}`}
 									aria-invalid={errors.length > 0}

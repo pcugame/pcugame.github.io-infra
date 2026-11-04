@@ -355,7 +355,7 @@ export default function AdminYearsPage() {
 					<p className="field-hint">{orderHint}</p>
 					{env.VISIBILITY_CONTROLS_ENABLED && (
 						<div className="form-field">
-							<label htmlFor="new-visibility">공개 범위 *</label>
+							<label className="form-field__label" htmlFor="new-visibility">공개 범위 *</label>
 							<VisibilitySelect
 								id="new-visibility"
 								value={createVisibility}

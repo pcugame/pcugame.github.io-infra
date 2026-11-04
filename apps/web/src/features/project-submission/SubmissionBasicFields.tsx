@@ -36,16 +36,16 @@ export function SubmissionBasicFields({
 	const exhibition = years.find((item) => item.id === exhibitionId);
 	return (
 		<>
-			<FormSection legend="기본 정보" className="project-basic-fields">
+			<FormSection variant="plain" legend="기본 정보" className="project-basic-fields">
 	            {env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field">
-	             <label htmlFor="project-visibility">공개 범위</label>
+	             <label className="form-field__label" htmlFor="project-visibility">공개 범위</label>
 	             <VisibilitySelect id="project-visibility" value={visibility ?? ''} {...register('visibility')} />
 	             <VisibilityNotice visibility={visibility} exhibitionVisibility={exhibition?.visibility} />
 				<p className="field-hint">작성자·참여자는 공개 범위와 관계없이 조회할 수 있습니다.</p>
 	            </div>}
 
 				<div className="form-field">
-					<label htmlFor="exhibitionId">전시회 <span className="required-mark">*</span></label>
+					<label className="form-field__label" htmlFor="exhibitionId">전시회 <span className="required-mark">*</span></label>
 					{years.length > 0 ? (
 						<Controller
 							control={control}
@@ -72,20 +72,20 @@ export function SubmissionBasicFields({
 				</div>
 
 				<div className="form-field">
-					<label htmlFor="title">제목 <span className="required-mark">*</span></label>
-					<input id="title" aria-required="true" aria-invalid={!!errors.title} aria-describedby={errors.title ? "title-error" : undefined} type="text" {...register('title')} />
+					<label className="form-field__label" htmlFor="title">제목 <span className="required-mark">*</span></label>
+					<input className="form-control" id="title" aria-required="true" aria-invalid={!!errors.title} aria-describedby={errors.title ? "title-error" : undefined} type="text" {...register('title')} />
 					{errors.title && <span id="title-error" className="field-error">{errors.title.message}</span>}
 				</div>
 
 				<div className="form-field">
-					<label htmlFor="summary">한줄 소개</label>
-					<input id="summary" aria-invalid={!!errors.summary} aria-describedby={errors.summary ? "summary-error" : undefined} type="text" {...register('summary')} />
+					<label className="form-field__label" htmlFor="summary">한줄 소개</label>
+					<input className="form-control" id="summary" aria-invalid={!!errors.summary} aria-describedby={errors.summary ? "summary-error" : undefined} type="text" {...register('summary')} />
 					{errors.summary && <span id="summary-error" className="field-error">{errors.summary.message}</span>}
 				</div>
 
 				<div className="form-field">
-					<label htmlFor="description">상세 설명</label>
-					<textarea id="description" aria-invalid={!!errors.description} aria-describedby={errors.description ? "description-error" : undefined} rows={3} {...register('description')} />
+					<label className="form-field__label" htmlFor="description">상세 설명</label>
+					<textarea className="form-control" id="description" aria-invalid={!!errors.description} aria-describedby={errors.description ? "description-error" : undefined} rows={3} {...register('description')} />
 					{errors.description && (
 						<span id="description-error" className="field-error">{errors.description.message}</span>
 					)}

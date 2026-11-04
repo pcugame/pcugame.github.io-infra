@@ -51,17 +51,17 @@ export function SubmissionFileFieldset({
 	} = files;
 
 	return (
-		<FormSection legend="파일 업로드">
+		<FormSection variant="plain" legend="파일 업로드">
 
 			{fileSizeError && (
 				<div className="error-box" role="alert">
-					<p>{fileSizeError}</p>
+					<p className="error-box__message">{fileSizeError}</p>
 				</div>
 			)}
 
 			<div className="form-field">
-				<label htmlFor="poster">포스터 이미지 (JPG · PNG · WebP 최대 {limits.posterMaxMb}MB / PDF 최대 {limits.posterPdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환)</label>
-				<input
+				<label className="form-field__label" htmlFor="poster">포스터 이미지 (JPG · PNG · WebP 최대 {limits.posterMaxMb}MB / PDF 최대 {limits.posterPdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환)</label>
+				<input className="form-file"
 					id="poster"
 					type="file"
 					accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
@@ -90,8 +90,8 @@ export function SubmissionFileFieldset({
 			</div>
 
 			<div className="form-field">
-				<label htmlFor="videoFile">동영상 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 파일당 최대 {limits.videoMaxMb}MB · 프로젝트당 최대 5개)</label>
-				<input
+				<label className="form-field__label" htmlFor="videoFile">동영상 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 파일당 최대 {limits.videoMaxMb}MB · 프로젝트당 최대 5개)</label>
+				<input className="form-file"
 					id="videoFile"
 					type="file"
 					accept="video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv"
@@ -118,8 +118,8 @@ export function SubmissionFileFieldset({
 			</div>
 
 			<div className="form-field">
-				<label htmlFor="images">추가 이미지 (JPG · PNG · WebP 각 최대 {limits.imageMaxMb}MB / PDF 최대 {limits.imagePdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환, 복수 선택)</label>
-				<input
+				<label className="form-field__label" htmlFor="images">추가 이미지 (JPG · PNG · WebP 각 최대 {limits.imageMaxMb}MB / PDF 최대 {limits.imagePdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환, 복수 선택)</label>
+				<input className="form-file"
 					id="images"
 					type="file"
 					accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
@@ -144,8 +144,8 @@ export function SubmissionFileFieldset({
 			{materialLimits && (
 				<>
 					<div className="form-field">
-						<label htmlFor="documents">프로젝트 문서 (텍스트 · Markdown · PDF · 오피스 문서, 파일당 최대 {(materialLimits.maxBytes / 1024 / 1024).toFixed(0)}MB)</label>
-						<input id="documents" type="file" accept="text/plain,text/markdown,application/pdf,.txt,.md,.markdown,.pdf,.doc,.docx,.odt,.ods,.odp,.rtf,.xls,.xlsx,.ppt,.pptx" multiple disabled={documentFiles.length + attachmentFiles.length >= materialLimits.maxCount} ref={documentsInputRef} onChange={handleDocumentsChange} />
+						<label className="form-field__label" htmlFor="documents">프로젝트 문서 (텍스트 · Markdown · PDF · 오피스 문서, 파일당 최대 {(materialLimits.maxBytes / 1024 / 1024).toFixed(0)}MB)</label>
+						<input className="form-file" id="documents" type="file" accept="text/plain,text/markdown,application/pdf,.txt,.md,.markdown,.pdf,.doc,.docx,.odt,.ods,.odp,.rtf,.xls,.xlsx,.ppt,.pptx" multiple disabled={documentFiles.length + attachmentFiles.length >= materialLimits.maxCount} ref={documentsInputRef} onChange={handleDocumentsChange} />
 						{documentFiles.length > 0 && (
 							<div className="file-selected-row">
 								<p className="file-info">{documentFiles.map((file) => file.name).join(', ')}</p>
@@ -154,8 +154,8 @@ export function SubmissionFileFieldset({
 						)}
 					</div>
 					<div className="form-field">
-						<label htmlFor="attachments">기타 첨부자료 (문서와 합쳐 프로젝트당 최대 {materialLimits.maxCount}개 · 파일당 최대 {(materialLimits.maxBytes / 1024 / 1024).toFixed(0)}MB)</label>
-						<input id="attachments" type="file" multiple disabled={documentFiles.length + attachmentFiles.length >= materialLimits.maxCount} ref={attachmentsInputRef} onChange={handleAttachmentsChange} />
+						<label className="form-field__label" htmlFor="attachments">기타 첨부자료 (문서와 합쳐 프로젝트당 최대 {materialLimits.maxCount}개 · 파일당 최대 {(materialLimits.maxBytes / 1024 / 1024).toFixed(0)}MB)</label>
+						<input className="form-file" id="attachments" type="file" multiple disabled={documentFiles.length + attachmentFiles.length >= materialLimits.maxCount} ref={attachmentsInputRef} onChange={handleAttachmentsChange} />
 						{attachmentFiles.length > 0 && (
 							<div className="file-selected-row">
 								<p className="file-info">{attachmentFiles.map((file) => file.name).join(', ')}</p>
@@ -167,8 +167,8 @@ export function SubmissionFileFieldset({
 			)}
 
 			<div className="form-field">
-				<label htmlFor="gameFile">게임 파일 (ZIP, 최대 {limits.gameMaxMb}MB)</label>
-				<input
+				<label className="form-field__label" htmlFor="gameFile">게임 파일 (ZIP, 최대 {limits.gameMaxMb}MB)</label>
+				<input className="form-file"
 					id="gameFile"
 					type="file"
 					accept=".zip,application/zip,application/x-zip-compressed"
@@ -195,8 +195,8 @@ export function SubmissionFileFieldset({
 			</div>
 
 			<div className="form-field">
-				<label htmlFor="webglFile">WebGL 빌드 파일 (ZIP, 최대 {limits.gameMaxMb}MB)</label>
-				<input
+				<label className="form-field__label" htmlFor="webglFile">WebGL 빌드 파일 (ZIP, 최대 {limits.gameMaxMb}MB)</label>
+				<input className="form-file"
 					id="webglFile"
 					type="file"
 					accept=".zip,application/zip,application/x-zip-compressed"

@@ -49,69 +49,6 @@
   margin: 0.5rem 0;
 }
 
-/* ── Status badges ───────────────────────────────────────────── */
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.badge--published {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.badge--archived {
-  background: #e5e7eb;
-  color: #374151;
-}
-
-.incomplete-badge {
-  display: inline-block;
-  margin-left: 0.5rem;
-  padding: 0.15em 0.5em;
-  font-size: 0.7em;
-  font-weight: 600;
-  line-height: 1.4;
-  color: #92400e;
-  background: #fef3c7;
-  border: 1px solid #fde68a;
-  border-radius: 4px;
-  vertical-align: middle;
-}
-
-.incomplete-notice {
-  margin: 0.5rem 0 1rem;
-  padding: 0.6rem 1rem;
-  font-size: 0.9rem;
-  color: #92400e;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: var(--radius);
-}
-
-.incomplete-notice--missing {
-  color: #991b1b;
-  background: #fef2f2;
-  border-color: #fecaca;
-}
-
-[data-theme='dark'] .badge--published {
-  background: rgba(52, 211, 153, 0.12);
-  color: #34d399;
-}
-
-[data-theme='dark'] .badge--archived {
-  background: rgba(156, 163, 175, 0.12);
-  color: #9ca3af;
-}
-
 [data-theme='dark'] .error-box {
   background: rgba(248, 113, 113, 0.08);
   border-color: rgba(248, 113, 113, 0.2);
@@ -200,11 +137,6 @@
     font-size: 0.92rem;
   }
 
-  .badge {
-    font-size: 0.68rem;
-    padding: 0.15rem 0.5rem;
-  }
-
   .mock-switcher {
     bottom: 4.25rem;
     right: 0.5rem;
@@ -225,3 +157,45 @@ body:has(.project-edit-apply) .mock-switcher {
     max-height: calc(100svh - 16rem);
   }
 }
+
+/* Domain status labels and mappings stay in their features. */
+.status-badge {
+  --status-color: #475569;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: .3rem;
+  padding: .2rem .6rem;
+  border-radius: 999px;
+  font-size: .72rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--status-color);
+  background: color-mix(in srgb, var(--status-color) 12%, var(--color-surface));
+}
+.status-badge--sm { font-size: .68rem; padding: .15rem .5rem; }
+.status-badge--info { --status-color: var(--color-primary); }
+.status-badge--success { --status-color: #065f46; }
+.status-badge--warning { --status-color: #92400e; }
+.status-badge--danger { --status-color: #b91c1c; }
+[data-theme='dark'] .status-badge--neutral { --status-color: var(--color-secondary); }
+[data-theme='dark'] .status-badge--success { --status-color: var(--color-success); }
+[data-theme='dark'] .status-badge--danger { --status-color: var(--color-danger); }
+[data-theme='dark'] .status-badge--warning { --status-color: #fbbf24; }
+
+.notice {
+  --notice-color: var(--color-primary);
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid color-mix(in srgb, var(--notice-color) 25%, var(--color-border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--notice-color) 8%, var(--color-surface));
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+.notice > p { margin-top: .35rem; }
+.notice--danger { --notice-color: var(--color-danger); }
+.notice--warning { --notice-color: #b45309; }
+.notice--success { --notice-color: var(--color-success); }
+.spinner--small { width: 1.4rem; height: 1.4rem; border-width: 3px; }
+.preserve-lines { white-space: pre-wrap; }

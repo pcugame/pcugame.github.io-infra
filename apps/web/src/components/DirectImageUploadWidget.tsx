@@ -1,3 +1,4 @@
+import { ProgressBar } from './ui';
 import { usePreventWindowClose } from './common/usePreventWindowClose';
 import { LinearUploadContext } from '../lib/upload/linearPresentation';
 import { UploadFileRows } from './common/UploadFileRows';
@@ -42,6 +43,8 @@ interface Props {
 	/** An enclosing row provides the heading, chooser, and selected file summary. */
 	displayNames?: string[];
 	compact?: boolean;
+	/** Surface only; does not hide controls or change upload behavior. */
+	variant?: 'panel' | 'plain';
 	/** Suppress the generic heading when embedded in an asset-management row. */
 	hideTitle?: boolean;
 	/** Lets an enclosing owner control mutually exclusive mutations such as delete. */
@@ -68,6 +71,7 @@ function ImageUploadSession({
 	onCancelled,
 	displayNames,
 	compact = false,
+	variant = 'panel',
 	hideTitle = false,
 	onBusyChange,
 	submissionItems = [],
@@ -430,7 +434,7 @@ function ImageUploadSession({
 			</div>);
 
 	return (
-		<div className={`game-upload${linear ? ' game-upload--linear' : ''}`} data-phase={phase}>
+		<div className={`game-upload${linear ? ' game-upload--linear' : compact ? ' game-upload--compact' : variant === 'plain' ? ' game-upload--plain' : ''}`} data-phase={phase}>
 			{linear && <UploadFileRows actions={uploadActions} names={files.length ? files.map(file => file.name) : (displayNames?.length ? displayNames : [resumable?.originalName ?? title])} completed={files.length ? completed : 0} phase={phase} percent={progress?.percent} />}
 			{!linear && !compact && !hideTitle && <h3 className="game-upload__title">{title}</h3>}
 			{!linear && resumable && phase === 'idle' && <p className="field-hint">중단된 업로드가 있습니다. 동일한 파일을 다시 선택해 재개하세요.</p>}
@@ -452,10 +456,8 @@ function ImageUploadSession({
 			{!linear && !compact && files.length > 0 && <p className="game-upload__file-summary">{files.length}개 파일 선택됨 ({completed}/{files.length} 완료)</p>}
 			{!linear && progress && (phase === 'uploading' || phase === 'verifying' || phase === 'ready') && (
 				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
-					<div className="game-upload__progress-track" role="progressbar" aria-label={`${title} 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
-						<div className={`game-upload__progress-bar ${phase === 'ready' ? 'game-upload__progress-bar--done' : ''}`} style={{ width: `${progress.percent}%` }} />
-						<span className="game-upload__progress-label">{progress.percent}%</span>
-					</div>
+					<ProgressBar aria-label={`${title} 업로드 진행률`} value={progress.percent} tone={phase === 'ready' ? 'success' : 'info'} />
+					<span className="game-upload__progress-label">{progress.percent}%</span>
 					<p className="game-upload__progress-status">
 						{phase === 'ready' ? '업로드 완료!' : phase === 'verifying' ? '이미지 검증 및 변환 중…' : '업로드 중…'}
 					</p>

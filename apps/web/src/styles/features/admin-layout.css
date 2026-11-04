@@ -362,7 +362,7 @@
   font-size: 0.85rem;
   line-height: 1.5;
 }
-.admin-content .form-field { margin-bottom: 0.75rem; }
+.admin-content { --form-field-gap: .75rem; }
 .admin-content .network-section-heading h2 { font-size: var(--admin-section-title-size); }
 @media (max-width: 50em) {
   .admin-layout {
@@ -373,7 +373,6 @@
 
 .admin-content .form-section > legend,
 .admin-content .year-create-form > h3 { padding-inline: 0; }
-.admin-content .form-row > .form-field { margin-bottom: 0; }
 
 /* Adjust the label's optical center without moving or resizing the icon. */
 @media (min-width: 60.001em) {
