@@ -1,61 +1,54 @@
-import { useId, useState } from 'react';
-import { StudioFileHeading } from '../../../components/project/editor/StudioFileHeading';
+import { materialGroups, type MaterialGroup } from '../../../components/project/editor/materialGroups';
+import { useState } from 'react';
+import { ProjectMaterialManager, MaterialPanel, MaterialUploadSummary } from '../../../components/project/editor/ProjectMaterialManager';
+import { MaterialFileRow } from '../../../components/project/editor/MaterialFileRow';
+import { classifyMaterialSelection } from '../../../components/project/editor/materialSelection';
+import { ProjectPosterPreview } from '../../../components/project/editor/ProjectPosterPreview';
+import { WebglBuildGuideLink } from '../../../components/project/WebglBuildGuideLink';
+import { FileUploadRow } from '../../../components/common/FileUploadRows';
 import { studioFileHint } from '../../../components/project/editor/studioFileHint';
-import { ProjectUploadDropZone } from '../../../components/project/editor/ProjectUploadDropZone';
-import { classifyProjectFile, type ProjectUploadKind } from '../../../lib/upload/project-files';
-import { formatFileSizeMb } from '../../../lib/upload/fileValidation';
 import type { ClientUploadLimits, MaterialUploadLimits } from '../../../lib/upload-limits';
 import type { SubmissionFilesState } from '../useSubmissionFiles';
-import { selectedStudioFiles, studioFileGroups, type StudioFileGroup } from './fileGroups';
+import type { useProjectSubmissionForm } from '../useProjectSubmissionForm';
+import { selectedStudioFiles } from './fileGroups';
+import { useStudioSubmissionUploads } from './useStudioSubmissionUploads';
+import { getApiErrorMessage } from '../../../lib/api';
 
-export function StudioFileSelection({ files, enabled, limits, materialLimits, retryConfig }: {
-	files: SubmissionFilesState;
-	enabled: boolean;
-	limits: ClientUploadLimits;
-	materialLimits?: MaterialUploadLimits;
-	retryConfig: () => void;
+export function StudioFileSelection({ files, enabled, limits, materialLimits, retryConfig, submission, title = '작품' }: {
+ files: SubmissionFilesState; enabled: boolean; limits: ClientUploadLimits; materialLimits?: MaterialUploadLimits; retryConfig: () => void;
+ submission?: ReturnType<typeof useProjectSubmissionForm>; title?: string;
 }) {
-	return <div className="studio-files-container"><div className="studio-files-grid">
-		{studioFileGroups.map(group => <FileGroup key={group.id} group={group} files={files} enabled={enabled} limits={limits} materialLimits={materialLimits} retryConfig={retryConfig} />)}
-	</div></div>;
-}
-function FileGroup({ group, files, enabled, limits, materialLimits, retryConfig }: Parameters<typeof StudioFileSelection>[0] & { group: StudioFileGroup }) {
-	const id = useId();
-	const [error, setError] = useState<string | null>(null);
-	const build = group.id === 'native' || group.id === 'web';
-	const hint = studioFileHint(group.kinds[0], limits, materialLimits);
-	const select = (chosen: File[]) => {
-		if (!enabled || !chosen.length) return;
-		const typed: { kind: Exclude<ProjectUploadKind, 'POSTER'>; file: File }[] = [];
-		if (build && chosen.length !== 1) { setError('ZIP 파일 한 개만 선택하세요.'); return; }
-		for (const file of chosen) {
-			const kind = classifyProjectFile(file, 'files');
-			if (build) {
-				if (kind !== 'ZIP') { setError('빌드는 ZIP 파일만 선택할 수 있습니다.'); return; }
-				typed.push({ kind: group.id === 'native' ? 'GAME' : 'WEBGL', file });
-			} else if (group.id === 'video') {
-				if (kind !== 'VIDEO') { setError('지원하는 동영상 파일만 선택하세요.'); return; }
-				typed.push({ kind, file });
-			} else {
-				if (kind === 'VIDEO' || file.type.startsWith('video/')) { setError('영상은 동영상 영역에서 선택하세요.'); return; }
-				const materialKind = kind === 'IMAGE' || kind === 'DOCUMENT' ? kind : 'ATTACHMENT';
-				if (materialKind !== 'IMAGE' && !materialLimits) { setError('자료 업로드 설정을 다시 불러온 뒤 문서·첨부자료를 선택하세요.'); return; }
-				typed.push({ kind: materialKind, file });
-			}
-		}
-		files.addFiles(typed, setError);
-	};
-	const selected = selectedStudioFiles(files).filter(item => (group.kinds as readonly string[]).includes(item.kind));
-	return <fieldset className="form-section submission-file-fieldset" data-file-group={group.id} aria-labelledby={`${id}-title`} aria-describedby={[`${id}-hint`, error ? `${id}-error` : ''].filter(Boolean).join(' ')}>
-		<StudioFileHeading id={id} label={group.label} hint={hint} error={error} webgl={group.id === 'web'} />
-		<ProjectUploadDropZone zone="files" compact label={`${group.label} 파일 선택`} enabled={enabled} hint={hint}
-			accept={build ? '.zip,application/zip,application/x-zip-compressed' : group.id === 'video' ? '.mp4,.mov,.m4v,.3gp,.3g2,.mkv,.webm,.avi,.wmv,.asf' : undefined}
-			multiple={!build} onFiles={select} footer={<div className="studio-files-scroll" tabIndex={selected.length > 0 ? 0 : undefined} aria-label={`${group.label} 파일 목록`}>
-				{group.id === 'materials' && !materialLimits && <p className="field-hint">문서·첨부자료는 설정 조회 후 선택할 수 있습니다. <button type="button" className="btn btn--secondary btn--small" disabled={!enabled} onClick={retryConfig}>설정 다시 불러오기</button></p>}
-				{selected.length > 0 && <ul className="project-upload-queue" aria-label={`선택한 ${group.label}`}>
-					{selected.map(({ kind, file }, index) => <li key={`${kind}:${index}`}><p title={`${file.name} · ${formatFileSizeMb(file.size)} MB`}><strong>{file.name}</strong> · {formatFileSizeMb(file.size)} MB</p>
-						<button type="button" className="btn btn--secondary btn--small" disabled={!enabled} aria-label={`${file.name} 선택 취소`} onClick={() => { files.removeFile(kind, file); setError(null); }}>선택 취소</button></li>)}
-				</ul>}
-			</div>} />
-	</fieldset>;
+ const { queues, rows } = useStudioSubmissionUploads(files, submission);
+ const [errors, setErrors] = useState<Record<string, string | null>>({});
+ const selected = [...(files.posterFile ? [{ kind: 'POSTER' as const, file: files.posterFile }] : []), ...selectedStudioFiles(files)];
+ const uploading = submission?.createdProjectId != null;
+ const busy = !!(submission?.isSubmitting || submission?.showGameProgress);
+ const select = (group: MaterialGroup, chosen: File[]) => {
+  if (!enabled || !chosen.length) return;
+  const error = (message: string | null) => setErrors(previous => ({ ...previous, [group.id]: message }));
+  try {
+   const typed = classifyMaterialSelection(group, chosen);
+   if (group.id === 'poster') { error(null); files.selectPoster(chosen[0]); }
+   else files.addFiles(typed.filter((item): item is typeof item & { kind: Exclude<typeof item.kind, 'POSTER'> } => item.kind !== 'POSTER'), error);
+  } catch (cause) { error((cause as Error).message); }
+ };
+ const failure = submission?.submissionError ?? submission?.submitMutation.error;
+ return <ProjectMaterialManager busy={busy} firstKind={rows.find(row => row.phase !== 'ready')?.kind ?? selected[0]?.kind}
+  summary={busy && <>
+   {uploading ? <MaterialUploadSummary rows={rows}><button type="button" className="btn btn--danger btn--small" onClick={() => void submission?.cancelSubmission()}>전체 업로드 중단</button></MaterialUploadSummary> : <p role="status">작품 정보를 저장하고 있습니다.</p>}
+   {uploading && selected.length === 0 && rows.some(row => !row.file && row.phase === 'waiting') && <p className="field-hint">원본 파일을 다시 선택해 주세요. 완료된 파일은 유지됩니다.</p>}
+   {failure != null && <p className="field-error" role="alert">{getApiErrorMessage(failure)}</p>}
+   {submission?.canRetryStatus && <button type="button" className="btn btn--secondary" disabled={submission.isFinalizing} onClick={() => void submission.retryStatus()}>제출 상태 다시 확인</button>}
+   {failure != null && uploading && <button type="button" className="btn btn--secondary" onClick={submission?.goToEdit}>작품에서 수정·재시도</button>}
+  </>}
+  groups={materialGroups.map(group => {
+   const matches = (kind: string) => (group.kinds as readonly string[]).includes(kind);
+   const chosen = selected.filter(item => matches(item.kind));
+   const progress = rows.filter(row => matches(row.kind));
+   const count = uploading ? submission!.submissionItems.filter(item => matches(item.kind)).length : chosen.length;
+   return { id: group.id, count, failed: !!errors[group.id] || (group.id === 'poster' && !!files.fileSizeError) || progress.some(row => ['failed', 'cancel-unconfirmed', 'cancelled'].includes(row.phase)), content: <MaterialPanel group={group} count={count} enabled={enabled} onFiles={chosen => select(group, chosen)} hint={studioFileHint(group.kinds[0], limits, materialLimits)} error={errors[group.id] ?? (group.id === 'poster' ? files.fileSizeError : null)} help={group.id === 'web' ? <WebglBuildGuideLink /> : undefined}>
+    {group.id === 'materials' && !materialLimits && <p className="field-hint">문서·첨부자료는 설정 조회 후 선택할 수 있습니다. <button type="button" className="btn btn--secondary btn--small" disabled={!enabled} onClick={retryConfig}>설정 다시 불러오기</button></p>}
+    {uploading ? progress.map(row => <FileUploadRow key={row.id} row={row} queue={queues[row.kind]} material />) : chosen.map(({ kind, file }, index) => <MaterialFileRow key={`${kind}:${index}`} name={file.name} kind={kind} size={file.size} status="저장 시 업로드" icon={kind === 'POSTER' && files.posterPreview ? <ProjectPosterPreview title={title} localFile={file} trigger={<img src={files.posterPreview} alt="포스터" />} /> : undefined} actions={[{ label: '선택 취소', disabled: !enabled, onClick: () => { files.removeFile(kind, file); setErrors(previous => ({ ...previous, [group.id]: null })); } }]} />)}
+   </MaterialPanel> };
+  })} />;
 }

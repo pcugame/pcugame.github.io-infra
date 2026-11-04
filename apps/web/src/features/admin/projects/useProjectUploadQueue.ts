@@ -112,7 +112,7 @@ export function useProjectUploadQueue(
 		? 'ZIP 파일의 용도를 선택해 주세요.'
 		: issues.values().next().value ?? null;
 	const add = (files: File[], zone: UploadZone, kinds?: ProjectUploadKind[]): string | null => {
-		if (!enabled || locked || applying.current || files.length === 0) return null;
+		if (!enabled || locked || applying.current || active || files.length === 0) return null;
 		if (zone === 'poster') {
 			if (files.length !== 1 || classifyProjectFile(files[0]!, zone) !== 'POSTER') {
 				setPosterError('포스터는 JPG·PNG·WebP·PDF 파일 한 개만 선택해 주세요.');
@@ -217,7 +217,7 @@ export function useProjectUploadQueue(
 		queueId,
 		entries,
 		project,
-		locked: locked || isApplying,
+		locked: locked || isApplying || !!active,
 		setLocked,
 		isApplying,
 		hasChanges: entries.some(entry => entry.status !== 'done' && entry.status !== 'removed') || removals.length > 0 || removeWebgl || refreshNeeded.current || refreshError,
@@ -231,11 +231,11 @@ export function useProjectUploadQueue(
 		storedAssets: project.assets.filter((asset) => !deleted.current.has(asset.id)),
 		hasWebgl: webglIdentity !== null && webglIdentity !== webglDeleted.current,
 		toggleRemoval: (id: number) => {
-			if (!enabled || locked || applying.current) return;
+			if (!enabled || locked || applying.current || active) return;
 			setRemovals((ids) => ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id]);
 		},
 		toggleWebglRemoval: () => {
-			if (enabled && !locked && !applying.current) setRemoveWebgl((value) => !value);
+			if (enabled && !locked && !applying.current && !active) setRemoveWebgl((value) => !value);
 		},
 		active,
 		issues,

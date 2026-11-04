@@ -842,3 +842,31 @@ html:has(.admin-project-edit-page) { scroll-padding-block: 5rem 16rem; }
   .admin-project-edit-grid .project-requirements input[type='checkbox'] { appearance: auto; }
   .admin-project-edit-grid .project-requirements input[type='checkbox']::after { content: none; }
 }
+
+/* Web build settings stay next to the build controls and open in the top layer. */
+.webgl-settings-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.webgl-settings-dialog[open] { display: flex; flex-direction: column; }
+.webgl-settings-dialog::backdrop { background: rgb(15 23 42 / 42%); backdrop-filter: blur(3px); }
+.webgl-settings-dialog__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.25rem; border-bottom: 1px solid var(--color-border); }
+.webgl-settings-dialog__header h2 { margin: 0; font-size: 1rem; }
+.webgl-settings-dialog__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 1rem 1.25rem; }
+.webgl-settings-dialog .project-form { margin-bottom: 0; }
+.webgl-settings-dialog .form-section { margin: 1rem 0; padding: 1rem; }
+.webgl-settings-dialog :is(.field-hint, .field-error, .success-message) { line-height: 1.6; overflow-wrap: anywhere; }
+.webgl-settings-dialog .form-field { min-width: 0; }
+.webgl-settings-dialog__body > .btn { margin-top: 1rem; }
+@media (max-width: 50em) {
+  .webgl-settings-dialog { width: calc(100vw - 1.25rem); max-height: calc(100dvh - 1.25rem); }
+  .webgl-settings-dialog__header, .webgl-settings-dialog__body { padding: 1rem; }
+}

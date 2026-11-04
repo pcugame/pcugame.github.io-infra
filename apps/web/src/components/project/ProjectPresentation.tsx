@@ -1,0 +1,333 @@
+import { ProjectAwards } from './AwardBadge';
+import { awardStyle, awardTone, orderedAwards } from './awardTone';
+import { createPortal } from 'react-dom';
+import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+
+import type { ProjectVideo as VideoInfo, ResponsiveImage as ResponsiveImageData } from '@pcu/contracts';
+import type { PublicProjectDetailResponse } from '@pcu/contracts';
+
+import { LoadingSpinner, ResponsiveImage } from '../common';
+import { ProjectPublicMeta } from './ProjectPublicMeta';
+import { ProjectVideo } from './ProjectVideo';
+import { ProjectActions } from './ProjectActions';
+import { ProjectAttachments } from './ProjectAttachments';
+import { getVideoLabel } from '../../lib/video-label';
+
+export type ProjectPresentationData = Pick<PublicProjectDetailResponse,
+ 'id' | 'title' | 'summary' | 'description' | 'githubUrl' | 'externalLinks' | 'platforms' | 'hardwareRequirements' | 'awards' | 'poster' | 'video' | 'videos' | 'images' | 'members' | 'attachments' | 'gameDownloadUrl' | 'webglUrl' | 'webglPlayUrl'>;
+interface Props {
+ project?: ProjectPresentationData;
+ isLoading?: boolean;
+ onClose?: () => void;
+ inline?: boolean;
+ active?: boolean;
+ notice?: ReactNode;
+ pendingActions?: { game?: string; webgl?: string };
+ renderVideo?: (video: VideoInfo) => ReactNode;
+}
+
+type MediaItem =
+	| (VideoInfo & { type: 'video'; label: string })
+	| { type: 'poster'; image: ResponsiveImageData; label: string }
+	| { type: 'image'; id: number; image: ResponsiveImageData; label: string };
+
+export function ProjectPresentation({ project, isLoading, onClose, inline = false, active = true, notice, pendingActions, renderVideo }: Props) {
+ const overlayRef = useRef<HTMLDivElement>(null);
+ const [activeIndex, setActiveIndex] = useState(0);
+ const [lightboxImage, setLightboxImage] = useState<ResponsiveImageData | null>(null);
+ useEffect(() => {
+  if (!active) overlayRef.current?.querySelectorAll('video').forEach(video => video.pause());
+ }, [active]);
+
+	// ESC 닫기
+	useEffect(() => {
+		if (inline && !lightboxImage) return;
+		const previousOverflow = document.body.style.overflow;
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key !== 'Escape' || event.defaultPrevented) return;
+			// Menus and fullscreen handle Escape before the surrounding project dialog.
+			if (document.fullscreenElement || overlayRef.current?.querySelector('[data-fullscreen]')) return;
+			// Video.js also listens on document; its preventDefault may run after ours.
+			if (event.composedPath().some(node => node instanceof Element && node.matches('.media-menu-popup, .media-dialog-popup'))
+				|| overlayRef.current?.querySelector('.media-menu-popup[data-open], .media-dialog-popup[data-open]')) return;
+			if (lightboxImage) {
+				setLightboxImage(null);
+			} else {
+				onClose?.();
+			}
+		};
+		document.addEventListener('keydown', onKey);
+		document.body.style.overflow = 'hidden';
+		return () => {
+			document.removeEventListener('keydown', onKey);
+			document.body.style.overflow = previousOverflow;
+		};
+	}, [onClose, lightboxImage, inline]);
+
+	// 오버레이 클릭 닫기
+	const handleOverlayClick = (e: React.MouseEvent) => {
+		if (!inline && e.target === overlayRef.current) onClose?.();
+	};
+
+	const closeLightbox = useCallback((e: React.MouseEvent) => {
+		if (e.target === e.currentTarget) setLightboxImage(null);
+	}, []);
+
+	// 미디어 목록 구성: 포스터 > 동영상 > 사진
+	const mediaItems: MediaItem[] = [];
+	const projectVideos = project?.videos?.length
+		? project.videos
+		: project?.video
+			? [project.video]
+			: [];
+	if (project) {
+		if (project.poster) {
+			mediaItems.push({
+				type: 'poster',
+				image: project.poster,
+				label: '포스터',
+			});
+		}
+		projectVideos.forEach((video, index) => {
+			mediaItems.push({
+				...video,
+				type: 'video',
+				label: getVideoLabel(video, index),
+			});
+		});
+		const galleryImages = project.images.filter((img) => img.kind === 'IMAGE');
+		galleryImages.forEach((img, i) => {
+			mediaItems.push({
+				type: 'image',
+				id: img.id,
+				image: img.image,
+				label: `사진 ${i + 1}`,
+			});
+		});
+	}
+
+	const current = mediaItems[activeIndex] ?? null;
+
+	// activeIndex가 범위를 벗어나지 않도록
+	const safeIndex = Math.min(activeIndex, Math.max(mediaItems.length - 1, 0));
+	if (safeIndex !== activeIndex && mediaItems.length > 0) {
+		setActiveIndex(safeIndex);
+	}
+
+	const isImageType = current?.type === 'poster' || current?.type === 'image';
+
+	// 동영상 캐러셀 헬퍼
+	const videoStartIndex = mediaItems.findIndex((m) => m.type === 'video');
+	const videoCount = projectVideos.length;
+	const currentVideoOffset = current?.type === 'video' ? activeIndex - videoStartIndex : 0;
+
+	const prevVideo = () => {
+		if (videoCount < 2) return;
+		setActiveIndex(videoStartIndex + (currentVideoOffset - 1 + videoCount) % videoCount);
+	};
+	const videoAt = (offset: number) => mediaItems[videoStartIndex + offset] as Extract<MediaItem, { type: 'video' }> | undefined;
+	const previousVideo = videoAt((currentVideoOffset - 1 + videoCount) % videoCount);
+	const nextVideoItem = videoAt((currentVideoOffset + 1) % videoCount);
+	const nextVideo = () => {
+		if (videoCount < 2) return;
+		setActiveIndex(videoStartIndex + (currentVideoOffset + 1) % videoCount);
+	};
+
+	return (
+		<div className={inline ? "project-preview-inline" : "modal-overlay"} ref={overlayRef} onClick={handleOverlayClick}>
+			<div className={inline ? "project-preview-inline__content modal-panel--project" : "modal-panel modal-panel--project"} role={inline ? "region" : "dialog"} aria-modal={inline ? undefined : true} aria-label={inline ? "전시 화면 미리보기" : "작품"} tabIndex={inline ? 0 : undefined}>
+				{!inline && <button type="button" className="modal-close" onClick={onClose} aria-label="닫기">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+					</svg>
+				</button>}
+                {notice && <div className="preview-banner" role="note">{notice}</div>}
+
+				{isLoading && (
+					<div className="modal-loading">
+						<LoadingSpinner />
+					</div>
+				)}
+
+				{project && (
+					<>
+						<div className="modal-content">
+						{/* 메인 미디어 표시 — 16:9 고정 비율 */}
+						{current && (
+							<div className="modal-visual" style={current.type === 'poster' ? awardStyle(orderedAwards(project.awards)[0]) : undefined} data-award-tone={current.type === 'poster' && project.awards?.length ? awardTone(orderedAwards(project.awards)[0]) : undefined}>
+								<div className={`modal-visual__frame${current.type === 'video' ? ' modal-visual__frame--video' : ''}`}>
+									{current.type === 'video' ? (
+										renderVideo ? renderVideo(current) : <ProjectVideo
+											key={current.assetId ?? current.url ?? activeIndex}
+											video={current}
+											poster={project.poster}
+											title={project.title}
+										/>
+									) : (
+										<ResponsiveImage
+											image={current.image}
+											alt={current.label}
+											className="modal-visual__img"
+											sizes="(max-width: 768px) 100vw, 960px"
+											decoding="async"
+										/>
+									)}
+									{current.type === 'poster' && <ProjectAwards awards={project.awards} />}
+									{/* 사진/포스터일 때 확대 버튼 */}
+									{isImageType && (
+										<button type="button"
+											className="modal-visual__zoom"
+											onClick={() => setLightboxImage(current.image)}
+											aria-label="확대해서 보기"
+										>
+											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+												<circle cx="11" cy="11" r="8" />
+												<line x1="21" y1="21" x2="16.65" y2="16.65" />
+												<line x1="11" y1="8" x2="11" y2="14" />
+												<line x1="8" y1="11" x2="14" y2="11" />
+											</svg>
+										</button>
+									)}
+								</div>
+								{current.type === 'video' && (
+									<p className="modal-video-label">{current.label}</p>
+								)}
+								{/* 동영상 여러 개일 때 dot + 화살표 네비게이션 */}
+								{current.type === 'video' && videoCount > 1 && (
+									<div className="modal-video-nav">
+									<button type="button" className="modal-video-nav__arrow" onClick={prevVideo} aria-label={`이전 ${previousVideo?.label ?? '영상'}`}>
+											<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+												<polyline points="15 18 9 12 15 6" />
+											</svg>
+										</button>
+										<div className="modal-video-dots">
+									{Array.from({ length: videoCount }, (_, i) => {
+										const video = videoAt(i);
+										return <button type="button"
+											key={video?.assetId ?? video?.url ?? i}
+													className={`modal-video-dot${i === currentVideoOffset ? ' modal-video-dot--active' : ''}`}
+													onClick={() => setActiveIndex(videoStartIndex + i)}
+											aria-label={video?.label ?? '영상'}
+										/>;
+									})}
+										</div>
+									<button type="button" className="modal-video-nav__arrow" onClick={nextVideo} aria-label={`다음 ${nextVideoItem?.label ?? '영상'}`}>
+											<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+												<polyline points="9 18 15 12 9 6" />
+											</svg>
+										</button>
+									</div>
+								)}
+							</div>
+						)}
+
+						{/* 미디어 탭 목록 */}
+						{mediaItems.length > 1 && (
+							<div className="modal-media-tabs">
+								{mediaItems.map((item, i) => {
+									// 동영상이 여러 개면 첫 번째 이후의 동영상 탭은 생략 (dot nav로 대체)
+									if (item.type === 'video' && i > videoStartIndex) return null;
+
+									const isActive = item.type === 'video'
+										? current?.type === 'video'
+										: i === activeIndex;
+
+									return (
+										<button type="button"
+										key={item.type === 'image' ? `img-${item.id}` : item.type === 'video' ? `video-${item.assetId ?? item.url ?? i}` : `${item.type}-${i}`}
+											className={`modal-media-tab ${isActive ? 'modal-media-tab--active' : ''}`}
+											onClick={() => setActiveIndex(i)}
+										>
+											{item.type === 'video' ? (
+												<span className="modal-media-tab__icon">
+													<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+														<polygon points="5 3 19 12 5 21 5 3" />
+													</svg>
+												</span>
+											) : (
+												<ResponsiveImage
+													image={item.image}
+													alt={item.label}
+													className="modal-media-tab__thumb"
+													sizes="96px"
+													loading="lazy"
+													decoding="async"
+												/>
+											)}
+											<span className="modal-media-tab__label">
+												{item.type === 'video' ? '동영상' : item.label}
+											</span>
+										</button>
+									);
+								})}
+							</div>
+						)}
+
+						{/* 본문 */}
+						<div className="modal-body">
+							{inline ? <h2 className="modal-title">{project.title}</h2> : <h1 className="modal-title">{project.title}</h1>}
+
+							{current?.type !== 'poster' && <ProjectAwards awards={project.awards} />}
+
+							<ProjectPublicMeta githubUrl={project.githubUrl} externalLinks={project.externalLinks} platforms={project.platforms} hardwareRequirements={project.hardwareRequirements} />
+
+							{/* 참여 학생 */}
+							<div className="modal-members">
+								{project.members.map((m) => (
+									<span key={m.id} className="modal-member">
+										{m.name}
+										<span className="modal-member__id">{m.studentId}</span>
+									</span>
+								))}
+							</div>
+
+							{/* 요약 */}
+							{project.summary && (
+								<p className="modal-summary">{project.summary}</p>
+							)}
+
+							{/* 상세 설명 */}
+							{project.description && (
+								<div className="modal-description">
+									<div className="prose">{project.description}</div>
+								</div>
+							)}
+
+							<ProjectAttachments attachments={project.attachments} className="modal-attachments" />
+						</div>
+						</div>
+						<ProjectActions
+							projectId={project.id}
+							gameDownloadUrl={project.gameDownloadUrl}
+							webglUrl={project.webglUrl}
+							webglPlayUrl={project.webglPlayUrl}
+							className="modal-action-bar"
+                            pending={pendingActions}
+						/>
+					</>
+				)}
+			</div>
+
+			{/* 라이트박스 (사진 확대) */}
+			{lightboxImage && createPortal(
+				<div className="modal-lightbox" onClick={closeLightbox}>
+					<button type="button"
+						className="modal-lightbox__close"
+						onClick={() => setLightboxImage(null)}
+						aria-label="닫기"
+					>
+						<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+						</svg>
+					</button>
+					<img
+						src={lightboxImage.original.url}
+						alt="확대 이미지"
+						className="modal-lightbox__img"
+					/>
+				</div>
+            , document.body)}
+		</div>
+	);
+}
