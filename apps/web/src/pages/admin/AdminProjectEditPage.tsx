@@ -1,3 +1,4 @@
+import { StatusBadge } from '../../components/ui';
 import { AwardSettings } from '../../features/admin/awards/AwardSettings';
 import { AdminVideoRetryPanel } from '../../features/admin/projects/AdminVideoRetryPanel';
 import { publicationReadiness } from '@pcu/contracts';
@@ -212,9 +213,9 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 			{form.formState.errors.status && <p className="field-error" role="alert">{form.formState.errors.status.message}</p>}
 			{!canEditContent && project.canRequestChange && <div className="admin-card" style={{ marginBottom: '1rem' }}><p>이 작품이 속한 연도는 닫혀 있습니다. 변경 내용은 운영자 승인 후 반영됩니다.</p><Link className="btn btn--primary" to={`/me/projects/${id}/change-request`}>수정 요청 작성</Link></div>}
 			<form id={formId} onSubmit={onApply} />
-			<ProjectEditStudio title={<>작품 수정{isPrivileged && project.isIncomplete && <span className="incomplete-badge">불완전</span>}</>} secondaryAction={<Link className="btn btn--secondary project-edit-header__back" to={isPrivileged ? '/admin/projects' : '/me/projects'} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 돌아가시겠어요?'))) event.preventDefault(); }} aria-disabled={pending}>{isPrivileged ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기'}</Link>} step={step} onStepChange={next => { setNotice(''); setStep(next); }} disabled={pending} notice={notice}
+			<ProjectEditStudio title={<>작품 수정{isPrivileged && project.isIncomplete && <StatusBadge size="sm" tone="warning" className="project-edit-header__status">불완전</StatusBadge>}</>} secondaryAction={<Link className="btn btn--secondary project-edit-header__back" to={isPrivileged ? '/admin/projects' : '/me/projects'} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 돌아가시겠어요?'))) event.preventDefault(); }} aria-disabled={pending}>{isPrivileged ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기'}</Link>} step={step} onStepChange={next => { setNotice(''); setStep(next); }} disabled={pending} notice={notice}
 				introduction={<><AdminProjectBasicInfoForm {...info} section="introduction" />{isPrivileged && project.exhibitionId && <AwardSettings exhibitionId={project.exhibitionId} projectId={id} />}
-     {wantsPublic && user?.role === 'ADMIN' && <div className="form-field"><label htmlFor="publication-exception">예외 공개 사유 (필수 조건 면제 시)</label><textarea id="publication-exception" value={exceptionReason} maxLength={2000} onChange={event => setExceptionReason(event.target.value)} /><p className="field-hint">파일 검증과 접근 권한은 면제되지 않습니다. 사유와 면제 항목이 기록됩니다.</p></div>}
+     {wantsPublic && user?.role === 'ADMIN' && <div className="form-field"><label className="form-field__label" htmlFor="publication-exception">예외 공개 사유 (필수 조건 면제 시)</label><textarea className="form-control" id="publication-exception" value={exceptionReason} maxLength={2000} onChange={event => setExceptionReason(event.target.value)} /><p className="field-hint">파일 검증과 접근 권한은 면제되지 않습니다. 사유와 면제 항목이 기록됩니다.</p></div>}
      <PublicationFeedback readiness={currentReadiness} onStep={setStep} />
      {project.publicationError && <p className="field-error" role="alert">{project.publicationError}</p>}</>}
 				game={<AdminProjectBasicInfoForm {...info} section="game" members={<AdminProjectMemberEditor

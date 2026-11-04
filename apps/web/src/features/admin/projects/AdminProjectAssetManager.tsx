@@ -173,7 +173,7 @@ export function AdminProjectPosterUpload({
 	if (studio) return <StudioEditFileArea label="포스터" kinds={['POSTER']} canEditContent={canEditContent} />;
 	const selected = queue.entries.filter(entry => entry.kind === 'POSTER' && (entry.status === 'pending' || entry.status === 'active')).at(-1)?.file;
 	return (
-		<FormSection legend="포스터">
+		<FormSection variant="plain" legend="포스터">
 			<StoredFiles poster canEditContent={canEditContent} />
 			<UploadDropZone zone="poster" canEditContent={canEditContent}>
 				<ProjectPosterPreview image={project.poster} title={project.title} localFile={selected instanceof File ? selected : undefined} />
@@ -184,7 +184,7 @@ export function AdminProjectPosterUpload({
 export function AdminProjectAssetManager({ canEditContent, studio = false }: { canEditContent: boolean; studio?: boolean }) {
 	const queue = useAdminProjectUploadQueue();
 	return (
-		studio ? <div className="studio-files-container"><div className="studio-files-grid">{studioFileGroups.map(group => <StudioEditFileArea key={group.id} label={group.label} kinds={[...group.kinds]} canEditContent={canEditContent} />)}</div></div> : <fieldset className="form-section">
+		studio ? <div className="studio-files-container"><div className="studio-files-grid">{studioFileGroups.map(group => <StudioEditFileArea key={group.id} label={group.label} kinds={[...group.kinds]} canEditContent={canEditContent} />)}</div></div> : <fieldset className="form-section form-section--plain">
 			<legend className="submission-file-heading"><span>게임·미디어·자료</span><WebglBuildGuideLink /></legend>
 			<StoredFiles poster={false} canEditContent={canEditContent} />
 			<UploadDropZone zone="files" canEditContent={canEditContent} />
@@ -215,7 +215,7 @@ function StudioEditFileArea({ label, kinds, canEditContent }: { label: string; k
   }
   setError(queue.add(files, poster ? 'poster' : 'files', typed));
  };
- return <fieldset className="form-section submission-file-fieldset" aria-labelledby={`${id}-title`}>
+ return <fieldset className="form-section form-section--plain submission-file-fieldset" aria-labelledby={`${id}-title`}>
   <StudioFileHeading id={id} label={label} hint={hint} error={error} poster={poster} webgl={kinds.includes('WEBGL')} />
   <ProjectUploadDropZone zone={poster ? 'poster' : 'files'} compact label={`${label} 파일 선택`} enabled={canEditContent && !queue.locked} multiple={!poster && !build} accept={build ? '.zip,application/zip' : poster ? undefined : video ? 'video/*' : undefined} onFiles={select} footer={<div className="studio-files-scroll" tabIndex={0} aria-label={`${label} 파일 목록`}>
    {!poster && !build && !video && queue.configUnavailable && <p className="field-hint">자료 설정을 불러오지 못했습니다. <button type="button" className="btn btn--secondary btn--small" disabled={queue.configLoading || queue.locked} onClick={queue.retryConfig}>설정 재시도</button></p>}

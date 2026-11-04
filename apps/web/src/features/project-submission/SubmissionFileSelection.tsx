@@ -47,7 +47,7 @@ export function SubmissionPosterSelection({
 		</ul>
 	);
 	return (
-		<fieldset className="form-section submission-file-fieldset" aria-labelledby={`${id}-title`} aria-describedby={inlineError ? `${id}-error` : undefined}>
+		<fieldset className="form-section form-section--plain submission-file-fieldset" aria-labelledby={`${id}-title`} aria-describedby={inlineError ? `${id}-error` : undefined}>
 			{inlineErrors ? <StudioFileHeading id={id} label="포스터" poster hint={studioFileHint('POSTER', limits)} error={inlineError} /> : <legend className="submission-file-heading">
 				<span id={`${id}-title`}>포스터</span>
 				<SubmissionPosterHelp />
@@ -107,7 +107,7 @@ export function SubmissionMixedFilesSelection({
 		...files.attachmentFiles.map((file) => ({ kind: 'ATTACHMENT' as const, file })),
 	];
 	return (
-		<fieldset className="form-section submission-file-fieldset">
+		<fieldset className="form-section form-section--plain submission-file-fieldset">
 			<legend className="submission-file-heading">
 				<span>게임·미디어·자료</span>
 				<SubmissionFilesHelp webglUploadHint={webglUploadHint} />

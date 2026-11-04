@@ -444,6 +444,7 @@ export default function ProjectChangeRequestPage() {
 					initialFiles={initialFiles}
 					autoStart={bound}
 					compact={bound}
+				variant="plain"
 					submissionItems={bindings}
 				/>
 			);
@@ -456,6 +457,7 @@ export default function ProjectChangeRequestPage() {
 					initialFile={initialFiles[0]}
 					autoStart={bound}
 					compact={bound}
+				variant="plain"
 					submissionItem={bindings[0]}
 				/>
 			);
@@ -468,6 +470,7 @@ export default function ProjectChangeRequestPage() {
 				initialFiles={initialFiles}
 				autoStart={bound}
 				compact={bound}
+				variant="plain"
 				maxFiles={planned.length}
 				maxFileBytes={uploadKind === 'VIDEO' ? undefined : materialLimits?.maxBytes}
 				submissionItems={bindings}
@@ -481,7 +484,7 @@ export default function ProjectChangeRequestPage() {
 				체크한 파일은 승인될 때 제거됩니다. 새 파일은 이 요청의 임시 공간에만 업로드됩니다.
 			</p>
 			<div className="form-field">
-				<label htmlFor="change-poster">대표 포스터</label>
+				<label className="form-field__label" htmlFor="change-poster">대표 포스터</label>
 				<SelectControl
 					id="change-poster"
 					disabled={!editable}
@@ -519,7 +522,7 @@ export default function ProjectChangeRequestPage() {
 			))}
 			{videoAssetIds.length > 0 && (
 				<div className="form-field">
-					<label>동영상 순서</label>
+					<label className="form-field__label">동영상 순서</label>
 					{videoAssetIds.map((assetId, index) => (
 						<div key={assetId} className="member-add-row">
 							<span>
@@ -626,7 +629,7 @@ export default function ProjectChangeRequestPage() {
 		</>
 	);
 	const filesPanel = (
-		<fieldset disabled={!editable || busy}>
+		<fieldset className="form-section form-section--plain" disabled={!editable || busy}>
 			<legend className="submission-file-heading"><span>게임·미디어·자료</span><WebglBuildGuideLink /></legend>
 			{preparedManifest ? (
 				<>
@@ -689,7 +692,7 @@ export default function ProjectChangeRequestPage() {
 			</div>
 			{!active ? (
 				<section className="project-form">
-					<fieldset>
+					<fieldset className="form-section">
 						<legend>요청 종류</legend>
 						<label className="form-choice">
 							<input name="change-kind" type="radio" checked={kind === 'EDIT'} onChange={() => setKind('EDIT')} /> 수정 요청
@@ -698,8 +701,8 @@ export default function ProjectChangeRequestPage() {
 							<input name="change-kind" type="radio" checked={kind === 'DELETE'} onChange={() => setKind('DELETE')} /> 삭제 요청
 						</label>
 						<div className="form-field">
-							<label htmlFor="change-reason">요청 사유 *</label>
-							<textarea
+							<label className="form-field__label" htmlFor="change-reason">요청 사유 *</label>
+							<textarea className="form-control"
 								id="change-reason"
 								rows={4}
 								value={reason ?? ''}
@@ -724,12 +727,12 @@ export default function ProjectChangeRequestPage() {
 					</p>
 					{active.kind === 'DELETE' ? (
 						<section className="project-form">
-							<fieldset disabled={!editable || busy}>
+							<fieldset className="form-section" disabled={!editable || busy}>
 								<legend>삭제 요청</legend>
 								<p>승인되면 작품과 연결된 파일이 삭제되며 복구할 수 없습니다.</p>
 								<div className="form-field">
-									<label htmlFor="delete-reason">요청 사유 *</label>
-									<textarea
+									<label className="form-field__label" htmlFor="delete-reason">요청 사유 *</label>
+									<textarea className="form-control"
 										id="delete-reason"
 										rows={4}
 										value={formReason}
@@ -738,7 +741,7 @@ export default function ProjectChangeRequestPage() {
 								</div>
 							</fieldset>
 							{editable && (
-								<fieldset disabled={busy}>
+								<fieldset className="form-section" disabled={busy}>
 									<legend>제출</legend>
 									<button
 										type="button"
@@ -800,7 +803,7 @@ export default function ProjectChangeRequestPage() {
 								</button>
 							</div>}
 							poster={
-								<fieldset disabled={!editable || busy}>
+								<fieldset className="form-section form-section--plain" disabled={!editable || busy}>
 									<legend>포스터</legend>
 									<ProjectUploadDropZone
 										zone="poster"
@@ -834,27 +837,27 @@ export default function ProjectChangeRequestPage() {
 							}
 							details={
 								<>
-									<fieldset className="project-basic-fields" disabled={!editable || busy}>
+									<fieldset className="form-section form-section--plain project-basic-fields" disabled={!editable || busy}>
 										<legend>기본 정보</legend>
 										<div className="form-field">
-											<label htmlFor="change-title">제목 *</label>
-											<input
+											<label className="form-field__label" htmlFor="change-title">제목 *</label>
+											<input className="form-control"
 												id="change-title"
 												value={formChanges.title ?? ''}
 												onChange={(e) => setChanges({ ...changes, title: e.target.value })}
 											/>
 										</div>
 										<div className="form-field">
-											<label htmlFor="change-summary">한줄 소개</label>
-											<input
+											<label className="form-field__label" htmlFor="change-summary">한줄 소개</label>
+											<input className="form-control"
 												id="change-summary"
 												value={formChanges.summary ?? ''}
 												onChange={(e) => setChanges({ ...changes, summary: e.target.value })}
 											/>
 										</div>
 										<div className="form-field">
-											<label htmlFor="change-description">상세 설명</label>
-											<textarea
+											<label className="form-field__label" htmlFor="change-description">상세 설명</label>
+											<textarea className="form-control"
 												id="change-description"
 												rows={3}
 												value={formChanges.description ?? ''}
@@ -869,7 +872,7 @@ export default function ProjectChangeRequestPage() {
 
 									</fieldset>
 
-									<fieldset disabled={!editable || busy}>
+									<fieldset className="form-section form-section--plain" disabled={!editable || busy}>
 										<legend>참여 학생</legend>
 										{formMembers.map((member, index) => (
 											<div className="member-add-row" key={index}>
@@ -927,11 +930,11 @@ export default function ProjectChangeRequestPage() {
 										<ExternalLinksFieldset value={formLinks} onChange={(externalLinks) => setChanges({ ...changes, externalLinks })} disabled={!editable || busy} showErrors />
 									</div>
 									{editable && (
-										<fieldset>
+										<fieldset className="form-section">
 											<legend>제출</legend>
 											<div className="form-field">
-												<label htmlFor="draft-reason">요청 사유 *</label>
-												<textarea
+												<label className="form-field__label" htmlFor="draft-reason">요청 사유 *</label>
+												<textarea className="form-control"
 													id="draft-reason"
 													rows={3}
 													value={formReason}

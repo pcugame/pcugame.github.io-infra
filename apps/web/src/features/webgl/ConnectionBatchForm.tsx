@@ -116,8 +116,8 @@ export function ConnectionBatchForm({ path, items, gameOrigin, onSubmitted, dire
     <h3>{direct ? '연결 설명' : '신청 설명'}</h3>
     <p className="field-hint">주소별 용도와 설정이 다르면 주소 이름과 함께 이곳에 모아 적어 주세요.</p>
     {(['purpose', 'cors'] as const).map(field => <div className="form-field" key={field}>
-     <label htmlFor={`network-${field}`}>{field === 'purpose' ? '사용 목적' : 'CORS / 인증 설정 계획'}</label>
-     <textarea id={`network-${field}`} value={description[field]} disabled={submit.isPending} onChange={event => {
+     <label className="form-field__label" htmlFor={`network-${field}`}>{field === 'purpose' ? '사용 목적' : 'CORS / 인증 설정 계획'}</label>
+     <textarea className="form-control" id={`network-${field}`} value={description[field]} disabled={submit.isPending} onChange={event => {
       if (locked.current) return;
       setDescription(previous => ({ ...previous, [field]: event.target.value }));
       setDescriptionErrors(previous => ({ ...previous, [field]: '' })); setNotice('');
@@ -127,8 +127,8 @@ export function ConnectionBatchForm({ path, items, gameOrigin, onSubmitted, dire
     <p className="field-hint">CORS·WebSocket Origin 허용 대상: <code>{gameOrigin}</code></p>
    </div>
    {direct && <div className="form-field">
-    <label htmlFor="network-reason">허용 사유</label>
-    <textarea id="network-reason" value={reason} disabled={submit.isPending} maxLength={2000} rows={2} required
+    <label className="form-field__label" htmlFor="network-reason">허용 사유</label>
+    <textarea className="form-control" id="network-reason" value={reason} disabled={submit.isPending} maxLength={2000} rows={2} required
      aria-invalid={!!descriptionErrors.reason} aria-describedby={descriptionErrors.reason ? 'network-reason-error' : undefined}
      onChange={event => { if (!locked.current) { setReason(event.target.value); setDescriptionErrors(previous => ({ ...previous, reason: '' })); } }} />
     {descriptionErrors.reason && <p id="network-reason-error" className="field-error" role="alert">{descriptionErrors.reason}</p>}

@@ -1,3 +1,4 @@
+import { DialogFrame, DialogHeader, DialogBody, DialogFooter, ProgressBar } from '../ui';
 import { LinearUploadContext, UploadProgressReporter, type UploadByteProgress } from '../../lib/upload/linearPresentation';
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -39,14 +40,14 @@ export function ProjectUploadDialog({ open, title, description, completed, total
    if (previous?.isConnected) previous.focus({ preventScroll: true });
   };
  }, [open]);
- return createPortal(<dialog ref={ref} className="project-upload-dialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} onCancel={event => event.preventDefault()}>
-  <header className="project-upload-dialog__header">
+ return createPortal(<DialogFrame size="sm" ref={ref} className="project-upload-dialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} onCancel={event => event.preventDefault()}>
+  <DialogHeader>
    <h2 id={`${id}-title`} tabIndex={-1} autoFocus>{title}</h2>
    <span className="project-upload-dialog__count" aria-label="파일 검증 완료">{displayPercent === undefined ? '크기 확인 중' : `${displayPercent}%`} · 검증 완료 {completed} / {total}</span>
-   <progress className="project-upload-dialog__progress" aria-label="전체 파일 업로드 진행률" max={100} value={displayPercent} />
+   <ProgressBar size="sm" className="project-upload-dialog__progress" aria-label="전체 파일 업로드 진행률" max={100} value={displayPercent} />
    <p id={`${id}-description`} className="sr-only">{description}</p>
-  </header>
-  <LinearUploadContext.Provider value={true}><UploadProgressReporter.Provider value={report}><div className="project-upload-dialog__body">{children}</div></UploadProgressReporter.Provider></LinearUploadContext.Provider>
-  {actions && <footer className="project-upload-dialog__footer">{actions}</footer>}
- </dialog>, document.body);
+  </DialogHeader>
+  <LinearUploadContext.Provider value={true}><UploadProgressReporter.Provider value={report}><DialogBody className="project-upload-dialog__body">{children}</DialogBody></UploadProgressReporter.Provider></LinearUploadContext.Provider>
+  {actions && <DialogFooter>{actions}</DialogFooter>}
+ </DialogFrame>, document.body);
 }

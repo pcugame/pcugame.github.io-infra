@@ -1,0 +1,21 @@
+.progress-bar {
+  --progress-color: var(--color-primary-btn, var(--color-primary));
+  display: block;
+  width: 100%;
+  height: .75rem;
+  border: 0;
+  border-radius: 99px;
+  overflow: hidden;
+  background: var(--color-border);
+  accent-color: var(--progress-color);
+}
+.progress-bar--sm { height: .35rem; }
+.progress-bar--success { --progress-color: var(--color-success); }
+/* Keep the browser's moving indicator when the total is unknown. */
+.progress-bar[value] { appearance: none; }
+.progress-bar::-webkit-progress-bar { background: var(--color-border); }
+.progress-bar::-webkit-progress-value { background: var(--progress-color); }
+.progress-bar::-moz-progress-bar { background: var(--progress-color); }
+@media (forced-colors: active) {
+  .progress-bar[value] { appearance: auto; }
+}

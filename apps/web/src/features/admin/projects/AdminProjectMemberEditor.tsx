@@ -16,7 +16,7 @@ interface Props {
 }
 export function AdminProjectMemberEditor({ members, canEditContent, isBusy, errors, onAdd, onSwap, onUpdate, onRemove }: Props) {
 	return (
-		<FormSection disabled={!canEditContent || isBusy} legend={<>참여 학생 <span className="required-mark">*</span></>}>
+		<FormSection variant="plain" className="project-members" disabled={!canEditContent || isBusy} legend={<>참여 학생 <span className="required-mark">*</span></>}>
 			<div className="submission-members__list">
 				{members.map((member, index) => {
 					const validation = errors.length ? AddMemberSchema.safeParse(member) : undefined;

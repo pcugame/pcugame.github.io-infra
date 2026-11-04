@@ -18,43 +18,6 @@
   padding-bottom: 1.25rem;
 }
 
-.home-topnav__logo {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  color: var(--h-text);
-  line-height: 1.2;
-  text-decoration: none;
-}
-
-.home-topnav__logo:hover {
-  text-decoration: none;
-}
-
-.home-topnav__logo-sig {
-  height: 3.75rem;
-  width: auto;
-  flex-shrink: 0;
-}
-
-.home-topnav__logo-divider {
-  width: 1px;
-  height: 2.25rem;
-  background: var(--h-border);
-  flex-shrink: 0;
-}
-
-.home-topnav__logo-dept {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--h-text);
-  white-space: nowrap;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .home-topnav__actions {
   display: flex;
   align-items: center;
@@ -116,18 +79,6 @@
   .home-topnav__inner {
     padding-top: 0.75rem;
     padding-bottom: 0.75rem;
-  }
-
-  .home-topnav__logo-sig {
-    height: 2rem;
-  }
-
-  .home-topnav__logo-divider {
-    height: 1.375rem;
-  }
-
-  .home-topnav__logo-dept {
-    font-size: 0.75rem;
   }
 
   /* 모바일: 홈 topnav 전체 숨김 → Layout의 MobileTopBar로 통일 */

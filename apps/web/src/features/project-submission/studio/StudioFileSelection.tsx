@@ -46,7 +46,7 @@ function FileGroup({ group, files, enabled, limits, materialLimits, retryConfig 
 		files.addFiles(typed, setError);
 	};
 	const selected = selectedStudioFiles(files).filter(item => (group.kinds as readonly string[]).includes(item.kind));
-	return <fieldset className="form-section submission-file-fieldset" data-file-group={group.id} aria-labelledby={`${id}-title`} aria-describedby={[`${id}-hint`, error ? `${id}-error` : ''].filter(Boolean).join(' ')}>
+	return <fieldset className="form-section form-section--plain submission-file-fieldset" data-file-group={group.id} aria-labelledby={`${id}-title`} aria-describedby={[`${id}-hint`, error ? `${id}-error` : ''].filter(Boolean).join(' ')}>
 		<StudioFileHeading id={id} label={group.label} hint={hint} error={error} webgl={group.id === 'web'} />
 		<ProjectUploadDropZone zone="files" compact label={`${group.label} 파일 선택`} enabled={enabled} hint={hint}
 			accept={build ? '.zip,application/zip,application/x-zip-compressed' : group.id === 'video' ? '.mp4,.mov,.m4v,.3gp,.3g2,.mkv,.webm,.avi,.wmv,.asf' : undefined}

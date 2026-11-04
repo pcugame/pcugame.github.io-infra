@@ -1,3 +1,4 @@
+import { DialogFrame, DialogHeader, DialogBody } from '../../../components/ui';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../../../components/ui';
@@ -56,7 +57,7 @@ export function ExhibitionSettingsDialog({
 		delete: danger,
 	};
 	return createPortal(
-		<dialog
+		<DialogFrame size="lg"
 			ref={dialog}
 			id={`exhibition-panel-${id}`}
 			className="exhibition-dialog"
@@ -70,7 +71,7 @@ export function ExhibitionSettingsDialog({
 				if (event.target === event.currentTarget && !busy) onClose();
 			}}
 		>
-			<header className="exhibition-dialog__header">
+			<DialogHeader className="exhibition-dialog__header">
 				<div className="exhibition-dialog__identity">
 					<div className="exhibition-dialog__title-row">
 						<span className="admin-year-badge">{year.year}</span>
@@ -107,7 +108,7 @@ export function ExhibitionSettingsDialog({
 				>
 					닫기
 				</Button>
-			</header>
+			</DialogHeader>
 			<div className="exhibition-dialog__body">
 				<div
 					className="exhibition-dialog__tabs"
@@ -155,7 +156,7 @@ export function ExhibitionSettingsDialog({
 						</Button>
 					))}
 				</div>
-				<div className="exhibition-dialog__content">
+				<DialogBody className="exhibition-dialog__content">
 					{tabs.map((tab) => (
 						<section
 							key={tab.id}
@@ -168,9 +169,9 @@ export function ExhibitionSettingsDialog({
 							{panels[tab.id]}
 						</section>
 					))}
-				</div>
+				</DialogBody>
 			</div>
-		</dialog>,
+		</DialogFrame>,
 		document.body,
 	);
 }

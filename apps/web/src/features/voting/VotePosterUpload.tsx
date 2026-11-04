@@ -82,7 +82,7 @@ export function VotePosterUpload({ voteId, exhibitionId, onReady }: {
 	}
 	return <div className="vote-upload form-field">
 		<label className="form-field form-field__label">투표 전용 포스터 업로드
-			<input className="form-control" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={busy || !canContinue}
+			<input className="form-file form-control" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={busy || !canContinue}
 				onChange={event => { const chosen = event.target.files?.[0]; if (chosen) { selectFiles([chosen]); setFile(chosen); void upload(chosen); } }} />
 		</label>
 		<p className="field-hint">이 이미지를 투표 화면에 공개합니다. 작품·전시회 원본 포스터는 변경하지 않습니다.</p>

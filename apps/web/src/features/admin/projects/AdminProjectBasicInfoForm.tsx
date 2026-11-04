@@ -30,19 +30,19 @@ export function AdminProjectBasicInfoForm({ project, form, formId, isPending, ca
 	const content = (
 		<>
 			{section !== 'game' && <>
-			<FormSection disabled={!canEditContent || isPending} legend="기본 정보" className="project-basic-fields">
-				<div className="form-field"><label htmlFor="edit-exhibition">전시회 <span className="required-mark">*</span></label><input id="edit-exhibition" readOnly value={`${project.year} 작품 전시`} /></div>
+			<FormSection variant="plain" disabled={!canEditContent || isPending} legend="기본 정보" className="project-basic-fields">
+				<div className="form-field"><label className="form-field__label" htmlFor="edit-exhibition">전시회 <span className="required-mark">*</span></label><input className="form-control" id="edit-exhibition" readOnly value={`${project.year} 작품 전시`} /></div>
 				<ProjectIntroductionFields title={register('title')} summary={register('summary')} description={register('description')} summaryLength={summary.length} errors={{ title: errors.title?.message, summary: errors.summary?.message, description: errors.description?.message }} />
-    <div className="form-field"><label htmlFor="edit-visibility">공개 여부</label>
+    <div className="form-field"><label className="form-field__label" htmlFor="edit-visibility">공개 여부</label>
      <SelectControl id="edit-visibility" disabled={!project.canChangeVisibility} value={visibility ?? 'STAFF'} {...register('visibility')}><option value="STAFF">비공개</option><option value="PUBLIC">공개</option></SelectControl>
      <p className="field-hint">비공개 작품은 작성자·연결된 참여자·운영자·관리자만 조회할 수 있습니다.</p>
     </div>
 			</FormSection>
-			<FormSection legend="관리 정보" disabled={!canEditContent || isPending}>
+			<FormSection variant="plain" legend="관리 정보" disabled={!canEditContent || isPending}>
 
 				<div className="form-field">
-					<label htmlFor="sortOrder">오프셋(작을수록 상단에 표시)</label>
-					<input id="sortOrder" aria-invalid={!!errors.sortOrder} aria-describedby={errors.sortOrder ? "sortOrder-error" : undefined} type="number" {...register('sortOrder', { valueAsNumber: true })} />
+					<label className="form-field__label" htmlFor="sortOrder">오프셋(작을수록 상단에 표시)</label>
+					<input className="form-control" id="sortOrder" aria-invalid={!!errors.sortOrder} aria-describedby={errors.sortOrder ? "sortOrder-error" : undefined} type="number" {...register('sortOrder', { valueAsNumber: true })} />
 					{errors.sortOrder && <span id="sortOrder-error" className="field-error">{errors.sortOrder.message}</span>}
 				</div>
 			</FormSection>

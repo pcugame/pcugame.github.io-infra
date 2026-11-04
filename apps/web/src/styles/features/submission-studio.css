@@ -1,7 +1,6 @@
 /* Submission workspace built on the shared form, archive card and admin shell. */
 .layout:has(.submission-studio) { --h-bg: var(--color-bg); background: var(--color-bg); }
-.main.container:has(> .submission-studio) { padding-top: .5rem; }
-.main.container:has(> .submission-studio) { width: 100%; }
+.main.container:has(> .submission-studio) { padding-top: .5rem; width: 100%; }
 .submission-studio {
   container: submission-workspace / inline-size;
   --studio-accent: var(--color-primary);
@@ -11,9 +10,15 @@
   --studio-content-gap: .65rem;
   --studio-field-gap: .85rem;
   --studio-section-gap: 1.25rem;
+  --form-field-gap: var(--studio-field-gap);
+  --form-label-size: .95rem;
+  --form-label-gap: var(--studio-heading-gap);
+  --form-section-title-size: 1.1rem;
+  --form-section-title-weight: 650;
+  --form-section-heading-gap: var(--studio-heading-gap);
+  --form-section-gap: var(--studio-section-gap);
   width: 100%; max-width: 76rem; margin: 0 auto; padding: 1.6rem 1.2rem 2.5rem;
 }
-[data-theme='dark'] .submission-studio { --studio-paper: var(--color-surface); }
 .submission-studio [hidden] { display: none !important; }
 .submission-studio__layout { position: relative; scroll-margin-top: 1rem; display: grid; grid-template-columns: minmax(0, 1fr) 14rem; grid-template-rows: auto auto; gap: 1.2rem; align-content: start; align-items: start; }
 .submission-studio__layout > * { min-width: 0; }
@@ -29,8 +34,6 @@
 .submission-studio__step.is-active { color: var(--studio-accent); background: var(--studio-soft); font-weight: 700; }
 .submission-studio__step.is-active > span { background: var(--color-primary-btn); border-color: var(--color-primary-btn); color: white; }
 .submission-studio__step:disabled { cursor: default; opacity: .5; }
-.submission-studio__guide { display: none; }
-.submission-studio__guide a { font-size: .6rem; color: var(--studio-accent); line-height: 1.7; }
 .submission-studio__sheet { background: var(--studio-paper); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: clip; scroll-margin-top: 1rem; }
 .submission-studio__form-guard { border: 0; padding: 0; margin: 0; min-width: 0; }
 .submission-studio__sheet-heading { display: flex; justify-content: space-between; align-items: start; gap: .8rem; padding: 1.35rem 1.5rem 1.1rem; border-bottom: 1px solid var(--color-border); }
@@ -41,19 +44,15 @@
 .submission-studio__sheet-heading p { font-size: .75rem; color: var(--color-text-muted); line-height: 1.65; }
 .submission-studio__sheet-heading > span { white-space: nowrap; color: var(--color-text-muted); font-size: .7rem; margin-top: .3rem; }
 .submission-studio__fields { padding: 1.35rem 1.5rem; }
-.submission-studio .form-section, .submission-studio .project-external-links { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; min-width: 0; border-radius: 0; }
-.submission-studio .form-section + .form-section, .submission-studio .project-external-links, .submission-studio .studio-files-container { margin-top: var(--studio-section-gap); }
-.submission-studio .form-section > legend, .submission-studio .project-external-links > legend { color: var(--color-text); padding: 0; font-size: 1.1rem; font-weight: 650; margin-bottom: var(--studio-heading-gap); }
+.submission-studio .project-external-links, .submission-studio .studio-files-container { margin-top: var(--studio-section-gap); }
 .submission-studio [data-studio-step='0'] .form-section > legend, .submission-studio [data-studio-step='1'] .form-section > legend, .submission-studio .project-external-links > legend { display: flex; align-items: center; gap: .65rem; padding: .1rem 0; }
 .submission-studio [data-studio-step='0'] .form-section > legend::before, .submission-studio [data-studio-step='1'] .form-section > legend::before, .submission-studio .project-external-links > legend::before { content: ''; flex: 0 0 .2rem; height: 1.1em; border-radius: .1rem; background: var(--studio-accent); }
-.submission-studio .form-field { margin-bottom: var(--studio-field-gap); }
 .submission-studio .form-field:has(> label) { display: grid; grid-template-columns: auto minmax(0, 1fr); align-content: start; column-gap: var(--studio-heading-gap); }
 .submission-studio .form-field > label { grid-column: 1; grid-row: 1; }
 .submission-studio .form-field > :not(label):not(.field-error) { grid-column: 1 / -1; }
 .submission-studio .form-field > .field-error { grid-column: 2; grid-row: 1; align-self: baseline; margin: 0 0 var(--studio-heading-gap); overflow-wrap: anywhere; }
 .submission-studio .submission-file-heading { display: flex; align-items: baseline; gap: var(--studio-content-gap); }
 .submission-studio .submission-file-heading > .field-error { flex: 1; min-width: 0; margin: 0; font-weight: 400; overflow-wrap: anywhere; }
-.submission-studio .form-field label, .submission-studio .form-field__label { font-size: .95rem; margin-bottom: var(--studio-heading-gap); }
 .submission-studio .form-field:last-child { margin-bottom: 0; }
 .submission-studio .field-hint, .submission-studio .field-error { font-size: .8rem; line-height: 1.7; }
 .submission-studio .field-hint, .submission-studio .field-error { margin-top: var(--studio-heading-gap); }
@@ -117,15 +116,6 @@
 .submission-studio .external-link-row > .form-field:first-child { grid-column: 1; }
 .submission-studio .external-link-row > button { grid-column: 3; grid-row: 2; }
 .submission-studio .external-link-row__preview { grid-row: 3; }
-.submission-studio__notice { background: var(--studio-soft); border: 1px solid var(--color-border); border-radius: .4rem; font-size: .75rem; color: var(--color-text-muted); padding: .9rem; margin: 1.3rem 0; line-height: 1.8; }
-.submission-studio__progress .submission-studio__sheet-heading { display: block; }
-.submission-studio__progress .submission-studio__sheet-heading h2 { margin: .6rem 0; }
-.submission-studio__progress .submission-studio__fields > .btn { margin: .6rem 0; }
-.submission-studio__upload-summary { padding: 1.2rem; border: 1px solid var(--color-border); border-radius: .6rem; background: var(--studio-paper); }
-.submission-studio__upload-summary h2 { font-size: .9rem; margin-top: .65rem; }
-.submission-studio__upload-summary > strong { display: block; font-size: 2.5rem; margin-top: 1rem; }
-.submission-studio__upload-summary > strong > span { font-size: 1rem; color: var(--color-text-muted); }
-.submission-studio__upload-summary > p { font-size: .75rem; color: var(--color-text-muted); }
 .submission-studio__sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 @media (max-width: 50em) {
   .submission-studio .project-requirements { grid-template-columns: minmax(0, 1fr); }
@@ -142,7 +132,6 @@
   .submission-studio { padding: .5rem 0 2rem; }
   .main--home > .submission-studio { padding: 1rem; }
   .submission-studio .form-control, .submission-studio .form-field input:not([type='checkbox']), .submission-studio .form-field textarea { font-size: 1rem; }
-  .submission-studio .form-field label, .submission-studio .form-field__label { font-size: .95rem; }
   .submission-studio .field-hint, .submission-studio .field-error { font-size: .8rem; }
   .submission-studio .btn { min-height: 2.75rem; font-size: .8rem; }
   .submission-studio__step { min-height: 2.75rem; }
@@ -211,17 +200,15 @@
 .submission-studio__sheet [data-studio-step='1'] > .submission-studio__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto minmax(0, 1fr); gap: var(--studio-section-gap) var(--studio-content-gap); }
 .submission-studio__sheet [data-studio-step='1'] .project-requirements { grid-column: 1 / -1; grid-row: 1; margin: 0; }
 .submission-studio__sheet [data-studio-step='1'] .project-environment-links { display: contents; }
-.submission-studio__sheet [data-studio-step='1'] .form-section:not(.project-requirements),
+.submission-studio__sheet [data-studio-step='1'] .project-members,
 .submission-studio__sheet [data-studio-step='1'] .project-external-links { grid-row: 2; min-height: 0; display: flex; flex-direction: column; margin: 0; }
-.submission-studio__sheet [data-studio-step='1'] .form-section:not(.project-requirements) { grid-column: 1; }
+.submission-studio__sheet [data-studio-step='1'] .project-members { grid-column: 1; }
 .submission-studio__sheet [data-studio-step='1'] .project-external-links { grid-column: 2; }
 .submission-studio__sheet [data-studio-step='1'] :is(.submission-members__list, .external-links__list) { flex: 1; min-height: 0; max-height: none; }
 .submission-studio__sheet [data-studio-step='1'] fieldset > button { flex: 0 0 auto; align-self: start; }
 .submission-studio__sheet [data-studio-step='3'] .project-preview-inline { height: 100%; min-height: 0; }
 
 .submission-studio .submission-members__list, .submission-studio .external-links__list { max-height: 18rem; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; margin-bottom: var(--studio-field-gap); }
-
-.submission-studio--edit .project-edit-apply { position: static; margin: 0; border-width: 0; border-radius: 0; box-shadow: none; }
 .submission-studio__stage[data-step-direction='backward'] { --studio-enter-offset: -12px; }
 .submission-studio__arrow { position: absolute; z-index: 5; top: 50%; transform: translateY(-50%); width: var(--studio-arrow-width); min-height: 5.25rem; display: grid; place-items: center; padding: 0; border: 1px solid #cbd7e8; border-radius: var(--radius); background: var(--studio-paper); color: var(--color-text); font-size: 4rem; line-height: 1; cursor: pointer; }
 .submission-studio__arrow > svg { display: block; width: .65em; height: .8em; pointer-events: none; }

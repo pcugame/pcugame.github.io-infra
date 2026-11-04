@@ -1,3 +1,4 @@
+import { StatusBadge } from '../../../components/ui';
 import { useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -59,13 +60,11 @@ export function ExhibitionSummary({
 				)}
 				<span>
 					<small>작품 등록·변경</small>
-					<span
-						className={`badge ${(year.isModificationEnabled ?? year.isUploadEnabled) ? 'badge--published' : 'badge--archived'}`}
-					>
+					<StatusBadge tone={(year.isModificationEnabled ?? year.isUploadEnabled) ? 'success' : 'neutral'}>
 						{(year.isModificationEnabled ?? year.isUploadEnabled)
 							? '허용'
 							: '비허용'}
-					</span>
+					</StatusBadge>
 				</span>
 				<span>
 					<small>등록 작품</small>
@@ -157,7 +156,7 @@ export function ExhibitionSettings({
 			<div className="exhibition-settings__options">
 				{env.VISIBILITY_CONTROLS_ENABLED && (
 					<div className="form-field">
-						<label htmlFor={`visibility-${year.id}`}>공개 범위 *</label>
+						<label className="form-field__label" htmlFor={`visibility-${year.id}`}>공개 범위 *</label>
 						<VisibilitySelect
 							id={`visibility-${year.id}`}
 							value={visibility ?? ''}

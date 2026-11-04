@@ -22,12 +22,12 @@ export function ProjectRequirementsFieldset({
 }: Props) {
 	const id = useId();
 	return (
-		<FormSection disabled={disabled} legend="실행 환경" className="project-requirements">
+		<FormSection variant="plain" disabled={disabled} legend="실행 환경" className="project-requirements">
 			<div className="form-field" role="group" aria-labelledby={`${id}-platforms`}>
 				<span id={`${id}-platforms`} className="form-field__label">
 					지원 플랫폼
 				</span>
-				<div className="form-checkbox-group form-field--checkbox">
+				<div className="form-checkbox-group">
 					{PROJECT_PLATFORMS.map((platform) => (
 						<label key={platform} className="form-choice">
 							<input

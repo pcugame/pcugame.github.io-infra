@@ -1,3 +1,4 @@
+import { ProgressBar, StatusBadge, type StatusBadgeProps } from '../ui';
 import { useContext, useEffect, useSyncExternalStore } from 'react';
 import { UploadProgressReporter } from '../../lib/upload/linearPresentation';
 import type { FileUploadQueue, FileUploadRowState } from '../../lib/upload/fileUploadQueue';
@@ -6,6 +7,9 @@ const labels = {
  waiting: '대기', checking: '파일 확인 중', preparing: '업로드 준비 중', uploading: '전송 중', transferred: '전송 완료',
  completing: '완료 처리 중', verifying: '검증 중', ready: '완료', failed: '실패', cancelled: '취소 완료',
  cancelling: '취소 처리 중', 'cancel-unconfirmed': '취소 결과 미확정',
+};
+const tones: Record<FileUploadRowState['phase'], StatusBadgeProps['tone']> = {
+ waiting: 'neutral', checking: 'info', preparing: 'info', uploading: 'info', transferred: 'info', completing: 'info', verifying: 'info', ready: 'success', failed: 'danger', cancelled: 'neutral', cancelling: 'warning', 'cancel-unconfirmed': 'warning',
 };
 const bytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 ** 2 ? `${(value / 1024).toFixed(1)} KB` : `${(value / 1024 ** 2).toFixed(1)} MB`;
 export function FileUploadRow({ row, queue, disabled = false }: { row: FileUploadRowState; queue: FileUploadQueue; disabled?: boolean }) {
@@ -21,9 +25,9 @@ export function FileUploadRow({ row, queue, disabled = false }: { row: FileUploa
  useEffect(() => () => { report?.(row.id, null); }, [report, row.id]);
  return <div className="upload-file-row" data-file-id={row.id} data-phase={row.phase}>
   <span className="upload-file-row__name" title={row.name}>{row.name}</span>
-  <span className="upload-file-row__state" role="status">{labels[row.phase]}</span>
+  <StatusBadge size="sm" tone={tones[row.phase]} role="status">{labels[row.phase]}</StatusBadge>
   <div className="upload-file-row__meter">
-   <progress max={100} value={percent} aria-label={`${row.name} 업로드 진행률`} />
+   <ProgressBar size="sm" value={percent} aria-label={`${row.name} 업로드 진행률`} />
    <span>{percent}% · {bytes(loaded)} / {total === undefined ? '크기 확인 중' : bytes(total)}</span>
   </div>
   <div className="upload-file-row__actions">

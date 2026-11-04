@@ -1,12 +1,12 @@
-@import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
+@import './foundation/index.css';
 
-@import './foundation/tokens.css';
-@import './foundation/base.css';
-@import './foundation/animations.css';
 @import './layout/site-shell.css';
+@import './layout/brand.css';
 @import './components/buttons.css';
 @import './components/forms.css';
 @import './components/feedback.css';
+@import './components/dialog.css';
+@import './components/progress.css';
 @import './components/award-badge.css';
 @import './features/admin-layout.css';
 @import './features/admin-collections.css';

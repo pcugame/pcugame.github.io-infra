@@ -86,11 +86,6 @@
 	font-weight: 400;
 	color: var(--color-text-muted);
 }
-.exhibition-settings__fields {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) 9rem;
-	gap: 1rem;
-}
 .exhibition-create-fields {
 	display: grid;
 	grid-template-columns: 8rem minmax(0, 1fr) 9rem;
@@ -203,12 +198,6 @@
 		grid-column: 1 / -1;
 		grid-row: 2;
 	}
-	.exhibition-settings__fields {
-		grid-template-columns: minmax(0, 1fr);
-	}
-	.exhibition-settings__fields > :last-child {
-		max-width: 10rem;
-	}
 	.admin-exhibition-poster {
 		flex-wrap: wrap;
 	}
@@ -287,34 +276,12 @@
 
 /* Exhibition identity above an editor with tabs aligned at the upper left. */
 .exhibition-dialog {
-	margin: auto;
-	padding: 0;
-	width: min(62rem, calc(100vw - 3rem));
-	height: min(48rem, calc(100dvh - 3rem));
-	max-height: calc(100dvh - 3rem);
-	border: 1px solid var(--color-border);
+	height: min(48rem, calc(100dvh - 2rem));
 	border-top: 3px solid var(--color-primary);
-	border-radius: 12px;
-	background: var(--color-surface);
-	color: var(--color-text);
-	overflow: hidden;
-	box-shadow: 0 20px 70px rgb(0 0 0 / 25%);
-}
-.exhibition-dialog[open] {
-	display: flex;
-	flex-direction: column;
-}
-.exhibition-dialog::backdrop {
-	background: rgb(0 0 0 / 55%);
 }
 .exhibition-dialog__header {
-	flex-shrink: 0;
-	display: flex;
 	align-items: flex-start;
-	justify-content: space-between;
-	gap: 1rem;
-	padding: 1.5rem 2rem;
-	border-bottom: 1px solid var(--color-border);
+	flex-wrap: nowrap;
 }
 .exhibition-dialog__identity {
 	min-width: 0;
@@ -395,10 +362,7 @@
 	width: 100%;
 	min-width: 0;
 	flex: 1;
-	min-height: 0;
-	overflow-y: auto;
 	scrollbar-gutter: stable;
-	padding: 1.75rem 2rem;
 }
 .exhibition-dialog [role='tabpanel'][hidden] {
 	display: none;
@@ -472,12 +436,7 @@
 }
 @media (max-width: 50em) {
 	.exhibition-dialog {
-		width: calc(100vw - 1rem);
-		height: min(48rem, calc(100dvh - 1rem));
-		max-height: calc(100dvh - 1rem);
-	}
-	.exhibition-dialog__header {
-		padding: 1.25rem 1rem;
+		height: min(48rem, calc(100dvh - 2rem));
 	}
 	.exhibition-dialog__facts {
 		gap: 0.5rem 1rem;
@@ -512,9 +471,6 @@
 	}
 	.exhibition-dialog__content {
 		width: 100%;
-		min-height: 0;
-		padding: 1.25rem 1rem;
-		border-right: 0;
 	}
 	.exhibition-settings__primary {
 		grid-template-columns: minmax(0, 1fr);
@@ -671,13 +627,6 @@
 	margin: 0;
 	min-width: 0;
 }
-.award-card__image-select {
-	width: 9rem;
-	flex-shrink: 0;
-}
-.award-card__image-select .form-field__label {
-	font-size: 0.75rem;
-}
 .award-card__selection {
 	display: grid;
 	gap: 1rem;
@@ -782,31 +731,6 @@
 .award-settings__empty p {
 	margin-top: 0.5rem;
 }
-.award-settings__assets {
-	border-top: 1px solid var(--color-border);
-	padding-top: 1rem;
-}
-.award-settings__assets summary {
-	cursor: pointer;
-	font-size: 0.85rem;
-	font-weight: 600;
-}
-.award-settings__assets summary span {
-	margin-left: 0.5rem;
-	color: var(--color-text-muted);
-	font-size: 0.75rem;
-	font-weight: 400;
-}
-.award-settings__assets[open] summary {
-	margin-bottom: 1rem;
-}
-.award-settings__asset {
-	display: flex;
-	justify-content: space-between;
-	gap: 1rem;
-	align-items: center;
-	overflow-wrap: anywhere;
-}
 @media (max-width: 50em) {
 	.award-card__header {
 		gap: 0.65rem;
@@ -823,9 +747,6 @@
 	.award-card__recipients {
 		padding: 0 1rem 1rem;
 	}
-	.award-card__image-select {
-		width: 100%;
-	}
 	.award-card__projects {
 		grid-template-columns: minmax(0, 1fr);
 	}
@@ -835,36 +756,6 @@
 	}
 	.award-settings__create .award-settings__actions {
 		padding-top: 0;
-	}
-}
-
-.award-card__image-select {
-	width: 11rem;
-	display: grid;
-	gap: 0.5rem;
-}
-.award-card__image-select > .btn {
-	justify-self: start;
-}
-.award-card__upload {
-	padding: 1.25rem;
-	border-top: 1px solid var(--color-border);
-}
-.award-card__upload[hidden] {
-	display: none;
-}
-.award-card__upload > .ui-stack {
-	margin-top: 0.75rem;
-}
-.award-card__upload .game-upload {
-	margin: 0;
-}
-.award-card__upload .award-settings__asset {
-	flex-wrap: wrap;
-}
-@media (max-width: 50em) {
-	.award-card__image-select {
-		width: 100%;
 	}
 }
 
@@ -887,43 +778,10 @@
 	margin-bottom: 0.75rem;
 	font-size: 0.9rem;
 }
-.award-upload-popup__library {
-	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	gap: 0.75rem;
-	max-height: 15rem;
-	overflow-y: auto;
-}
-.award-upload-popup .award-settings__asset {
-	display: grid;
-	justify-items: center;
-	gap: 0.5rem;
-	padding: 0.75rem;
-	border: 1px solid var(--color-border);
-	border-radius: 8px;
-	min-width: 0;
-}
-.award-upload-popup .award-settings__asset img {
-	width: 3rem;
-	height: 3rem;
-	object-fit: contain;
-}
-.award-upload-popup .award-settings__asset > span {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	max-width: 100%;
-	font-size: 0.75rem;
-}
-@media (max-width: 50em) {
-	.award-upload-popup__library {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-	}
-}
 
 .award-card__icon-picker { min-width: 0; padding: 0 1.25rem 1rem; }
 .award-card__icon-modes, .award-card__photos { display: flex; flex-wrap: wrap; gap: .4rem; }
-.award-card__photos { margin-top: .5rem; }
+.award-card__photos { margin-top: .5rem; gap: .6rem; }
 .award-card__icon-tile.btn {
   flex-direction: column;
   gap: .25rem;
@@ -945,7 +803,6 @@
   padding: 0;
   border-radius: 50%;
 }
-.award-card__photos { gap: .6rem; }
 .award-card__icon-picker .btn[aria-pressed='true'] { border-color: var(--color-primary); background: var(--color-bg); }
 @media (max-width: 50em) {
   .award-card__icon-picker { padding-inline: 1rem; }
