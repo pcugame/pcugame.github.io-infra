@@ -2,7 +2,7 @@ import type { ComponentPropsWithRef } from 'react';
 
 export type ProgressBarProps = ComponentPropsWithRef<'progress'> & {
   size?: 'sm' | 'md';
-  tone?: 'info' | 'success';
+  tone?: 'info' | 'success' | 'danger';
 };
 
 /** Omit value for native indeterminate progress; callers own progress calculation. */

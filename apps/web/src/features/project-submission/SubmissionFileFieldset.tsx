@@ -55,7 +55,7 @@ export function SubmissionFileFieldset({
 
 			{fileSizeError && (
 				<div className="error-box" role="alert">
-					<p>{fileSizeError}</p>
+					<p className="error-box__message">{fileSizeError}</p>
 				</div>
 			)}
 

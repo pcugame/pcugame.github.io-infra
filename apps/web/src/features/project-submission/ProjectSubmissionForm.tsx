@@ -126,12 +126,12 @@ function SubmissionForm({ mode }: ProjectSubmissionFormProps) {
 
 								{files.fileSizeError && (
 									<div className="error-box" role="alert">
-										<p>{files.fileSizeError}</p>
+										<p className="error-box__message">{files.fileSizeError}</p>
 									</div>
 								)}
 								{submitMutation.error && (
 									<div className="error-box" role="alert">
-										<p>{getApiErrorMessage(submitMutation.error)}</p>
+										<p className="error-box__message">{getApiErrorMessage(submitMutation.error)}</p>
 									</div>
 								)}
 							</>
@@ -139,7 +139,7 @@ function SubmissionForm({ mode }: ProjectSubmissionFormProps) {
 					files={
 						<>
 								{uploadConfigQuery.isError && (
-									<p role="alert">
+									<p className="field-error" role="alert">
 										자료 업로드 설정을 불러오지 못했습니다.{' '}
 										<button
 											type="button"

@@ -704,3 +704,10 @@ html:has(.admin-project-edit-page) { scroll-padding-block: 5rem 16rem; }
 }
 
 .project-edit-header__status { margin-left: .5rem; vertical-align: middle; }
+/* The shared dialog owns its surface; the feature owns content layout. */
+.webgl-settings-dialog__header h2 { margin: 0; font-size: 1rem; }
+form.webgl-display-settings { margin-bottom: 0; }
+.webgl-display-settings__fields { display: grid; gap: 1rem; }
+.webgl-settings-dialog :is(.field-hint, .field-error, .success-message) { line-height: 1.6; overflow-wrap: anywhere; }
+.webgl-settings-dialog .form-field { min-width: 0; }
+.webgl-settings-dialog__body > .btn { margin-top: 1rem; }

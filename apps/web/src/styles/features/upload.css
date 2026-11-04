@@ -153,10 +153,10 @@
 .project-upload-dialog__count { color: var(--color-text-muted); font-size: .85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .project-upload-dialog .project-upload-queue { margin: 0; padding: 0; list-style: none; }
 .project-upload-dialog .project-upload-queue > li { padding: 0; border: 0; }
-.upload-file-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem .75rem; align-items: center; min-height: 2.4rem; padding: .35rem 0; border-bottom: 1px solid var(--color-border); font-size: .8rem; }
-.upload-file-row__name { min-width: 0; overflow-wrap: anywhere; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.upload-file-row .game-upload__actions { flex-shrink: 0; margin: 0; gap: .3rem; }
-.upload-file-row .btn { font-size: .65rem; padding: .25rem .45rem; min-height: 0; }
+.upload-file-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .65rem .75rem; min-height: 2.4rem; padding: 1rem 0; border-bottom: 1px solid var(--color-border); font-size: .8rem; }
+.upload-file-row > .status-badge { justify-self: end; }
+.upload-file-row__name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; color: var(--color-text); }
+.upload-file-row .btn { font-size: .8rem; padding: .4rem .65rem; min-height: 2.25rem; }
 .project-upload-dialog__progress { flex-basis: 100%; }
 .project-upload-dialog__body { max-height: 50dvh; }
 .project-upload-dialog .game-upload__error { font-size: .7rem; padding: .35rem .5rem; margin: .25rem 0; }
@@ -166,22 +166,23 @@
 .game-upload--linear .game-upload__complete-text { display: none; }
 
 .project-upload-dialog .field-hint, .project-upload-dialog .game-upload__resume-text { font-size: .75rem; }
+.project-upload-dialog__body > :is(.field-hint, .field-error, .success-message, .error-box) { margin-block: .5rem; line-height: 1.6; overflow-wrap: anywhere; }
 .project-upload-dialog input[type=file] { max-width: 100%; font-size: .8rem; }
-@media (max-width: 50em) {
- .upload-file-row .game-upload__actions { margin-left: auto; }
-}
 
 .project-upload-dialog__recovery { margin: .5rem 0; color: var(--color-text-muted); font-size: .7rem; line-height: 1.5; }
 
-/* File rows retain their identity, controls, and errors at narrow widths. */
-.upload-file-row[data-file-id] .upload-file-row__name { white-space: normal; }
-.upload-file-row__meter { min-width: 0; display: flex; flex-direction: column; gap: .25rem; font-variant-numeric: tabular-nums; }
-.upload-file-row__actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-.upload-file-row__error { grid-column: 1 / -1; overflow-wrap: anywhere; color: var(--color-danger, #b42318); margin: 0; }
-.upload-file-row__select input { display: block; max-width: 100%; }
-@media (max-width: 480px) {
- .upload-file-row { grid-template-columns: minmax(0, 1fr); }
- .upload-file-row__actions { justify-content: flex-start; }
+/* Row styling is self-contained because upload dialogs render outside the editor. */
+.upload-file-row__meter { grid-column: 1 / -1; min-width: 0; display: flex; flex-direction: column; gap: .4rem; font-variant-numeric: tabular-nums; color: var(--color-text-muted); font-size: .75rem; }
+.upload-file-row__actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .5rem; }
+.upload-file-row__error { grid-column: 1 / -1; margin: 0; padding: .65rem .75rem; border: 1px solid color-mix(in srgb, var(--color-danger) 25%, transparent); border-radius: var(--radius); background: color-mix(in srgb, var(--color-danger) 6%, transparent); color: var(--color-danger); font-size: .8rem; line-height: 1.65; overflow-wrap: anywhere; }
+.upload-file-row__actions:empty { display: none; }
+@media (max-width: 50em) {
+ .upload-file-row { gap: .35rem .5rem; padding-block: .5rem; }
+ .upload-file-row__meter { display: grid; grid-template-columns: minmax(2rem, 1fr) auto; align-items: center; gap: .5rem; font-size: .7rem; }
+ .upload-file-row__meter > span { white-space: nowrap; }
+ .upload-file-row__actions { gap: .4rem; }
+ .upload-file-row .btn { min-height: 2rem; padding: .3rem .55rem; font-size: .75rem; }
+ .upload-file-row__error { padding: .45rem .6rem; font-size: .75rem; line-height: 1.5; }
 }
 
 .upload-progress-modal__progress { margin: 1rem 0 .55rem; }

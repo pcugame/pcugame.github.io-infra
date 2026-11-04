@@ -18,7 +18,7 @@ export function SubmissionActions({
 	return (
 		<div className="project-edit-apply submission-actions" aria-label="작품 제출·등록">
 			<div className="project-edit-apply__feedback" aria-live="polite">
-				{blockedReason ?? (isSubmitting ? submittingLabel : null)}
+				{blockedReason ? <p className="field-error">{blockedReason}</p> : isSubmitting ? <p className="field-hint" role="status">{submittingLabel}</p> : null}
 			</div>
 			<button type="submit" className="btn btn--primary" disabled={isSubmitting || isUploadLocked}>
 				{isSubmitting ? submittingLabel : submitLabel}

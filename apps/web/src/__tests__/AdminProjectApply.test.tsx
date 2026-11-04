@@ -14,7 +14,7 @@ const control = vi.hoisted(() => ({ role: 'ADMIN', visibilityEnabled: true, queu
 vi.mock('../features/auth', () => ({ useMe: () => ({ user: { role: control.role } }) }));
 vi.mock('../features/admin/projects/AdminProjectAssetManager', () => ({
 	AdminProjectUploadProvider: ({ children }: { children: React.ReactNode }) => children,
-	AdminProjectAssetManager: () => null,
+	AdminProjectAssetManager: ({ webglActions }: { webglActions?: React.ReactNode }) => webglActions ?? null,
 	AdminProjectUploadProgress: () => null,
 	AdminProjectPosterUpload: () => null,
 	useAdminProjectUploadQueue: () => ({ entries: control.entries, removals: control.removals, hasChanges: control.queueDirty, isApplying: false, validationError: control.queueError, applyChanges: control.queueApply, setLocked: control.lock }),
@@ -54,10 +54,13 @@ describe('global project Apply', () => {
 		change('작품명 *', '새 제목');
 		for (const step of [0, 1, 2, 3]) { goTo(step); expect(button().disabled).toBe(false); }
 		goTo(2);
-		const display = screen.getByRole('form', { name: 'WebGL 표시 크기 설정' });
-		expect(display.closest('.submission-studio__sheet')).toBeNull();
-		expect(display.classList.contains('webgl-display-settings--horizontal')).toBe(true);
-		expect(display.querySelector('details')?.open).toBe(true);
+		expect(screen.queryByRole('form', { name: 'WebGL 표시 크기 설정' })).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: /^웹 빌드 설정$/ }));
+        const dialog = screen.getByRole('dialog', { name: '웹 빌드 설정' });
+        const display = within(dialog).getByRole('form', { name: 'WebGL 표시 크기 설정' });
+        expect(display.closest('.submission-studio__sheet')).toBeNull();
+        expect(display.querySelector('details')).toBeNull();
+        fireEvent.click(within(dialog).getByRole('button', { name: '웹 빌드 설정 닫기' }));
 		goTo(0); change('작품명 *', ''); expect(button().disabled).toBe(true);
 	});
 
@@ -73,12 +76,27 @@ describe('global project Apply', () => {
   change('작품명 *', '수정 미리보기');
   expect(card.getByRole('heading', { name: '수정 미리보기' })).toBeTruthy();
   goTo(3);
-  expect(screen.getByText(/파일명: saved-game.zip/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '게임 다운로드 (ZIP)' }).getAttribute('href')).toBe('/game.zip');
   control.removals = [30]; goTo(0);
   expect(card.queryByRole('img')).toBeNull();
   goTo(3); expect(document.querySelector('.project-preview-inline img')).toBeNull();
   control.removals = []; goTo(0);
   expect(card.getByAltText('수정 미리보기 포스터')).toBeTruthy();
+  expect(adminProjectApi.update).not.toHaveBeenCalled();
+ });
+
+ it('uses real saved game actions and disables replacements until uploaded', async () => {
+  stored = { ...stored, webglUrl: '/saved-webgl/index.html', assets: [{ id: 31, kind: 'GAME', url: '/game.zip', originalName: 'saved-game.zip', size: 200 }] };
+  mount(); await ready(); goTo(3);
+  const preview = () => within(screen.getByRole('region', { name: '전시 화면 미리보기' }));
+  expect(preview().getByRole('link', { name: '플레이해보기' }).getAttribute('href')).toBe('/projects/7/play');
+  expect(preview().getByRole('link', { name: '게임 다운로드 (ZIP)' }).getAttribute('href')).toBe('/game.zip');
+  control.entries = [{ id: 1, uploadId: 'web', kind: 'WEBGL', zone: 'files', status: 'pending', file: new File(['zip'], 'replacement.zip') }];
+  goTo(0); goTo(3);
+  expect(preview().queryByRole('link', { name: '플레이해보기' })).toBeNull();
+  expect((preview().getByRole('button', { name: '플레이해보기' }) as HTMLButtonElement).disabled).toBe(true);
+  control.removals = [31]; goTo(0); goTo(3);
+  expect(preview().queryByRole('link', { name: '게임 다운로드 (ZIP)' })).toBeNull();
   expect(adminProjectApi.update).not.toHaveBeenCalled();
  });
 
@@ -213,8 +231,9 @@ describe('global project Apply', () => {
 	it('locks metadata, members, and apply while pending and runs publication after domains', async () => {
 		let finish!: () => void; control.queueApply.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
 		mount(); await ready(); chooseVisibility('비공개'); fireEvent.click(apply());
-		await screen.findByRole('dialog', { name: '변경사항을 적용하고 있어요.' });
-        expect(screen.queryByRole('button', { name: '적용 중…' })).toBeNull();
+		await screen.findByRole('button', { name: '적용 중…' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+        expect((screen.getByRole('button', { name: '적용 중…' }) as HTMLButtonElement).disabled).toBe(true);
 		expect(screen.queryByRole('switch', { name: '작품 보관' })).toBeNull();
 		expect(screen.getByLabelText('작품명 *').closest('fieldset')?.disabled).toBe(true);
 		expect(screen.getByLabelText('필수 하드웨어').closest('fieldset')?.disabled).toBe(true);

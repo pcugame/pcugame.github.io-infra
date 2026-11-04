@@ -11,6 +11,7 @@
 }
 .progress-bar--sm { height: .35rem; }
 .progress-bar--success { --progress-color: var(--color-success); }
+.progress-bar--danger { --progress-color: var(--color-danger); }
 /* Keep the browser's moving indicator when the total is unknown. */
 .progress-bar[value] { appearance: none; }
 .progress-bar::-webkit-progress-bar { background: var(--color-border); }

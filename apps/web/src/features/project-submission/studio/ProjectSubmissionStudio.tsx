@@ -17,12 +17,11 @@ import { useSubmissionFiles } from '../useSubmissionFiles';
 import { useProjectSubmissionForm } from '../useProjectSubmissionForm';
 import { SubmissionBackButton } from '../SubmissionBackButton';
 import { SubmissionMembersFieldset } from '../SubmissionMembersFieldset';
-import { SubmissionPosterSelection } from '../SubmissionFileSelection';
-import { SubmissionUploadDialog } from '../SubmissionUploadDialog';
 import { StudioFileSelection } from './StudioFileSelection';
 import { ProjectRequirementsFieldset } from '../../../components/project/ProjectRequirementsFieldset';
 import { StudioIntroduction } from './StudioIntroduction';
 import { StudioPreview } from './StudioPreview';
+import { usePreventWindowClose } from '../../../components/common/usePreventWindowClose';
 import { ProjectStudio } from '../../../components/project/editor/ProjectStudio';
 
 const lastStep = 3;
@@ -86,15 +85,21 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
  const missing = readiness.requirements.filter(item => item.state === 'MISSING').map(item => publicationRequirementLabels[item.key]);
  const blockedReason = isUploadLocked ? '전시회 업로드가 잠겨 있습니다.' : wantsPublic && step === lastStep && missing.length && !(user?.role === 'ADMIN' && submission.exceptionReason.trim()) ? `공개하려면 다음 항목을 보완하세요: ${missing.join(', ')}` : '';
 	const disabled = isSubmitting || showGameProgress;
+ usePreventWindowClose(disabled);
+ const [uploadWasActive, setUploadWasActive] = useState(false);
+ if (disabled !== uploadWasActive) {
+  setUploadWasActive(disabled);
+  if (disabled) setStep(2);
+ }
 	const readyToSubmit = SubmitProjectPayloadSchema.safeParse(values).success;
 	const error = submissionError ?? submission.submitMutation.error;
  const duplicate = isApiError(error) ? (error.body as { error?: { details?: { projectId?: number; publicationStatus?: string } } })?.error?.details : undefined;
-	return <div inert={disabled} aria-hidden={disabled} className="project-studio-host">
-		<ProjectStudio title={mode === 'admin' ? '새 작품 등록하기' : '새 작품 만들기'} step={step} onStepChange={changeStep} disabled={disabled} notice={validationNotice}
+	return <div className="project-studio-host">
+		<ProjectStudio title={mode === 'admin' ? '새 작품 등록하기' : '새 작품 만들기'} step={step} onStepChange={changeStep} disabled={false} notice={validationNotice}
 			secondaryAction={<SubmissionBackButton mode={mode} isDirty={form.formState.isDirty} files={files} disabled={disabled} />}
 			panels={[
-				<StudioIntroduction submission={submission} />,
-				<>
+				<fieldset className="submission-studio__form-guard" disabled={disabled}><StudioIntroduction submission={submission} /></fieldset>,
+				<fieldset className="submission-studio__form-guard" disabled={disabled}>
 					<Controller control={form.control} name="platforms" render={({ field: platforms }) => <Controller control={form.control} name="hardwareRequirements" render={({ field: hardware }) => <ProjectRequirementsFieldset
 						platforms={platforms.value ?? []} hardwareRequirements={hardware.value ?? ''}
 						onPlatformsChange={platforms.onChange} onHardwareRequirementsChange={hardware.onChange}
@@ -102,25 +107,23 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 					/>} />} />
 					<SubmissionMembersFieldset append={membersFieldArray.append} swap={membersFieldArray.swap} remove={membersFieldArray.remove} fields={membersFieldArray.fields} register={form.register} errors={errors} />
 					<Controller control={form.control} name="externalLinks" render={({ field }) => <ExternalLinksFieldset value={field.value ?? []} onChange={field.onChange} disabled={disabled} showErrors={!!errors.externalLinks} />} />
-				</>,
+				</fieldset>,
 				<>
 					<p className="submission-studio__upload-recommendation">공개하려면 포스터·네이티브 게임·동영상이 필요합니다. WebGL·스크린샷·기타 자료는 선택입니다.</p>
-					<SubmissionPosterSelection inlineErrors files={files} title={values.title || '새 작품'} limits={limits} enabled={!disabled && !isUploadLocked} />
-					<StudioFileSelection files={files} limits={limits} materialLimits={materialLimits} enabled={!disabled && !isUploadLocked} retryConfig={() => void uploadConfig.refetch()} />
+					<StudioFileSelection submission={submission} title={values.title || '새 작품'} files={files} limits={limits} materialLimits={materialLimits} enabled={!disabled && !isUploadLocked} retryConfig={() => void uploadConfig.refetch()} />
 				</>,
 				<ProjectPreviewPanel active={step === lastStep} values={values} poster={files.posterFile} images={files.imageFiles} videos={files.videoFiles} game={files.gameFile} webgl={files.webglFile} exhibitionLabel={exhibitionLabel} />
 			]}
 			preview={<StudioPreview values={values} files={files} exhibitionLabel={exhibitionLabel} onPreview={() => changeStep(lastStep)} />}
-			feedback={<>{wantsPublic && <PublicationFeedback readiness={readiness} onStep={changeStep} />}{duplicate?.projectId && <p>기존 작품: {duplicate.publicationStatus === 'PUBLIC' ? '공개' : '비공개'} · <Link to={`/admin/projects/${duplicate.projectId}/edit`}>이어서 수정</Link></p>}{blockedReason && <p className="field-error">{blockedReason}</p>}{error != null && <p className="field-error" role="alert">{getApiErrorMessage(error)}</p>}</>}
-			actions={<Button type="submit" disabled={disabled || !!blockedReason || (!(wantsPublic && step < lastStep) && !readyToSubmit)}>{isSubmitting ? copy.submittingLabel : wantsPublic ? step < lastStep ? '다음' : '공개 제출' : '저장'}</Button>}
+			feedback={<>{wantsPublic && <PublicationFeedback readiness={readiness} onStep={changeStep} />}{duplicate?.projectId && <p className="field-hint">기존 작품: {duplicate.publicationStatus === 'PUBLIC' ? '공개' : '비공개'} · <Link to={`/admin/projects/${duplicate.projectId}/edit`}>이어서 수정</Link></p>}{blockedReason && <p className="field-error">{blockedReason}</p>}{error != null && <p className="field-error" role="alert">{getApiErrorMessage(error)}</p>}</>}
+			actions={<Button type="submit" disabled={disabled || !!blockedReason || (!(wantsPublic && step < lastStep) && !readyToSubmit)}>{isSubmitting ? copy.submittingLabel : showGameProgress ? '업로드 처리 중…' : wantsPublic ? step < lastStep ? '다음' : '공개 제출' : '저장'}</Button>}
 			renderBody={body => <div ref={panel}><form noValidate onSubmit={event => {
 				event.preventDefault();
 				if (disabled || isUploadLocked) return;
 				if (wantsPublic && step < lastStep) { void nextStep(); return; }
 				if (blockedReason) { setValidationNotice(blockedReason); return; }
 				void form.handleSubmit(submission.onSubmit, revealErrors)(event);
-			}}><fieldset className="submission-studio__form-guard" disabled={disabled}><legend className="submission-studio__sr-only">작품 작성</legend>{body}</fieldset></form></div>}
+			}}>{body}</form></div>}
 		/>
-		<SubmissionUploadDialog submission={submission} files={files} title={values.title || '작품'} />
 	</div>;
 }

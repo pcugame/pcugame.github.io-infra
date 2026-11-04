@@ -18,6 +18,7 @@
 @import './features/project-submission.css';
 @import './features/admin-export.css';
 @import './features/upload.css';
+@import './features/material-manager.css';
 @import './features/archive.css';
 @import './features/project-modal.css';
 @import './components/award-effects.css';

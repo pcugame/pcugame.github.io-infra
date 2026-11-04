@@ -109,13 +109,14 @@ import { Button, FormSection, TextField } from '../../components/ui';
 | --- | --- |
 | `FormSection` | `variant="panel"` (default) or `"plain"`; forwards native fieldset props, ref and disabled semantics. |
 | `DialogFrame` | Native dialog with `size="sm"` (32rem), `"md"` (34rem, default), or `"lg"` (62rem), capped by the viewport. Header/body/footer padding is 1.25rem, or 1rem at 50em and below. |
-| `ProgressBar` | Native progress, `max={100}` by default. Omit `value` for indeterminate progress; `value={0}` means a known zero. `size="sm" \| "md"`, `tone="info" \| "success"`. Provide an accessible label. |
+| `ProgressBar` | Native progress, `max={100}` by default. Omit `value` for indeterminate progress; `value={0}` means a known zero. `size="sm" \| "md"`, `tone="info" \| "success" \| "danger"`. Provide an accessible label. |
 | `StatusBadge` | `tone="neutral" \| "info" \| "success" \| "warning" \| "danger"`, `size="sm" \| "md"`. Features own wording and status-to-tone mappings. Awards and year markers keep their own designs. |
 
 The dialog frame never calls `showModal`/`close`, handles Escape/backdrop clicks,
 locks scroll, restores focus, or unmounts children. The owning feature retains
 those policies and effects, including upload recovery and unsaved form state.
-WebGL display settings currently remain an inline form with a separate save action.
+WebGL display settings use the medium dialog frame and retain a separate save action.
+The owner preserves drafts on close and blocks dismissal while saving.
 
 Form rhythm can be set at the feature root with `--form-field-gap`,
 `--form-label-size`, `--form-label-gap`, `--form-section-title-size`,
@@ -128,8 +129,9 @@ page ancestors when a variant or variable expresses the requirement.
 Upload widgets keep their existing `compact` prop and linear context behavior;
 `game-upload--compact` and `game-upload--linear` own their undecorated surfaces.
 Use `variant="plain"` to remove the surface without hiding the heading or chooser.
-Reuse `FileUploadRows`/`UploadFileRows`; do not create another file manager for a
-style change. Alerts use `.notice` with `--danger`, `--warning`, or `--success`;
+Reuse `ProjectMaterialManager`, `MaterialFileRow`, and `FileUploadRows`/`UploadFileRows`;
+do not create another file manager for a style change. Material rows and transfer
+summaries use the shared badge/progress primitives, with state mappings in features. Alerts use `.notice` with `--danger`, `--warning`, or `--success`;
 repeated preserved prose uses `.preserve-lines`.
 
 Measure authored styles with `node apps/web/scripts/measure-styles.mjs [git-ref]`
