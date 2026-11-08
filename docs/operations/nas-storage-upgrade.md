@@ -67,3 +67,35 @@ and object state together. Do not alter Web/API binaries as part of this NAS tas
 References: [Garage 2.5.0 release notes](https://git.deuxfleurs.fr/Deuxfleurs/garage/releases/tag/v2.5.0),
 [Garage v1 to v2 migration](https://garagehq.deuxfleurs.fr/documentation/working-documents/migration-2/),
 [nginx security advisories](https://nginx.org/en/security_advisories.html).
+
+## Restart after NAS reboot or package update
+
+Garage and the three NAS gateways use `restart: always`. Docker restarts these
+containers when its daemon starts, including containers explicitly stopped before
+the daemon restart. `unless-stopped` preserves that stopped state instead.
+The inspected Container Manager 24.0.2-1707 startup script also includes containers
+with an `always` policy in its saved automatic-start list, and the package is enabled.
+
+Update an existing running container with `docker update --restart=always NAME`;
+this changes the policy without recreating it. Keep the NAS Compose definition
+in sync so the policy survives future recreation. Apply this only to Garage and
+the public, protected-download and upload-part gateways, not unrelated NAS services.
+
+For planned maintenance that must survive a NAS/Docker restart, temporarily set
+`--restart=no` on the affected containers before stopping them and avoid Compose
+recreation until maintenance is finished. Restore `always` and start the services
+when ready. A normal manual stop alone lasts only until Docker restarts (and the
+Synology package may explicitly start `always` containers).
+
+This policy depends on Container Manager starting and the storage volumes being
+available. It does not repair corrupt storage or invalid configuration. Policy
+inspection and non-disruptive health checks verify the configuration; an actual
+NAS reboot/update acceptance test is a separate operation.
+
+Applied to the four running production containers and both NAS Compose files on
+2026-11-08 without changing their IDs, image IDs or start times. The private NAS
+audit directory `/var/services/homes/gamedata/nas-autostart-20261108/` contains the
+previous Compose files, before/after inspection and `receipt.json`. Garage health
+and all three gateway health checks passed; no NAS reboot was performed.
+
+Reference: [Docker restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/).
