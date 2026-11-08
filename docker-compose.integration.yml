@@ -29,7 +29,7 @@ services:
       retries: 20
 
   garage:
-    image: dxflrs/garage:v1.1.0
+    image: dxflrs/garage:v2.5.0@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5
     restart: unless-stopped
     ports:
       - "3900:3900"
@@ -64,7 +64,7 @@ services:
     entrypoint: ["/bin/sh", "/garage-init-integration.sh"]
 
   upload-origin:
-    image: nginx:1.27-alpine
+    image: nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311
     restart: unless-stopped
     depends_on:
       garage-init:
@@ -82,7 +82,7 @@ services:
       - "3905:8080"
 
   protected-download-origin:
-    image: nginx:1.27-alpine
+    image: nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311
     restart: unless-stopped
     depends_on:
       garage-init:
@@ -103,7 +103,7 @@ services:
       - "3906:8080"
 
   public-origin:
-    image: nginx:1.27-alpine
+    image: nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311
     restart: unless-stopped
     depends_on:
       garage-init:
