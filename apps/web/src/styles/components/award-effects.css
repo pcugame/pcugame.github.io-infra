@@ -1,4 +1,4 @@
-/* Layered foil, facets and sparkles stay on the poster, beneath labels and controls. */
+/* Layered foil, facets and sparkles are exclusive to archive cards. */
 @property --award-orbit {
   syntax: '<angle>';
   inherits: false;
@@ -10,7 +10,7 @@
   isolation: isolate;
 }
 
-:is(.archive-card, .modal-visual)[data-award-tone]::before {
+.archive-card[data-award-tone]::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -30,8 +30,7 @@
   pointer-events: none;
 }
 
-.archive-card[data-award-tone] .archive-card__image::before,
-.modal-visual[data-award-tone] .modal-visual__frame::before {
+.archive-card[data-award-tone] .archive-card__image::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -53,8 +52,7 @@
   pointer-events: none;
 }
 
-.archive-card[data-award-tone] .archive-card__image::after,
-.modal-visual[data-award-tone] .modal-visual__frame::after {
+.archive-card[data-award-tone] .archive-card__image::after {
   content: '';
   position: absolute;
   inset: -35%;
@@ -74,18 +72,16 @@
 }
 
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  :is(.archive-card, .modal-visual)[data-award-tone]:is(:hover, :focus-visible, :focus-within)::before {
+  .archive-card[data-award-tone]:is(:hover, :focus-visible, :focus-within)::before {
     opacity: 1;
     animation: award-frame-orbit 4.8s linear infinite;
   }
 
-  .archive-card[data-award-tone]:is(:hover, :focus-visible) .archive-card__image::before,
-  .modal-visual[data-award-tone]:is(:hover, :focus-within) .modal-visual__frame::before {
+  .archive-card[data-award-tone]:is(:hover, :focus-visible) .archive-card__image::before {
     animation: award-facet-shimmer 7s linear infinite, award-pattern-drift 9s linear infinite;
   }
 
-  .archive-card[data-award-tone]:is(:hover, :focus-visible) .archive-card__image::after,
-  .modal-visual[data-award-tone]:is(:hover, :focus-within) .modal-visual__frame::after {
+  .archive-card[data-award-tone]:is(:hover, :focus-visible) .archive-card__image::after {
     animation: award-foil-wave 3.6s ease-in-out infinite;
   }
 }
