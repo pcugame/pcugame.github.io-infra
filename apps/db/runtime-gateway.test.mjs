@@ -88,7 +88,7 @@ try {
  config += '}';
  writeFileSync(join(work, 'nginx.conf'), config);
  docker('run', '-d', '--name', name, '-p', '127.0.0.1::8080', '-p', '127.0.0.1::8081',
-  '-v', `${work}:/fixture:ro`, '-v', `${work}/nginx.conf:/etc/nginx/nginx.conf:ro`, 'nginx:1.27-alpine');
+  '-v', `${work}:/fixture:ro`, '-v', `${work}/nginx.conf:/etc/nginx/nginx.conf:ro`, 'nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311');
  const validation = spawnSync('docker', ['exec', name, 'nginx', '-t'], { encoding: 'utf8' });
  if (validation.status !== 0) {
   const logs = spawnSync('docker', ['logs', name], { encoding: 'utf8' });

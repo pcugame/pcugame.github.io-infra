@@ -191,7 +191,7 @@ assert.doesNotMatch(liveTest, /put-object|immutable-fixture/);
 // Garage v1.1 intentionally exposes this through standard S3 Put/GetBucketCors
 // rather than an admin CLI. Test policy generation with a fake aws client so
 // exact origin normalization and the read-back invariant stay executable.
-assert.match(initDockerfile, /FROM dxflrs\/garage:v1\.1\.0 AS garage/);
+assert.match(initDockerfile, /FROM dxflrs\/garage:v2\.5\.0@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5 AS garage/);
 assert.match(initDockerfile, /apk add --no-cache aws-cli python3/);
 assert.match(corsScript, /s3api put-bucket-cors/);
 assert.match(corsScript, /s3api get-bucket-cors/);

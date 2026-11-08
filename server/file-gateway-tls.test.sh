@@ -1,5 +1,5 @@
 #!/bin/sh
-# Isolated real nginx 1.27 TLS/auth_request regression; requires Docker + OpenSSL.
+# Isolated real nginx 1.30.6 TLS/auth_request regression; requires Docker + OpenSSL.
 set -eu
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d)
@@ -36,7 +36,7 @@ for(const file of ['public-origin','protected-download']) {
 config+='}';writeFileSync(`${work}/nginx.conf`,config);
 JS
 docker run --rm -d --name "$name" -v "$work:/fixture:ro" \
- -v "$work/nginx.conf:/etc/nginx/nginx.conf:ro" nginx:1.27-alpine >/dev/null
+ -v "$work/nginx.conf:/etc/nginx/nginx.conf:ro" nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311 >/dev/null
 i=0
 until docker exec "$name" nginx -t >/dev/null 2>&1; do
  i=$((i + 1)); [ "$i" -lt 20 ] || exit 1; sleep 1
