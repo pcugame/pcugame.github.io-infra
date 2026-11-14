@@ -23,7 +23,7 @@ services:
   # and management listeners have no host publication at all.
   garage:
     image: dxflrs/garage:v2.5.0@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5
-    restart: unless-stopped
+    restart: always
     ports:
       - "127.0.0.1:${GARAGE_S3_LOCAL_PORT:-3900}:3900"
     volumes:
@@ -65,7 +65,7 @@ services:
   upload-part-origin:
     image: nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311
     profiles: ["nas-data-plane"]
-    restart: unless-stopped
+    restart: always
     depends_on:
       garage-init:
         condition: service_completed_successfully
@@ -104,7 +104,7 @@ services:
   protected-download-origin:
     image: nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311
     profiles: ["nas-data-plane"]
-    restart: unless-stopped
+    restart: always
     depends_on:
       garage-init:
         condition: service_completed_successfully
@@ -143,7 +143,7 @@ services:
   public-origin:
     image: nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311
     profiles: ["nas-data-plane"]
-    restart: unless-stopped
+    restart: always
     depends_on:
       garage-init:
         condition: service_completed_successfully
