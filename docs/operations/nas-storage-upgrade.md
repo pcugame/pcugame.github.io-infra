@@ -8,7 +8,7 @@ This document records the prepared operation, not a completed deployment.
 ## Exact images
 
 - Garage: `dxflrs/garage:v2.5.0@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5`
-- Gateways: `nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311`
+- Gateways: `nginx:1.30.7-alpine@sha256:bef154735288bc38d99fac41ae63730684bcc661503673a04a0f9bc526ba8598`
 
 The local Compose stack, integration stack, Garage init binary and nginx fixtures
 use these same images. Garage 2.5.0 restricts lifecycle configuration to bucket
