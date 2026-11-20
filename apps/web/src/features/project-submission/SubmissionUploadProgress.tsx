@@ -1,3 +1,4 @@
+import { submissionMode } from '../../lib/auth/roles';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { StudioFileGroup } from './studio/fileGroups';
@@ -13,7 +14,7 @@ function KindUploads({ projectId, kind, items, selected, fileNames, onComplete }
 }) {
  const client = useQueryClient();
  const user = client.getQueryData<{ user?: { id: number; role: string } }>(['me'])?.user;
- const queue = useMemo(() => new FileUploadQueue(String(user?.id ?? 'current-user'), user?.role === 'USER' ? 'user' : 'admin', `${projectId}:${kind}`), [projectId, kind, user?.id, user?.role]);
+ const queue = useMemo(() => new FileUploadQueue(String(user?.id ?? 'current-user'), submissionMode(user?.role), `${projectId}:${kind}`), [projectId, kind, user?.id, user?.role]);
  const rows = useSyncExternalStore(queue.subscribe, queue.getSnapshot);
  useEffect(() => queue.attach(), [queue]);
  useEffect(() => { queue.setOnReady(onComplete); return () => { queue.setOnReady(undefined); }; }, [queue, onComplete]);

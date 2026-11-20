@@ -133,6 +133,7 @@ const garageEnv = {
 };
 
 const suites = {
+ 'term-origins': {files:['src/__tests__/term-origins.postgres.test.ts', 'src/modules/benchmark-worker/repository.postgres.test.ts']},
  'awards-gateway': { files: ['src/__tests__/awards-gateway.garage.postgres.test.ts'], env: { RUN_POSTGRES_INTEGRATION: 'true', RUN_GARAGE_INTEGRATION: 'true', RUN_GATEWAY_INTEGRATION: 'true' } },
  awards: { files: ['src/__tests__/awards.postgres.test.ts'], env: { RUN_POSTGRES_INTEGRATION: 'true' } },
 	voting: { files: ['src/__tests__/voting.postgres.test.ts'], env: { RUN_POSTGRES_INTEGRATION: 'true' } },
@@ -236,6 +237,7 @@ const suites = {
 };
 
 const fullSuiteOrder = [
+ 'term-origins',
  'awards',
  'awards-gateway',
 	'voting',

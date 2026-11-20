@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // Keep development transports out of artifacts, including custom build modes.
+  define: command === 'build' ? { 'import.meta.env.VITE_MOCK': '"false"' } : {},
   plugins: [react()],
   test: {
     // Node 26 Web Storage globals shadow jsdom's browser Storage implementation.
@@ -26,4 +28,4 @@ export default defineConfig({
       .map((host) => host.trim())
       .filter(Boolean),
   },
-});
+}));

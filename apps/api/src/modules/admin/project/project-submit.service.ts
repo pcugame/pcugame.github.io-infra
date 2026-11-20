@@ -1,7 +1,7 @@
 import { enrichExternalLinks } from '../../external-links/resolver.js';
 import { canReadVisibility } from '../../../shared/visibility.js';
 import { createHash } from 'node:crypto';
-import type { ProjectSubmissionItemStatus, ProjectSubmissionStatusResponse } from '@pcu/contracts';
+import type { ProjectSubmissionItemStatus, ProjectSubmissionStatusResponse, UserRole } from '@pcu/contracts';
 import { AppError, badRequest, conflict, forbidden, isUniqueConstraintError } from '../../../shared/errors.js';
 import { toSlug } from '../../../shared/slug.js';
 import { parseBody, SubmitProjectPayload } from '../../../shared/validation.js';
@@ -146,8 +146,8 @@ export async function submitProject(
 	const { exhibitionId, title, summary, description, externalLinks, platforms, hardwareRequirements, members, manifest, visibility, allowDuplicateTitle } = parseBody(SubmitProjectPayload, input.payload);
 	assertManifestIsUnambiguous(manifest);
 	const exhibition = await deps.repository.findExhibitionById(exhibitionId);
-	assertUploadAllowed(exhibition, exhibitionId, options.audience === 'user' ? 'USER' : input.actor.role as never);
-	if (!canReadVisibility({ id: input.actor.id, role: input.actor.role as 'USER' | 'OPERATOR' | 'ADMIN' }, exhibition.visibility)) throw forbidden('Exhibition is not accessible');
+	assertUploadAllowed(exhibition, exhibitionId, options.audience === 'user' ? 'USER' : input.actor.role as UserRole);
+	if (!canReadVisibility({ id: input.actor.id, role: input.actor.role as UserRole }, exhibition.visibility)) throw forbidden('Exhibition is not accessible');
 
 	let operation: { operationId: string; ownerToken: string } | undefined;
 	try {
@@ -175,7 +175,7 @@ export async function submitProject(
 				project = await deps.repository.createProjectWithAssets({
 					allowDuplicateTitle, exhibitionId: exhibition.id, slug, title, summary, description, externalLinks: resolvedExternalLinks, platforms, hardwareRequirements, status, visibility: visibility ?? 'PUBLIC',
 					creatorId: input.actor.id,
-					actor: { id: input.actor.id, role: input.actor.role as 'USER' | 'OPERATOR' | 'ADMIN' },
+					actor: { id: input.actor.id, role: input.actor.role as UserRole },
 					manifest,
 					members: options.audience === 'user'
 						? members.map((member) => ({ name: member.name, studentId: member.studentId }))

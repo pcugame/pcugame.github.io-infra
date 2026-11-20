@@ -9,10 +9,11 @@ const serverTests = readdirSync(new URL('../server/', import.meta.url))
   .map(name => `server/${name}`);
 if (serverTests.length === 0) throw new Error('No release control tests found');
 
-// Only repository policy tests and temporary shell doubles run here. The live
-// Quadlet lifecycle test and database/service integration belong to other gates.
+// These checks run offline with local fixtures. Live Quadlet, model and database
+// integration use their respective environments.
 const checks = [
   [process.execPath, ['--test', 'scripts/check-migration-policy.test.mjs', ...serverTests]],
+  ['python3', ['-B', 'server/local-llm/test_server.py']],
   ['python3', ['server/quadlet/wait-network-ready.test.py']],
   ['python3', ['server/quadlet/check-installed.test.py']],
   ['python3', ['server/quadlet/parity.test.py']],

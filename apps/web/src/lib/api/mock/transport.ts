@@ -129,6 +129,8 @@ function delay(ms: number, signal?: AbortSignal | null): Promise<void> {
 }
 function successStatus(pathname: string, method: string): number {
   if (method !== 'POST') return 200;
+  if (pathname === '/api/lab/datasets') return 201;
+  if (pathname === '/api/lab/runs') return 202;
   return /^\/api\/(admin|me)\/projects\/submit$/.test(pathname)
     || /^\/api\/me\/projects\/\d+\/(change-requests|webgl-network-requests(?:\/batch)?)$/.test(pathname)
     || /^\/api\/admin\/projects\/\d+\/members$/.test(pathname)

@@ -19,6 +19,7 @@ enum UserRole {
   USER
   OPERATOR
   ADMIN
+  BETA_TESTER
 }
 
 enum ProjectStatus {
@@ -190,6 +191,10 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  labDatasets  LabDataset[]
+  labRuns      LabRun[]
+  labChangesMade LabRoleAudit[] @relation("LabRoleActor")
+  labChangesReceived LabRoleAudit[] @relation("LabRoleTarget")
   sessions     AuthSession[]        @relation("UserSessions")
   projects     Project[]            @relation("ProjectCreator")
   memberships  ProjectMember[]      @relation("UserMemberships")
@@ -1197,4 +1202,102 @@ model ProjectAward {
   @@id([projectId, awardId])
   @@index([awardId, exhibitionId])
   @@map("project_awards")
+}
+
+// Uploaded snapshots are immutable. Each result references a case in its run's dataset.
+model LabDataset {
+  id        String @id @default(uuid())
+  ownerId   Int
+  name      String
+  version   String @default("1")
+  hash      String
+  count     Int
+  createdAt DateTime @default(now())
+  owner     User @relation(fields: [ownerId], references: [id])
+  cases     LabTestCase[]
+  runs      LabRun[]
+
+  @@unique([ownerId, hash])
+  @@index([ownerId, createdAt])
+}
+
+model LabTestCase {
+  datasetId String
+  caseId    String
+  ordinal   Int
+  term      String
+  context   String
+  language  String
+  body      Json
+  dataset   LabDataset @relation(fields: [datasetId], references: [id])
+  results   LabResult[]
+
+  @@id([datasetId, caseId])
+  @@unique([datasetId, ordinal])
+}
+
+model LabRun {
+  id           String @id @default(uuid())
+  ownerId      Int
+  datasetId    String
+  datasetHash  String
+  systemPrompt String
+  promptHash   String
+  model        String
+  provider     String
+  searchMode   String
+  temperature  Float
+  maxTokens    Int
+  size         Int
+  status       String @default("QUEUED")
+  createdAt    DateTime @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+  owner        User @relation(fields: [ownerId], references: [id])
+  dataset      LabDataset @relation(fields: [datasetId], references: [id])
+  results      LabResult[]
+
+  @@unique([id, datasetId])
+  @@index([ownerId, createdAt])
+  @@index([status, createdAt])
+}
+
+model LabResult {
+  runId          String
+  datasetId      String
+  caseId         String
+  ordinal        Int
+  status         String @default("PENDING")
+  attempts       Int @default(0)
+  retryBase      Int @default(0)
+  leaseToken     String?
+  leaseUntil     DateTime?
+  output         Json?
+  sources        Json @default("[]")
+  history        Json @default("[]")
+  durationMs     Int?
+  searchCount    Int @default(0)
+  jsonValid      Boolean @default(false)
+  error          String?
+  toolSucceeded  Boolean @default(false)
+  toolSupport    String @default("unknown")
+  run            LabRun @relation(fields: [runId, datasetId], references: [id, datasetId])
+  testCase       LabTestCase @relation(fields: [datasetId, caseId], references: [datasetId, caseId])
+
+  @@id([runId, caseId])
+  @@unique([runId, ordinal])
+  @@index([status, leaseUntil])
+}
+
+model LabRoleAudit {
+  id         Int @id @default(autoincrement())
+  actorId    Int
+  targetId   Int
+  beforeRole UserRole
+  afterRole  UserRole
+  changedAt  DateTime @default(now())
+  actor      User @relation("LabRoleActor", fields: [actorId], references: [id])
+  target     User @relation("LabRoleTarget", fields: [targetId], references: [id])
+
+  @@index([targetId, changedAt])
 }

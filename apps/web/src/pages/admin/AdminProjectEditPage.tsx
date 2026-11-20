@@ -1,3 +1,4 @@
+import { submissionMode } from '../../lib/auth/roles';
 import { StatusBadge } from '../../components/ui';
 import { AwardSettings } from '../../features/admin/awards/AwardSettings';
 import { publicationReadiness } from '@pcu/contracts';
@@ -159,7 +160,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
     if (latest.publicationStatus !== 'PUBLIC') {
      await mutations.updateMutation.mutateAsync({ publication: { status: 'PUBLIC', expectedVersion: latest.version!, ...(exceptionReason.trim() ? { exceptionReason: exceptionReason.trim() } : {}) } });
      if (latest.status === 'DRAFT') {
-      const api = getProjectSubmitApi(user?.role === 'USER' ? 'user' : 'admin');
+      const api = getProjectSubmitApi(submissionMode(user?.role));
       await api.finalizeSubmission(id);
       setNotice('공개 처리 중입니다. 완료 후 상태가 반영됩니다.');
      }

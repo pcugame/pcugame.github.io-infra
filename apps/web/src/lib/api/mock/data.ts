@@ -76,6 +76,7 @@ interface MockUser {
 }
 
 const MOCK_USERS: Record<string, MockUser> = {
+	BETA_TESTER: { id: 7, name: '베타 테스터', email: 'tester@test.pcu.ac.kr', studentId: '2088103', role: 'BETA_TESTER' },
 	ADMIN: {
 		id: 1,
 		email: 'admin@test.pcu.ac.kr',

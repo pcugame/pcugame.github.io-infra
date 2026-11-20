@@ -1,0 +1,56 @@
+# derogatory
+es|paleto|Al oír el acento del nuevo compañero, alguien escribió «otro §» sin haber leído su propuesta.
+es|maruja|La moderadora preguntó por qué una queja sobre las goteras se había archivado como «cosas de §».
+fr|plouc|Une cliente demande le chemin du quai et le vendeur la traite de « § » devant toute la file.
+fr|assisté|Pendant la réunion, un orateur traite d'« § » tout habitant qui demande une aide au transport.
+de|Hinterwäldler|Im Chat wurde ein Teilnehmer wegen seines Dialekts als „§“ bezeichnet, bevor er seinen Vorschlag erklären konnte.
+de|Weichei|Als ein Spieler um eine Pause bat, antwortete ihm der Trainer vor der ganzen Mannschaft mit „§“.
+zh|土包子|实习生第一次问门禁卡怎么用，群里就有人回了一句“§”，管理员要求对方解释。
+zh|书呆子|同学认真核对了剧本的年代，有人却用“§”这个外号让他别再说了。
+pt|caipira|Na seleção da rádio, um jurado ouviu o sotaque do candidato e o chamou de “§” antes de avaliar o texto.
+pt|encostado|Um vizinho chamou quem recebia ajuda após a enchente de “§”, e a ata registrou a contestação.
+mul|foreigner|한국어로 회의를 진행하는 동료를 사회자가 거듭 “the § on our team”이라고 소개하자 동료가 이름으로 불러 달라고 했다.
+mul|boomer|En el foro bilingüe alguien respondió «OK, §» a una pregunta sobre el presupuesto y dejó la pregunta sin contestar.
+# historical_conflict
+es|reconquista|En el taller de historia local se discutió qué territorio y qué habitantes quedaban fuera del mapa titulado «§».
+es|memoria histórica|Al preparar una exposición sobre «§», dos asociaciones discreparon sobre qué testimonios abrirían el recorrido.
+fr|maintien de l'ordre|Les élèves ont comparé le « § » annoncé dans le communiqué avec les mots choisis par les manifestants.
+fr|banlieue|Le comité a demandé pourquoi le dossier intitulé « la § » ne montrait que deux quartiers d'une vaste couronne urbaine.
+de|Wende|Im Erzählcafé fragten jüngere Gäste, welchen Abschnitt ihres Lebens die Zeitzeugin mit „§“ meinte.
+de|Heimat|Für die Ausstellung schlugen zwei Familien „§“ als Titel vor, obwohl sie verschiedene Orte auf der Karte nannten.
+zh|下岗|口述史小组把厂报和工人的日记摆在一起，请参观者比较两份材料中“§”的用法。
+zh|城中村|改造说明会使用“§”一词，几名租户要求把他们在当地居住的经历写进展板。
+pt|retorno|Na mostra sobre migração, uma visitante perguntou de quem era a perspectiva na legenda “viagem de §”.
+mul|liberation|번역 수업에서 학생들은 한 증언의 “§”을 ‘해방’으로 옮겼고, 같은 날의 다른 증언에는 다른 말을 골랐다.
+# semantic_shift
+es|hilo|La bibliotecaria anunció un «§» de fotos en la red; nadie esperaba recibir una madeja.
+es|viral|El panadero dijo que su receta se había hecho «§» cuando empezaron a pedirla desde otros barrios.
+fr|pépite|Dans son carnet de lecture, la lycéenne a qualifié un court poème de « § ».
+fr|bulle|En parlant des recommandations de son téléphone, il a dit qu'il voulait sortir de sa « § » musicale.
+de|Ehrenmann|Nach der spontanen Reparatur des Fahrrads kommentierte ein Freund das Foto nur mit „§“.
+de|abfeiern|In der Schülerzeitung wollte die Band den ungewöhnlichen Rhythmus ausdrücklich „§“.
+zh|种草|朋友分享了一支钢笔的试写视频，评论里有人说“看完被§了”。
+zh|破防|读到孩子写给老树的信，主持人放下稿子说自己“§了”。
+pt|bolha|Ao trocar suas fontes de notícias, a leitora disse que queria sair da própria “§”.
+mul|손절|In a bilingual chat one student wrote “time to § this group project,” and the tutor asked whether she meant the people or the task.
+# neutral
+es|negra|En la clase de solfeo, la profesora dibujó una § y pidió a los alumnos que marcaran el pulso.
+es|raíz|En el ejercicio de álgebra, el alumnado comprobó la § sustituyendo el valor en la ecuación.
+fr|mineur|La pianiste a repris le thème en mode § avant de revenir au premier accord.
+fr|hôte|Dans le schéma du cours de biologie, les élèves ont relié le parasite à son §.
+de|Schwarzwald|Auf der Wanderkarte suchte die Gruppe einen markierten Weg im §.
+de|Mutter|Die Mechanikerin zog die § auf dem Gewinde an und prüfte das Spiel am Rad.
+zh|黑板|美术教室的§擦干净后，老师用白粉笔画了三种不同的线条。
+zh|白名单|软件说明里的“§”指管理员明确准许加载的一组插件，表中列着测试用名称。
+pt|raiz|No desenho de botânica, a estudante pintou a § da planta abaixo da linha do solo.
+mul|host|실습지의 “§ name” 칸에는 사람 이름을 쓰지 않고 각 컴퓨터에 붙인 식별자를 입력했다.
+# uncertain invented
+es|turno de nubebotón|En un juego inventado para la feria, los niños llamaron «§» al turno en que se guarda una ficha de lluvia.
+fr|pli de lunécume|Pour l'atelier de poésie, une élève a créé le nom « § » pour un geste imaginaire de la marée.
+de|Kieseltaktkarte|Für ein erfundenes Brettspiel nannte die Gruppe den Zettel zum Zählen der Steinschläge „§“.
+zh|云扣回步|舞蹈小组新编了一个倒退再转身的动作，临时取名为“§”。
+# uncertain underdetermined
+pt|marca do meio|A folha solta diz “usar a §”; faltam o desenho, o nome do jogo e o resto do caderno.
+es|tres al fondo|La grabación conserva la respuesta «§», pero se borraron la pregunta y el lugar de la entrevista.
+fr|deuxième cloche|Il reste une étiquette « § » sur la boîte vide, sans date ni nom d'atelier.
+mul|blue 칸|The bilingual note says only “§으로 옮겨”; the table and the instructions it referred to are missing.

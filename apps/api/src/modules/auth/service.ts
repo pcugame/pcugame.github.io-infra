@@ -48,6 +48,12 @@ const DEV_AUTH_USERS: Record<UserRole, {
 		name: 'Integration Student',
 		studentId: '20260001',
 	},
+	BETA_TESTER: {
+		googleSub: 'dev-auth-lab-tester',
+		email: 'lab-tester@test.pcu.ac.kr',
+		name: 'Integration Beta Tester',
+		studentId: '20260002',
+	},
 	OPERATOR: {
 		googleSub: 'dev-auth-operator',
 		email: 'operator@test.pcu.ac.kr',

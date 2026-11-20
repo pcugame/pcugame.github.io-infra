@@ -1,3 +1,4 @@
+import { labRouteContracts } from './lab-route-schemas.js';
 import { AwardStateSchema, AwardEditSchema, AwardOrderSchema, AwardRecipientsSchema, AwardVersionSchema } from '@pcu/contracts';
 import { VideoRetryResponseSchema } from '@pcu/contracts';
 import { DirectAssetUploadCreationSchema, DirectAssetUploadCreationLookupSchema } from '@pcu/contracts';
@@ -269,6 +270,7 @@ changeRouteContracts.push(
 );
 
 export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
+	...labRouteContracts,
 	contract({ method: 'POST', url: '/api/admin/projects/:id/videos/:assetId/retry', family: 'admin-projects',
 		bodyBoundary: 'none', responseBoundary: 'json',
 		params: z.object({ id: IdParamsSchema.shape.id, assetId: IdParamsSchema.shape.id }),
