@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { SubmitProjectPayloadBaseSchema } from '@pcu/contracts';
 import type { DirectAssetUploadKind, DirectAssetUploadStatus, ProjectSubmissionStatusResponse, SubmitProjectPayload, SubmitProjectResponse } from '../../../contracts';
 import { MOCK_USERS, MockHttpError, UNHANDLED, type MockContext, type MockProject, type MockRequestOptions } from './context';
-import { assertProjectWrite } from './policy';
+import { assertProjectWrite, isStaff } from './policy';
 import { mockFixtureUrl, mockResponsiveImage } from './data';
 
 export type MockSubmissionRecord = ProjectSubmissionStatusResponse & { actorId: number; createdAt: string; finalizedAt?: string };
@@ -161,7 +161,7 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
     const parsed = SubmitProjectPayloadBaseSchema.safeParse(raw); if (!parsed.success) return fail(400, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid submission');
     const payload = parsed.data as SubmitProjectPayload;
     const exhibition = ctx.state.exhibitions.find(item => item.id === payload.exhibitionId) ?? fail(404, 'NOT_FOUND', 'Exhibition not found');
-    if (exhibition.visibility === 'STAFF' && actor.role === 'USER') fail(403, 'FORBIDDEN', 'Exhibition is private');
+    if (exhibition.visibility === 'STAFF' && !isStaff(ctx)) fail(403, 'FORBIDDEN', 'Exhibition is private');
     if (match[1] === 'me' && !(exhibition.isModificationEnabled ?? exhibition.isUploadEnabled)) fail(403, 'FORBIDDEN', 'Submissions are closed');
     const key = new Headers(options.headers).get('idempotency-key'); const identity = `${actor.id}:project-submit:${match[1]}:${key}`;
     if (key && !/^[A-Za-z0-9_-]{8,128}$/.test(key)) fail(400, 'VALIDATION_ERROR', 'Invalid idempotency key');
@@ -173,7 +173,7 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
   if (match) {
     const actor = match[1] === 'admin' ? ctx.requireAdmin() : ctx.requireUser();
     const submission = submissions(ctx)[match[2]!] ?? fail(method === 'GET' ? 400 : 404, method === 'GET' ? 'ERROR' : 'NOT_FOUND', 'Project submission not found');
-    if (actor.role === 'USER' && submission.actorId !== actor.id) fail(403, 'FORBIDDEN', 'Submission belongs to another user');
+    if (!isStaff(ctx) && submission.actorId !== actor.id) fail(403, 'FORBIDDEN', 'Submission belongs to another user');
     if (!match[3] && method === 'DELETE') {
       if (submission.state === 'PUBLISHED') fail(409, 'CONFLICT', 'Published submission cannot be cancelled');
       submission.state = 'CANCELLED'; submission.publicationState = 'CANCELLED';

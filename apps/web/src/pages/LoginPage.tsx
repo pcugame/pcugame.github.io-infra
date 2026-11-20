@@ -17,6 +17,7 @@ const SCHOOL_DOMAIN_ERROR_CODES = new Set<string>([
 ]);
 
 const DEV_AUTH_ROLES: { role: UserRole; label: string }[] = [
+  { role: 'BETA_TESTER', label: '베타 테스터' },
   { role: 'USER', label: '학생' },
   { role: 'OPERATOR', label: '운영자' },
   { role: 'ADMIN', label: '관리자' },

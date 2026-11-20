@@ -1,3 +1,7 @@
+import { createLabController } from '../modules/lab/controller.js';
+import { createLabRepository } from '../modules/lab/repository.js';
+import { readLabConfig } from '../modules/benchmark-worker/config.js';
+import { createLabStatus } from '../modules/benchmark-worker/status.js';
 import { createAwardGraph } from '../modules/awards/composition.js';
 import { createVideoRetryRepository } from '../modules/video/retry.repository.js';
 import { createVideoRetryService } from '../modules/video/retry.service.js';
@@ -54,6 +58,7 @@ import { resolveRoleUploadLimits } from '../shared/upload-policy.js';
 import type { BackendPersistencePorts } from './persistence.js';
 
 export interface BackendRoutes {
+	lab?: FastifyPluginAsync;
 	voting?: FastifyPluginAsync;
 	fileAccess?: FastifyPluginAsync;
 	webglPlay?: FastifyPluginAsync;
@@ -189,6 +194,8 @@ export function composeBackendRoutes({
 }): BackendRoutes {
 	const routes = { ...baseRoutes };
 	if (!hasSuppliedRoutes) {
+		const labConfig = readLabConfig(config);
+		routes.lab = createLabController(prisma ? createLabRepository(prisma) : undefined, labConfig, createLabStatus(labConfig));
 		const votingRepository = prisma && !hasSuppliedPersistence
 			? createVotingRepository(prisma)
 			: {

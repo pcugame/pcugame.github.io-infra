@@ -1,3 +1,4 @@
+import { submissionMode } from '../auth/roles';
 import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { QueryClientContext } from '@tanstack/react-query';
 import type { DirectAssetUploadSession } from '../api/game-upload';
@@ -59,7 +60,7 @@ export function useDirectUploadSession<Saved extends Locator>({
 	const restoreRequired = useCallback(() => Boolean(task.getSaved() || task.hasUnresolved() || recoveryRef.current?.items.length), [task]);
 	const restore = useCallback(async () => {
 		const spec = recoveryRef.current;
-		const saved = await task.restore(spec ? { ...spec, mode: me?.user?.role === 'USER' ? 'user' : 'admin' } : undefined);
+		const saved = await task.restore(spec ? { ...spec, mode: submissionMode(me?.user?.role) } : undefined);
 		if (saved === undefined) return undefined;
 		return saved && task.getSaved() === saved ? saved as Saved : null;
 	}, [task, me?.user?.role]);
@@ -89,7 +90,7 @@ export function useDirectUploadSession<Saved extends Locator>({
 	}, [task, identity, isCurrentRun]);
 	const cancel = useCallback(async () => {
 		const spec = recoveryRef.current;
-		await task.cancel(spec ? { ...spec, mode: me?.user?.role === 'USER' ? 'user' : 'admin' } : undefined);
+		await task.cancel(spec ? { ...spec, mode: submissionMode(me?.user?.role) } : undefined);
 		if (task.hasUnresolved() && !task.isPendingCreate()) await restore().catch(() => undefined);
 	}, [task, restore, me?.user?.role]);
 	return {

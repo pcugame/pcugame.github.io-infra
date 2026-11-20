@@ -1,3 +1,4 @@
+import { submissionMode } from '../../../lib/auth/roles';
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useMe } from '../../auth';
@@ -15,7 +16,7 @@ export function useStudioSubmissionUploads(files: SubmissionFilesState, submissi
  const savedNames = submission?.createdSubmission?.fileNames;
  const finalize = submission?.finalizeIfReady;
  const owner = useMemo(() => {
-  return createUploadOwner(String(user?.id ?? 'current-user'), user?.role === 'USER' ? 'user' : 'admin', projectId);
+  return createUploadOwner(String(user?.id ?? 'current-user'), submissionMode(user?.role), projectId);
 
  }, [projectId, user?.id, user?.role]);
  const rows = useSyncExternalStore(owner.subscribe, owner.getSnapshot);

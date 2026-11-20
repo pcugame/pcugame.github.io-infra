@@ -1,3 +1,4 @@
+import { isStaffRole } from '../../lib/auth/roles';
 import { useMe } from '../../features/auth';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Header } from './Header';
@@ -8,7 +9,7 @@ import { MockRoleSwitcher } from '../common/MockRoleSwitcher';
 export function Layout() {
   const { pathname } = useLocation();
   const { user } = useMe();
-  const isStudentEditor = user?.role === 'USER' && /^\/admin\/projects\/[^/]+\/edit\/?$/.test(pathname);
+  const isStudentEditor = !isStaffRole(user?.role) && /^\/admin\/projects\/[^/]+\/edit\/?$/.test(pathname);
   const isHome = pathname === '/';
   const isFullWidth = isHome || pathname.startsWith('/years') || pathname.startsWith('/exhibitions') || (pathname.startsWith('/admin') && !isStudentEditor);
   return (

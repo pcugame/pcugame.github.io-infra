@@ -21,6 +21,14 @@ const envSchema = z
     // Enable only after the collection basis and notice are approved.
     VOTE_INVESTIGATION_SECRET: z.string().min(32).optional(),
     VOTE_PRIVACY_NOTICE: z.string().trim().min(1).max(4000).optional(),
+    // The optional lab validates its settings only when enabled.
+    LAB_ENABLED: z.string().optional(),
+    LAB_MODEL_PROVIDER: z.string().optional(),
+    LAB_MODEL: z.string().optional(),
+    LAB_MODEL_URL: z.string().optional(),
+    LAB_MODEL_API_KEY: z.string().optional(),
+    LAB_SEARXNG_URL: z.string().optional(),
+    LAB_CONCURRENCY: z.string().optional(),
     WEBGL_PLAY_ENABLED: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
     WEBGL_EXTERNAL_CONNECTIONS_ENABLED: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
     FILE_GATEWAY_SECRET: z.string().min(32).optional(),

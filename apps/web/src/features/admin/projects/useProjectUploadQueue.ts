@@ -1,3 +1,4 @@
+import { submissionMode } from '../../../lib/auth/roles';
 import { FileUploadQueue } from '../../../lib/upload/fileUploadQueue';
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -75,8 +76,8 @@ export function useProjectUploadQueue(
 	const webglIdentity = project.webglDeployment?.id ?? project.webglUrl ?? null;
 	const refreshNeeded = useRef(false);
 
-	const submissionApi = getProjectSubmitApi(user?.role === 'USER' ? 'user' : 'admin');
-	const uploads = useMemo(() => new FileUploadQueue(String(user?.id ?? 'current-user'), user?.role === 'USER' ? 'user' : 'admin', String(projectId)), [projectId, user?.id, user?.role]);
+	const submissionApi = getProjectSubmitApi(submissionMode(user?.role));
+	const uploads = useMemo(() => new FileUploadQueue(String(user?.id ?? 'current-user'), submissionMode(user?.role), String(projectId)), [projectId, user?.id, user?.role]);
 	useEffect(() => uploads.attach(), [uploads]);
 	useEffect(() => {
 		uploads.onChange = row => {

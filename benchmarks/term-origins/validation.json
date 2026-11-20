@@ -1,0 +1,51 @@
+{
+  "rows": 500,
+  "sha256": "32df43875a9d452341584ecc0d2cf9ab5a98efe5805bcc1ed2cf97fa526acdb6",
+  "bytes": 185579,
+  "languageByCategory": {
+    "ko": {
+      "derogatory": 72,
+      "historical_conflict": 60,
+      "semantic_shift": 60,
+      "neutral": 60,
+      "uncertain": 48
+    },
+    "en": {
+      "derogatory": 24,
+      "historical_conflict": 20,
+      "semantic_shift": 20,
+      "neutral": 20,
+      "uncertain": 16
+    },
+    "ja": {
+      "derogatory": 12,
+      "historical_conflict": 10,
+      "semantic_shift": 10,
+      "neutral": 10,
+      "uncertain": 8
+    },
+    "other": {
+      "derogatory": 12,
+      "historical_conflict": 10,
+      "semantic_shift": 10,
+      "neutral": 10,
+      "uncertain": 8
+    }
+  },
+  "languages": {
+    "ko": 300,
+    "en": 100,
+    "ja": 50,
+    "es": 10,
+    "fr": 10,
+    "de": 9,
+    "zh": 9,
+    "pt": 6,
+    "mul": 6
+  },
+  "sameLanguageContrastTerms": 19,
+  "invented": 40,
+  "underdetermined": 40,
+  "unverifiedReferences": 500,
+  "sourceUrls": 0
+}

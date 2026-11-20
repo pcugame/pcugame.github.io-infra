@@ -156,7 +156,9 @@ class RuntimeCheck(unittest.TestCase):
 
     def test_unpreserved_application_overrides_block_comparison(self):
         for index, key, value in ((0, 'RATE_LIMIT_LOGIN_MAX', '3'),
-                                  (5, 'EXPORT_WORKER_FILE_CONCURRENCY', '1')):
+                                  (5, 'EXPORT_WORKER_FILE_CONCURRENCY', '1'),
+                                  (0, 'LAB_ENABLED', 'true'),
+                                  (3, 'LAB_MODEL_API_KEY', SENTINEL)):
             original = copy.deepcopy(self.document)
             self.change(index, key, value)
             result = self.run_check()

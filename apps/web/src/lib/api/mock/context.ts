@@ -1,4 +1,6 @@
-import type { AwardState } from '@pcu/contracts';
+import { isStaffRole } from '../../auth/roles';
+import type { MockLabState } from './lab';
+import type { AwardState, UserRole } from '@pcu/contracts';
 import type { MockVotingState } from './voting';
 import type { AdminExhibitionItem, AdminProjectDetail } from '../../../contracts';
 import type { ProjectChangeDetail, WebglNetworkRequest } from '@pcu/contracts';
@@ -17,10 +19,11 @@ export class MockHttpError extends Error {
   }
 }
 export type MockRequestOptions = Omit<RequestInit, 'body'> & { body?: unknown };
-export type MockUserSelection = 'anonymous' | 'owner' | 'participant' | 'other' | 'newStudent' | 'OPERATOR' | 'ADMIN';
-export type MockUser = { id: number; name: string; email: string; role: 'ADMIN' | 'OPERATOR' | 'USER'; studentId?: string };
+export type MockUserSelection = 'anonymous' | 'owner' | 'participant' | 'other' | 'newStudent' | 'BETA_TESTER' | 'OPERATOR' | 'ADMIN';
+export type MockUser = { id: number; name: string; email: string; role: UserRole; studentId?: string };
 export const MOCK_USERS: Record<Exclude<MockUserSelection, 'anonymous'>, MockUser> = {
   ADMIN: { id: 1, name: '관리자', email: 'admin@test.pcu.ac.kr', role: 'ADMIN' },
+  BETA_TESTER: { id: 7, name: '베타 테스터', email: 'tester@test.pcu.ac.kr', studentId: '2088103', role: 'BETA_TESTER' },
   OPERATOR: { id: 2, name: '운영자', email: 'operator@test.pcu.ac.kr', role: 'OPERATOR' },
   owner: { id: 3, name: '학생', email: '2088099@test.pcu.ac.kr', studentId: '2088099', role: 'USER' },
   participant: { id: 4, name: '테스트파트너', email: '2088100@test.pcu.ac.kr', studentId: '2088100', role: 'USER' },
@@ -38,6 +41,7 @@ export type MockState = {
   awards?: Record<number, AwardState>;
 	videoRepairs?: Record<number, { projectId: number; dueAt: number }>;
   voting?: MockVotingState;
+  lab?: MockLabState;
   version: 2; revision: number; counters: Record<string, number>; authUser: MockUserSelection; authExpiresAt?: string;
   projects: Record<number, MockProject>; exhibitions: AdminExhibitionItem[];
   submissions: Record<string, MockSubmissionRecord>; sessions: Record<string, MockUploadSession>; changeRequests: Record<string, ProjectChangeDetail & {dueAt?:number}>;
@@ -49,10 +53,13 @@ export interface MockContext {
   state: MockState; readonly user: MockUser | null;
   now(): string; nextId(prefix: string): string; reserveProjectId(existingId?: number): number; requireUser(): MockUser; requireAdmin(): MockUser;
 }
+export function effectiveMockUser(state: MockState, user: MockUser): MockUser {
+  return { ...user, role: state.lab?.roles[user.id] ?? user.role };
+}
 export function createMockContext(state: MockState): MockContext {
   return {
     state,
-    get user() { return state.authUser === 'anonymous' || state.authExpiresAt !== undefined && Date.parse(state.authExpiresAt) <= Date.now() ? null : MOCK_USERS[state.authUser]; },
+    get user() { return state.authUser === 'anonymous' || state.authExpiresAt !== undefined && Date.parse(state.authExpiresAt) <= Date.now() ? null : effectiveMockUser(state, MOCK_USERS[state.authUser]); },
     now: () => new Date().toISOString(),
     nextId(prefix) { state.counters[prefix] = (state.counters[prefix] ?? 0) + 1; return `${prefix}-${state.counters[prefix]}`; },
     // One durable identity space for normal submissions and change-request staging projects.
@@ -62,11 +69,11 @@ export function createMockContext(state: MockState): MockContext {
       return existingId ?? state.counters.project;
     },
     requireUser() { if (!this.user) throw new MockHttpError(401, 'UNAUTHORIZED', '로그인이 필요합니다.'); return this.user; },
-    requireAdmin() { const user = this.requireUser(); if (user.role === 'USER') throw new MockHttpError(403, 'FORBIDDEN', '권한이 없습니다.'); return user; },
+    requireAdmin() { const user = this.requireUser(); if (!isStaffRole(user.role)) throw new MockHttpError(403, 'FORBIDDEN', '권한이 없습니다.'); return user; },
   };
 }
 function initialUser(): MockUserSelection {
-  try { const role = localStorage.getItem('mock-role'); return role === 'USER' ? 'owner' : role === 'OPERATOR' ? 'OPERATOR' : 'ADMIN'; } catch { return 'ADMIN'; }
+  try { const role = localStorage.getItem('mock-role'); return role === 'USER' ? 'owner' : role === 'OPERATOR' || role === 'BETA_TESTER' ? role : 'ADMIN'; } catch { return 'ADMIN'; }
 }
 export function createMockState(): MockState {
   const now = new Date().toISOString();
