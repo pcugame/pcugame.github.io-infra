@@ -50,8 +50,11 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   const [size, setSize] = useState<RunSize>(1);
   const [searchMode, setMode] = useState<LabSearchMode>('no_search');
   const [temperature, setTemperature] = useState('0.2');
-  const [maxTokens, setMaxTokens] = useState('1024');
+  const [maxTokens, setMaxTokens] = useState(String(Math.min(1024, status.generationLimits?.maxOutputTokens ?? 4096)));
   const [systemPrompt, setPrompt] = useState('주어진 어구가 이 문맥에서 어떻게 쓰였는지 분석하세요. 어원, 사회적 논란, 근거를 구분하고 불확실한 내용은 명시하세요.');
+  const limits = status.generationLimits;
+  const outputLimit = limits?.maxOutputTokens ?? 4096;
+  const effectiveMode = status.toolSupport === 'unsupported' && searchMode === 'model_tool_call' ? 'no_search' : searchMode;
   const dataset = datasetsList.find(item => item.id === datasetId) ?? datasetsList[0];
   function selectDataset(id: string) { setDatasetId(id); setSelected([]); }
   const upload = useMutation({
@@ -67,8 +70,8 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   });
   const create = useMutation({
     mutationFn: () => labApi.create({
-      datasetId: dataset!.id, size, systemPrompt, model: status.model, temperature: Number(temperature),
-      maxTokens: Number(maxTokens), searchMode, ...(selected.length ? { caseIds: selected } : {}),
+      datasetId: dataset!.id, size, systemPrompt, model: status.model, temperature: limits?.fixedTemperature ?? Number(temperature),
+      maxTokens: Number(maxTokens), searchMode: effectiveMode, ...(selected.length ? { caseIds: selected } : {}),
     }),
     onSuccess: async ({ runId }) => {
       await client.invalidateQueries({ queryKey: ['lab-runs'] });
@@ -105,15 +108,16 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
         </SelectField>
       </div>
       {dataset && <DatasetCases key={dataset.id} dataset={dataset} size={size} selected={selected} change={setSelected} />}
+      {limits && <p>이 서버는 고정 시스템 지시를 사용합니다. 실험 프롬프트 원문은 입력 본문으로 전달되며, 전체 입력 한도는 {limits.maxInputTokens}토큰입니다.</p>}
       <TextareaField label="시스템 프롬프트" rows={5} maxLength={16000} required value={systemPrompt} onChange={e => setPrompt(e.target.value)} />
       <div className="lab-grid lab-grid--settings">
-        <SelectField label="검색 모드" value={searchMode} onChange={e => setMode(e.target.value as LabSearchMode)}>
+        <SelectField label="검색 모드" value={effectiveMode} onChange={e => setMode(e.target.value as LabSearchMode)}>
           <option value="no_search">검색 없이 분석</option>
           <option value="backend_retrieval">Worker 선검색</option>
-          <option value="model_tool_call">모델 도구 호출</option>
+          <option value="model_tool_call" disabled={status.toolSupport === 'unsupported'}>모델 도구 호출</option>
         </SelectField>
-        <TextField type="number" label="Temperature" min={0} max={2} step="any" required value={temperature} onChange={e => setTemperature(e.target.value)} />
-        <TextField type="number" label="최대 출력 토큰" min={128} max={4096} step={1} required value={maxTokens} onChange={e => setMaxTokens(e.target.value)} />
+        <TextField type="number" label="Temperature" min={0} max={2} step="any" required disabled={!!limits} value={limits?.fixedTemperature ?? temperature} onChange={e => setTemperature(e.target.value)} />
+        <TextField type="number" label="최대 출력 토큰" min={128} max={outputLimit} step={1} required value={maxTokens} onChange={e => setMaxTokens(e.target.value)} />
       </div>
       <LabError error={create.error} />
       <div className="lab-actions">

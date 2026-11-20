@@ -1,6 +1,7 @@
 import { LabOutputSchema, type LabOutput, type LabSource } from '@pcu/contracts';
 import { z } from 'zod';
-import type { LabConfig } from './config.js';
+import { invalidGenerateSetting, type LabConfig } from './config.js';
+import { generateText, generatePrompt, generateEvidence } from './generate.js';
 import { LabFailure } from './http.js';
 import {
 	chat,
@@ -27,7 +28,9 @@ export type Attempt = {
 	toolSupport: ToolSupport;
 	toolCalls: number;
 	jsonAttempts: number;
-	outputFormat: 'none' | 'schema' | 'json';
+	outputFormat: 'none' | 'schema' | 'json' | 'prompt';
+	suppliedSourceIds?: string[];
+	generationUsage?: { inputTokens: number; outputTokens: number; seconds: number; jsonFenceRemoved: boolean }[];
 	durationMs: number;
 	output: LabOutput | null;
 	error: string | null;
@@ -77,10 +80,16 @@ export async function evaluateCase(
 		error: null,
 		retryable: false,
 	};
-	async function generate(messages: Message[], mode: OutputMode) {
+	async function generate(messages: Message[], mode: OutputMode | 'prompt') {
 		signal.throwIfAborted();
 		const start = performance.now();
 		try {
+			if (mode === 'prompt') {
+				const prompt = messages.map((message) => message.content).join('\n\n');
+				const reply = await generateText(config, prompt, item.maxTokens, signal);
+				(attempt.generationUsage ??= []).push(reply.usage);
+				return reply;
+			}
 			return await chat(config, item, messages, mode, signal);
 		} finally {
 			attempt.durationMs += Math.round(performance.now() - start);
@@ -117,6 +126,11 @@ export async function evaluateCase(
 	try {
 		if (config.model !== item.model || config.provider !== item.provider)
 			throw new LabFailure('RUN_PROVIDER_CONFIGURATION_CHANGED');
+		const promptOnly = config.provider === 'transformers-generate';
+		if (promptOnly) {
+			const problem = invalidGenerateSetting(item);
+			if (problem) throw new LabFailure(problem);
+		}
 		if (item.searchMode === 'backend_retrieval') {
 			await retrieve(item.testCase.term, item.testCase.language);
 		} else if (item.searchMode === 'model_tool_call') {
@@ -153,11 +167,18 @@ export async function evaluateCase(
 			}
 		} else if (item.searchMode !== 'no_search') throw new LabFailure('UNKNOWN_SEARCH_MODE');
 
-		const messages: Message[] = [
-			{ role: 'system', content: item.systemPrompt + '\n\n' + outputRules + '\nJSON Schema: ' + contractText },
-			{ role: 'user', content: JSON.stringify({ case: item.testCase, sources: attempt.sources }) },
-		];
-		let mode: 'schema' | 'json' = 'schema';
+		const shownSources = promptOnly ? generateEvidence(attempt.sources) : attempt.sources;
+		if (promptOnly) attempt.suppliedSourceIds = shownSources.map((source) => source.id);
+		const messages: Message[] = promptOnly
+			? [{ role: 'user', content: generatePrompt(item, shownSources) }]
+			: [
+					{
+						role: 'system',
+						content: item.systemPrompt + '\n\n' + outputRules + '\nJSON Schema: ' + contractText,
+					},
+					{ role: 'user', content: JSON.stringify({ case: item.testCase, sources: attempt.sources }) },
+				];
+		let mode: 'schema' | 'json' | 'prompt' = promptOnly ? 'prompt' : 'schema';
 		for (let pass = 0; pass < 2; pass++) {
 			attempt.jsonAttempts++;
 			let response;
@@ -188,7 +209,7 @@ export async function evaluateCase(
 				parsed.data.caseId === item.testCase.id &&
 				parsed.data.term === item.testCase.term &&
 				parsed.data.language === item.testCase.language &&
-				parsed.data.sourceIds.every((id) => attempt.sources.some((s) => s.id === id))
+				parsed.data.sourceIds.every((id) => shownSources.some((s) => s.id === id))
 			) {
 				attempt.output = parsed.data;
 				return attempt;

@@ -4,6 +4,7 @@ import { LAB_JSONL_MAX_BYTES } from '@pcu/contracts';
 import { requireRole } from '../../shared/auth-guards.js';
 import { AppError, badRequest, notFound } from '../../shared/errors.js';
 import { sendOk } from '../../shared/http.js';
+import { invalidGenerateSetting } from '../benchmark-worker/config.js';
 import type { createLabRepository } from './repository.js';
 
 type Id = { id: string };
@@ -52,6 +53,10 @@ export function createLabController(
 			api.post<{ Body: LabCreateRun }>('/runs', { config: writeLimit }, async (r, reply) => {
 				if (!config.modelUrl || !config.model || r.body.model !== config.model)
 					throw badRequest('Select the configured model');
+				if (config.provider === 'transformers-generate') {
+					const problem = invalidGenerateSetting(r.body);
+					if (problem) throw badRequest(problem);
+				}
 				if (r.body.searchMode !== 'no_search' && !config.searchUrl)
 					throw badRequest('Search provider is not configured');
 				sendOk(reply, await store.createRun(r.currentUser!, r.body, config.provider), 202);

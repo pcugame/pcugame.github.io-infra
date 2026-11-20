@@ -143,6 +143,13 @@ export const LabStatusSchema = z.object({
 	modelStatus: health,
 	searchStatus: health,
 	toolSupport: LabToolSupportSchema,
+	generationLimits: z
+		.object({
+			fixedTemperature: z.number(),
+			maxInputTokens: z.number().int().positive(),
+			maxOutputTokens: z.number().int().positive(),
+		})
+		.optional(),
 	mock: z.boolean(),
 });
 export const LabDatasetSchema = z.object({

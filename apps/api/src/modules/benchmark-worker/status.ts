@@ -1,17 +1,43 @@
 import { z } from 'zod';
-import type { LabConfig } from './config.js';
-import { jsonHeaders, requestJson } from './http.js';
+import { generateLimits, type LabConfig } from './config.js';
+import { jsonHeaders, LabFailure, requestJson } from './http.js';
 
 export type ToolSupport = 'supported' | 'unsupported' | 'unknown';
 type Availability = 'available' | 'unavailable' | 'unknown';
 
+export async function readGenerateHealth(config: LabConfig, signal: AbortSignal) {
+	const raw = await requestJson(
+		`${config.modelUrl}/health`,
+		{ headers: jsonHeaders(config.apiKey), signal },
+		8192,
+	);
+	const health = z
+		.object({
+			ok: z.literal(true),
+			model: z.literal(config.model),
+			busy: z.boolean(),
+			max_input_tokens: z.number().int().min(generateLimits.maxInputTokens),
+			max_output_tokens: z.number().int().min(generateLimits.maxOutputTokens),
+		})
+		.safeParse(raw);
+	if (!health.success) throw new LabFailure('MODEL_HEALTH_MISMATCH');
+	return health.data;
+}
+
 async function modelStatus(
 	config: LabConfig,
 ): Promise<{ modelStatus: Availability; toolSupport: ToolSupport }> {
-	const unknown = { modelStatus: 'unavailable', toolSupport: 'unknown' } as const;
+	const unknown: { modelStatus: Availability; toolSupport: ToolSupport } = {
+		modelStatus: 'unavailable',
+		toolSupport: config.provider === 'transformers-generate' ? 'unsupported' : 'unknown',
+	};
 	if (!config.modelUrl || !config.model) return unknown;
 	const options = { headers: jsonHeaders(config.apiKey), signal: AbortSignal.timeout(2500) };
 	try {
+		if (config.provider === 'transformers-generate') {
+			await readGenerateHealth(config, options.signal);
+			return { modelStatus: 'available', toolSupport: 'unsupported' };
+		}
 		if (config.provider === 'ollama') {
 			const raw = await requestJson(
 				`${config.modelUrl}/api/show`,
@@ -64,6 +90,7 @@ export function createLabStatus(config: LabConfig) {
 			provider: config.provider,
 			model: config.model,
 			mock: false as const,
+			...(config.provider === 'transformers-generate' ? { generationLimits: generateLimits } : {}),
 		};
 		if (!config.enabled)
 			return {

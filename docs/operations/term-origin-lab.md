@@ -9,12 +9,12 @@ API와 Benchmark Worker에는 같은 개발용 PostgreSQL, 설치된 모델 이�
 | 환경 변수 | 설정 |
 | --- | --- |
 | `LAB_ENABLED` | 기본 비활성. API와 Worker를 사용할 때 `true` |
-| `LAB_MODEL_PROVIDER` | `ollama` 또는 `openai-compatible` |
+| `LAB_MODEL_PROVIDER` | `ollama`, `openai-compatible`, `transformers-generate` |
 | `LAB_MODEL` | 추론 서버에 이미 로드할 수 있는 모델의 정확한 ID |
-| `LAB_MODEL_URL` | Ollama의 서비스 루트 또는 호환 서버의 API base URL(통상 `/v1` 포함) |
+| `LAB_MODEL_URL` | Ollama·Transformers의 서비스 루트 또는 OpenAI 호환 서버의 API base URL(통상 `/v1` 포함) |
 | `LAB_MODEL_API_KEY` | 추론 서버가 인증을 요구할 때 설정하는 비밀 값 |
 | `LAB_SEARXNG_URL` | JSON 검색을 허용한 SearXNG의 서비스 루트 |
-| `LAB_CONCURRENCY` | 기본 1, 허용 범위 1~4. 같은 DB를 처리하는 모든 Worker에 같은 값을 적용 |
+| `LAB_CONCURRENCY` | 기본 1. Transformers 서버는 1, 나머지 provider는 1~4. 같은 DB를 처리하는 모든 Worker에 같은 값을 적용 |
 | `DATABASE_URL` | 해당 환경의 실험 테이블에 접근 가능한 PostgreSQL 연결 |
 
 개발 DB에 저장소 migration을 적용한 뒤 API·Web과 별도 터미널에서 `npm run worker:benchmark -w apps/api`를 실행한다. 빌드된 API 이미지의 Worker 진입점은 `node dist/benchmark-worker.js`이다. Worker는 수신 포트 없이 작업을 조회한다. API는 서버 상태 요청 시 메타데이터만 조회한다. 모델 URL, API key, 데이터베이스 자격 증명은 서버 환경에만 둔다.
@@ -22,6 +22,14 @@ API와 Benchmark Worker에는 같은 개발용 PostgreSQL, 설치된 모델 이�
 1. 로그인 후 실험실에 [기준 JSONL](../../benchmarks/term-origins/benchmark-500.jsonl)을 업로드한다. UTF-8 파일에는 다섯 범주와 네 언어 그룹의 지정 분포를 충족하는 500행이 있어야 한다.
 2. 시스템 프롬프트, 모델, 검색 모드, 생성 설정과 크기를 선택한다. 미리보기에서 케이스를 지정하거나 파일 순서를 사용한다. 데이터셋은 등록 이후 수정 경로가 없으며 재업로드한 다른 내용은 별도의 스냅샷으로 저장된다.
 3. Run을 생성하면 API가 실행 ID를 반환한다. 진행 중 창을 닫아도 Worker가 케이스별 결과를 저장한다. 실험을 다시 열어 실패 건 재실행, ID별 비교, JSON·JSONL·CSV 다운로드를 수행한다.
+
+## 기존 Transformers 서버 연결
+
+전시용 추론 서비스에는 `LAB_MODEL_PROVIDER=transformers-generate`, `LAB_MODEL=Qwen2.5-Coder-7B-Instruct`, `LAB_CONCURRENCY=1`을 사용한다. API와 Worker에서 같은 사설 서비스 루트에 접근할 수 있어야 한다. 개발 환경에서는 SSH 로컬 포워딩으로 원격 루프백 포트에 연결하고, `LAB_MODEL_URL`을 터널의 로컬 주소로 지정할 수 있다. API와 Worker가 컨테이너 안에 있으면 각각의 네트워크에서 주소가 도달 가능한지 확인한다.
+
+Worker는 `GET /health`에서 모델 ID와 토큰 한도, 사용 중 여부를 확인한 다음 `POST /generate`로 실험 프롬프트와 출력 토큰 한도를 보낸다. 서버의 시스템 지시는 고정되어 있으며 실험 프롬프트 원문은 사용자 메시지 안에 전달된다. 생성은 greedy 방식이고 서버 한도는 입력 1,024토큰, 출력 256토큰, 생성 시간 90초이다. 전체 입력에는 서버 지시, 케이스, 출력 형식, 검색 발췌문도 포함된다. 긴 프롬프트가 한도를 초과하면 케이스 실패로 기록한다.
+
+이 서버에서 선택 가능한 검색 모드는 `no_search`와 `backend_retrieval`이다. Worker는 선검색 자료 중 입력 예산에 맞는 발췌문을 최대 두 건까지 전달한다. 이 어댑터는 시간 제한 안에서 JSON을 완성할 수 있도록 한 줄 150토큰 이내, 설명 필드당 6단어 이내의 응답을 요청한다. 모델은 텍스트로 JSON을 생성하며 Worker가 스키마, 케이스 식별자, 전달한 출처 ID를 검사한다. 결과 이력의 `suppliedSourceIds`는 모델에 전달한 출처를, `generationUsage`는 각 생성의 실제 입력·출력 토큰 수와 서버 소요 시간(초)을 기록한다. 텍스트 전체가 단일 Markdown JSON 코드 블록이면 경계만 제거하고 같은 검사를 수행하며, 해당 생성의 `jsonFenceRemoved`를 `true`로 기록한다.
 
 ## 해석과 실행 한도
 

@@ -34,7 +34,7 @@ function Workspace() {
     {status.isSuccess && status.data.enabled && <>
       {status.data.mock && <p className="lab-mock" role="status">Mock 실험실 · 개발용 모의 진행률과 합성 결과를 표시합니다.</p>}
       <Connections status={status.data} />
-      <RunEditor status={status.data} onCreated={select} />
+      <RunEditor key={JSON.stringify([status.data.provider, status.data.model])} status={status.data} onCreated={select} />
       <section className="lab-panel">
         <h2>실험 결과</h2>
         <LabError error={runs.error} />

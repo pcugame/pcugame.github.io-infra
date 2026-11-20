@@ -100,6 +100,8 @@ export async function finishCase(db: PrismaClient, claim: Claim, attempt: Attemp
 				toolSucceeded: attempt.toolSucceeded,
 				jsonAttempts: attempt.jsonAttempts,
 				outputFormat: attempt.outputFormat,
+				generationUsage: attempt.generationUsage,
+				suppliedSourceIds: attempt.suppliedSourceIds,
 				error: attempt.error,
 			});
 			const changed = await tx.$executeRaw`UPDATE "LabResult" SET

@@ -1,3 +1,4 @@
+import { scheduler } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readLabConfig } from './config.js';
 import { evaluateCase, type WorkItem } from './evaluate.js';
@@ -191,5 +192,115 @@ describe('bounded evidence collection and structured analysis', () => {
 			(await createLabStatus(readLabConfig({ LAB_ENABLED: 'false', LAB_MODEL_URL: 'bad' }))()).enabled,
 		).toBe(false);
 		expect(fetcher).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe('single-slot Transformers generation', () => {
+	const provider = 'transformers-generate' as const;
+	const settings = { ...config, provider };
+	const task = { ...item, provider, temperature: 0, maxTokens: 256 };
+	const health = { ok: true, busy: false, model: task.model, max_input_tokens: 1024, max_output_tokens: 256 };
+
+	it('advertises the wire limits and never generates on a mismatched or busy endpoint', async () => {
+		const fetcher = vi.fn(() => Response.json(health));
+		vi.stubGlobal('fetch', fetcher);
+		const probe = await createLabStatus({ ...settings, searchUrl: undefined })();
+		expect(probe).toMatchObject({
+			modelStatus: 'available',
+			toolSupport: 'unsupported',
+			generationLimits: { fixedTemperature: 0, maxInputTokens: 1024, maxOutputTokens: 256 },
+		});
+		fetcher.mockImplementationOnce(() => Response.json({ ...health, model: 'other' }));
+		expect((await evaluateCase(settings, task, signal(), 'unsupported')).error).toBe('MODEL_HEALTH_MISMATCH');
+		using wait = vi.spyOn(scheduler, 'wait').mockResolvedValue(undefined);
+		fetcher.mockImplementation(() => Response.json({ ...health, busy: true }));
+		expect(await evaluateCase(settings, task, signal(), 'unsupported')).toMatchObject({
+			error: 'MODEL_BUSY',
+			retryable: true,
+		});
+		expect(fetcher).toHaveBeenCalledTimes(6);
+		expect(wait).toHaveBeenCalledTimes(3);
+	});
+
+	it('rejects unsupported controls before I/O', async () => {
+		const fetcher = vi.fn();
+		vi.stubGlobal('fetch', fetcher);
+		for (const [overrides, code] of [
+			[{ searchMode: 'model_tool_call' }, 'MODEL_TOOLS_UNSUPPORTED'],
+			[{ temperature: 0.2 }, 'MODEL_REQUIRES_GREEDY_DECODING'],
+			[{ maxTokens: 257 }, 'MODEL_OUTPUT_TOKEN_LIMIT'],
+		] as const) {
+			expect((await evaluateCase(settings, { ...task, ...overrides }, signal(), 'unknown')).error).toBe(code);
+		}
+		expect(fetcher).not.toHaveBeenCalled();
+		expect(() =>
+			readLabConfig({ LAB_ENABLED: 'true', LAB_MODEL_PROVIDER: provider, LAB_CONCURRENCY: '2' }),
+		).toThrow();
+	});
+
+	it('sends the original prompt and quoted evidence, rejects unseen citations and records generation usage', async () => {
+		let generations = 0;
+		const experiment = ' Original\n instructions. ';
+		const fetcher = vi.fn((url: string, init: RequestInit) => {
+			if (url.endsWith('/health')) return Response.json(health);
+			expect(url).toBe(settings.modelUrl + '/generate');
+			const body = JSON.parse(String(init.body));
+			expect(Object.keys(body).sort()).toEqual(['max_new_tokens', 'prompt']);
+			expect(body.max_new_tokens).toBe(256);
+			expect(body.prompt.startsWith(experiment)).toBe(true);
+			expect(body.prompt).toContain('S2');
+			expect(body.prompt).not.toContain('S3');
+			generations++;
+			return Response.json({
+				text: JSON.stringify({ ...output, sourceIds: [generations === 1 ? 'S3' : 'S2'] }),
+				input_tokens: 320,
+				output_tokens: 110,
+				seconds: 15,
+			});
+		});
+		vi.stubGlobal('fetch', fetcher);
+		const search = {
+			search: async () =>
+				[1, 2, 3].map((n) => ({
+					title: 'Source ' + n,
+					url: 'https://example.org/' + n,
+					snippet: 'A quoted excerpt',
+					collectedAt: new Date().toISOString(),
+				})),
+		};
+		const result = await evaluateCase(
+			settings,
+			{ ...task, systemPrompt: experiment, searchMode: 'backend_retrieval' },
+			signal(),
+			'unsupported',
+			search,
+		);
+		expect(result).toMatchObject({
+			outputFormat: 'prompt',
+			jsonAttempts: 2,
+			searchCount: 1,
+			toolSucceeded: false,
+			output: { sourceIds: ['S2'], controversyScore: null },
+		});
+		expect(result.sources).toHaveLength(3);
+		expect(result.suppliedSourceIds).toEqual(['S1', 'S2']);
+		expect(result.generationUsage).toEqual(
+			Array(2).fill({ inputTokens: 320, outputTokens: 110, seconds: 15, jsonFenceRemoved: false }),
+		);
+	});
+	it('validates a single fenced JSON document but rejects commentary or a second document', async () => {
+		const fenced = ['```json', JSON.stringify(output), '```'].join('\n');
+		let text = fenced;
+		vi.stubGlobal('fetch', (url: string) =>
+			url.endsWith('/health')
+				? Response.json(health)
+				: Response.json({ text, input_tokens: 245, output_tokens: 150, seconds: 72 }),
+		);
+		const analyze = () => evaluateCase(settings, task, signal(), 'unsupported');
+		expect(await analyze()).toMatchObject({ output, generationUsage: [{ jsonFenceRemoved: true }] });
+		for (const mixed of ['Preface\n' + fenced, fenced + '\nConclusion', fenced + '\n' + fenced]) {
+			text = mixed;
+			expect(await analyze()).toMatchObject({ output: null, error: 'INVALID_MODEL_OUTPUT', jsonAttempts: 2 });
+		}
 	});
 });
