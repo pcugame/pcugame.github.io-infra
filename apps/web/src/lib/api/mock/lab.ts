@@ -1,6 +1,6 @@
 import {
   LAB_ACTIVE_RUN_LIMIT, LAB_CASE_ATTEMPT_LIMIT, LAB_PAGE_SIZE, LabBetaUserSchema, LabCompareQuerySchema, LabCreateRunSchema, LabExportFormatSchema, LabOutputSchema, LabPageQuerySchema,
-  LabResultsQuerySchema, LabRoleChangeSchema, LabUploadSchema, formatLabExport, parseLabJsonl,
+  LabResultsQuerySchema, LabRoleChangeSchema, LabUploadSchema, formatLabExport, labCaseFields, parseLabJsonl,
   type LabCase, type LabDataset, type LabResult, type LabRun, type LabStatus,
 } from '@pcu/contracts';
 import { canUseLab } from '../../auth/roles';
@@ -26,7 +26,8 @@ function pageOf<T>(rows: T[], page: number) {
 }
 function matches(row: LabCase, q: string) {
   const search = q.toLowerCase();
-  return [row.id, row.term, row.context].some(s => s.toLowerCase().includes(search));
+  const { term, context } = labCaseFields(row);
+  return [row.id, term, context].some(s => s.toLowerCase().includes(search));
 }
 async function sha256(text: string) {
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -62,12 +63,13 @@ function advance(ctx: MockContext, job: StoredRun) {
       row.error = 'Mock 작업 실패';
       run.failed++;
     } else {
-      const abstained = row.testCase.category === 'uncertain';
-      const value = abstained ? null : (row.testCase.term.length * 7 + run.promptHash.charCodeAt(0)) % 101;
+      const { term, language } = labCaseFields(row.testCase);
+      const abstained = 'category' in row.testCase && row.testCase.category === 'uncertain';
+      const value = abstained ? null : (term.length * 7 + run.promptHash.charCodeAt(0)) % 101;
       row.output = LabOutputSchema.parse({
-        schemaVersion: '1', caseId: row.caseId, term: row.testCase.term, language: row.testCase.language,
+        schemaVersion: '1', caseId: row.caseId, term, language,
         originSummary: '개발용 합성 어원 응답', earliestAttestation: null,
-        controversySummary: '개발용 합성 문맥 분석', controversyScore: value, controversyReason: '화면 검증용 합성 점수',
+        controversySummary: '개발용 합성 분석', controversyScore: value, controversyReason: '화면 검증용 합성 점수',
         originConfidence: 0, sourceIds: [], uncertainties: ['실제 모델·검색 자료를 사용하지 않은 Mock 결과'], abstained,
       });
       row.jsonValid = true;
@@ -133,7 +135,7 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
     const hash = await sha256(jsonl);
     const existing = state.datasets.find(d => d.ownerId === actor.id && d.info.hash === hash);
     if (existing) return existing.info;
-    const info = { id: crypto.randomUUID(), name, hash, count: cases.length, version: '1', createdAt: ctx.now() };
+    const info = { id: crypto.randomUUID(), name, hash, count: cases.length, version: 'nickname' in cases[0] ? '2' : '1', createdAt: ctx.now() };
     state.datasets.unshift({ ownerId: actor.id, cases, info });
     return info;
   }

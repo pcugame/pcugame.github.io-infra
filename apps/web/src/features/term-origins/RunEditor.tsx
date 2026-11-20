@@ -18,7 +18,7 @@ function DatasetCases({ dataset, size, selected, change }: {
   });
   return <details className="lab-preview">
     <summary>테스트케이스 미리보기 · {dataset.count}개</summary>
-    <TextField type="search" maxLength={160} label="케이스 검색" placeholder="어구, 문맥 또는 케이스 ID" value={q} onChange={e => { setQ(e.target.value); setPage(1); }} />
+    <TextField type="search" maxLength={160} label="케이스 검색" placeholder="닉네임 또는 케이스 ID" value={q} onChange={e => { setQ(e.target.value); setPage(1); }} />
     <p>직접 선택한 케이스가 없으면 파일 순서대로 {size}개를 실행합니다.</p>
     <div className="lab-actions"><strong>직접 선택 {selected.length} / {size}개</strong>
       {!!selected.length && <Button size="small" variant="secondary" onClick={() => change([])}>선택 해제</Button>}
@@ -29,7 +29,8 @@ function DatasetCases({ dataset, size, selected, change }: {
         <label><input type="checkbox" checked={selected.includes(item.id)}
           disabled={selected.length >= size && !selected.includes(item.id)} onChange={e =>
             change(e.target.checked ? [...selected, item.id] : selected.filter(id => id !== item.id))} />
-          <span><small>{item.id} · {item.language} · {item.category}</small><strong>{item.term}</strong><span>{item.context}</span></span>
+          <span><small>{item.id}{'category' in item && ` · ${item.language} · ${item.category}`}</small>
+            <strong>{'nickname' in item ? item.nickname : item.term}</strong>{'context' in item && <span>{item.context}</span>}</span>
         </label>
       </li>)}</ul>
       <Pager page={page} change={setPage} total={cases.data.total} />
@@ -51,7 +52,7 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   const [searchMode, setMode] = useState<LabSearchMode>('no_search');
   const [temperature, setTemperature] = useState('0.2');
   const [maxTokens, setMaxTokens] = useState(String(Math.min(1024, status.generationLimits?.maxOutputTokens ?? 4096)));
-  const [systemPrompt, setPrompt] = useState('주어진 어구가 이 문맥에서 어떻게 쓰였는지 분석하세요. 어원, 사회적 논란, 근거를 구분하고 불확실한 내용은 명시하세요.');
+  const [systemPrompt, setPrompt] = useState('닉네임에서 복원 가능한 원문과 변형 규칙을 찾고, 은어·모욕·논란성 용례를 근거와 함께 설명하세요. 가능한 일반적 해석도 고려하고, 출처가 부족하거나 복원이 불분명하면 판단을 보류하세요. 사용자 의도나 소속을 단정하지 마세요. 점수는 추가 검토 필요성을 나타냅니다.');
   const limits = status.generationLimits;
   const outputLimit = limits?.maxOutputTokens ?? 4096;
   const effectiveMode = status.toolSupport === 'unsupported' && searchMode === 'model_tool_call' ? 'no_search' : searchMode;

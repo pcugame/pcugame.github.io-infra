@@ -217,13 +217,17 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 				name: 'invalid',
 				jsonl: dataset.trim().split('\n').slice(1).join('\n'),
 			});
+			const labels = await readFile(new URL('./benchmark-500.labels.jsonl', datasetPath), 'utf8');
+			await api('POST', '/datasets', 400, { name: 'research labels', jsonl: labels });
 			const uploaded = await api('POST', '/datasets', 201, { name: 'benchmark-500', jsonl: dataset });
+			expect(uploaded.version).toBe('2');
 			expect(uploaded.count).toBe(500);
 			id = uploaded.id;
 			expect((await api('POST', '/datasets', 201, { name: 'same snapshot', jsonl: dataset })).id).toBe(id);
 			expect(await api('GET', '/datasets', 200, undefined, 'second')).toEqual([]);
 			await api('GET', '/datasets/' + id + '/cases', 404, undefined, 'second');
 			expect((await api('GET', '/datasets/' + id + '/cases?page=20')).items).toEqual(rows.slice(475));
+			expect((await api('GET', '/datasets/' + id + '/cases?q=no-such-nickname-in-fixture')).items).toEqual([]);
 		});
 
 		it('runs 1, 10 and 500 cases in a separate process, persists progress and exports by case identity', async () => {
@@ -278,7 +282,11 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 			])
 				await api('GET', path, 404, undefined, 'second');
 			const exported = await api('GET', `/runs/${full}/export?format=json`, 200, undefined, 'ADMIN');
-			expect(JSON.parse(exported.content).results).toHaveLength(500);
+			const exportedRows = LabResultSchema.array().parse(JSON.parse(exported.content).results);
+			expect(exportedRows.map((row) => row.testCase)).toEqual(rows);
+			expect(exportedRows.map((row) => row.output?.term)).toEqual(
+				rows.map((row) => 'nickname' in row && row.nickname),
+			);
 			const jsonl = await api('GET', `/runs/${full}/export?format=jsonl`);
 			expect(jsonl.content.trim().split('\n')).toHaveLength(500);
 			const csv = await api('GET', `/runs/${smoke}/export?format=csv`);

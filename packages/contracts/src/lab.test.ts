@@ -1,11 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { LabCreateRunSchema, LabOutputSchema, formatLabExport, type LabRun, type LabResult } from './lab.js';
+import { LabCreateRunSchema, LabOutputSchema, formatLabExport, parseLabJsonl, type LabRun, type LabResult } from './lab.js';
 
 const run = { id: '51512681-b19c-4da7-8e98-955e17dd938c' } as LabRun;
 const item = { term: '=unsafe cell', context: 'say "hi", then leave', language: 'en' };
 const result = { caseId: 'en-0001', testCase: item, output: null, status: 'FAILED' } as LabResult;
 
 describe('lab evaluation boundaries', () => {
+	it('accepts nickname-only uploads verbatim and rejects hints, duplicate nicknames and duplicate IDs', () => {
+		const rows = Array.from({ length: 500 }, (_, i) => ({ id: 'k-' + i, nickname: '음절' + i }));
+		rows[1]!.nickname = 'ㄱ ㅅ';
+		const encode = (data: unknown[]) => data.map((row) => JSON.stringify(row)).join('\n');
+		expect(parseLabJsonl(encode(rows))).toEqual(rows);
+		for (const invalid of [
+			{ ...rows[0], hint: '의미' },
+			{ ...rows[0], context: '예문' },
+			{ ...rows[0], nickname: 'ㄱ  ㅅ' },
+			{ ...rows[0], id: rows[1]!.id },
+			{ ...rows[0], nickname: '  ' },
+			{ ...rows[0], nickname: '두\n줄' },
+		]) expect(() => parseLabJsonl(encode([invalid, ...rows.slice(1)]))).toThrow();
+	});
 	it('rejects invalid SQL text and UTF-16 without changing valid user prompt bytes', () => {
 		const request = {
 			datasetId: run.id,

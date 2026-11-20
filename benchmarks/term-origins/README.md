@@ -1,53 +1,27 @@
-# Term origins benchmark
+# 닉네임 기반 사회적 위험 표현 벤치마크
 
-Upload `benchmark-500.jsonl` to the term origins lab as one file. Each row pairs an expression with a specific use. For example, `ko-0030` concerns a comparison between recipients of social assistance and parasites. A separate biology-class example uses the same Korean word for an actual parasite. The pair tests whether an analysis responds to *who or what is being described*.
+[모델 입력](benchmark-500.jsonl)은 한국어와 한국 인터넷 문화에서 유래한 닉네임 후보 500개로 구성한다. 실험실의 데이터셋 등록 화면에서 이 파일을 선택한다. 각 행에는 `id`와 `nickname`만 있다. 공백·자모·대소문자도 평가 대상이므로 등록할 때 표기를 보존한다.
 
-## Coverage
+[연구용 라벨](benchmark-500.labels.jsonl)은 같은 ID로 연결한다. `base`는 복원 후보, `method`와 `rule`은 표기 방식과 구체적인 해독 규칙이다. 복합 변형은 `stages`에 기저형부터 표면형까지 순서대로 기록한다. `meaning`은 가능한 의미, `uncertainty`는 일반적 독법이나 근거의 한계를 나타낸다. `family`는 대표 의미 유형이다.
 
-| Language bucket | Derogatory use | Historical or social conflict | Meaning change | Neutral control | Uncertain | Total |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Korean | 72 | 60 | 60 | 60 | 48 | 300 |
-| English | 24 | 20 | 20 | 20 | 16 | 100 |
-| Japanese | 12 | 10 | 10 | 10 | 8 | 50 |
-| Other and multilingual | 12 | 10 | 10 | 10 | 8 | 50 |
-| **Total** | **120** | **100** | **100** | **100** | **80** | **500** |
+실존·합성별 의미 유형과 변형 방식의 건수는 [분포 보고서](distribution.html)에 수록하였다.
 
-The fourth bucket includes Chinese, French, German, Portuguese, Spanish and code-switching. The `language` field stores the individual language code, including `mul` for multilingual cases. Each ten consecutive rows aligned to the start of the file contains six Korean cases, two English cases, one Japanese case and one case from the fourth bucket. The first 10 and 50 rows both cover all five categories. The prefixes are for testing runs and inspecting responses. Differences measured on these small selections carry substantial sampling uncertainty.
+## 출처와 판정 기준
 
-## Row schema
+- `attested`는 해당 표기를 확인한 사례다. 라벨의 `sources`에 원문 주소와 확인 위치를 기록한다. `surface`는 정확한 표기, `base`는 복원 후보에 대한 근거다. 사전 표제어, 댓글의 한 부분, 실제 닉네임은 서로 다른 종류의 기록이다. 출처가 뒷받침하는 범위 안에서 해석한다.
+- `synthetic`은 이번 평가에서 구성하거나 제시받은 변형이다. 같은 문자열이 다른 뜻으로 쓰일 수 있으며, 해당 해독으로 유통되었다는 뜻은 아니다. 원형 자료가 있는 경우 출처 범위를 `base`로 표시한다.
+- 복원·은어 판별·출처의 적합성·불확실성 표기를 각각 검토한다. 출처는 실제로 그 표현과 해석을 뒷받침하는지 확인한다. 동음이의어나 초성의 다른 독법을 제시하거나 근거가 부족해 점수를 유보한 응답도 평가할 수 있다.
+- 모욕 가능성 점수는 추가 검토 필요성을 나타낸다. 이 판본에는 사람이 교정한 정답 점수가 없다. 표기만으로 사용자의 의도·정치 성향·커뮤니티 소속을 확정할 수 없다.
 
-| Field | Meaning in this edition |
-| --- | --- |
-| `id` | Stable within this edition. Language bucket plus four decimal digits starting at 0001. Compare runs using the dataset hash and case ID. |
-| `term`, `context` | The target expression and an authored example containing it. A speaker in an example may quote, criticise, reclaim or apply a term. |
-| `language` | Language of the case. The target can be a loanword. |
-| `category` | One primary sampling stratum from `derogatory`, `historical_conflict`, `semantic_shift`, `neutral`, `uncertain`. It records the reason for including a case. |
-| `tags` | Optional annotations. `context-contrast` links repeated same-language targets via their term. `code-switching` marks multilingual contexts. `invented` and `underdetermined` distinguish two types of uncertainty control. |
-| `expectedBehavior` | Qualitative review cue. Distinguish uses for `CONTEXT_SENSITIVE`, support claims for `EVIDENCE_REQUIRED`, recognise the contextual meaning for `NEUTRAL_EXPECTED`, and withhold unsupported claims for `ABSTAIN_IF_UNSUPPORTED`. |
-| `reference` | Object containing nullable integer scores (0–100), verification status, nullable `originNote` and a list of source URLs. Both scores and the note are null in all 500 rows. Every status is `UNVERIFIED` and every source list is empty. |
+## 재생성과 검증
 
-The executable upload contract lives in [lab.ts](../../packages/contracts/src/lab.ts). A neutral use can have a contested history. An ambiguous use can have well-attested component words. Human review should distinguish the expression's history, evidence for its use in this context and the model's confidence about each. An unsupported conclusion can justify abstention or a null score. This edition supplies no calibrated numerical ground truth.
-
-## Authorship and publication
-
-The Codex dataset agent in this implementation session (GPT-6 family) authored the expressions in context and the synthetic controls. No separate external model API was called. Dialogue, situations and quoted examples are newly composed fixtures. The corpus includes no collected posts, named private individuals, contact details or attributed quotations. It contains explicit discriminatory language in research contexts, including examples of direct exclusion and critical quotation.
-
-The 40 cases tagged `invented` use an author-coined label in a stated fictional setting. Such a label could coincidentally appear elsewhere. The 40 tagged `underdetermined` contain fragmentary records or missing speaker and referent information. A dictionary entry for an individual word need not resolve the meaning of the fragment. The remaining cases likewise have no adjudicated origin, earliest date or controversy score. Source verification, expert annotation and independent native-speaker review have not been performed. The corpus supports exploratory comparisons between prompts and retrieval settings.
-
-## Reproduce the upload file
-
-Run from the repository root after installing workspace dependencies.
+저장소 루트에서 다음 명령을 실행한다.
 
 ```sh
 npm run build -w @pcu/contracts
 node benchmarks/term-origins/benchmark.mjs
 ```
 
-The default command reads the committed bytes with a strict UTF-8 decoder, passes them to the same Zod-backed parser used by the lab, checks edition-specific provenance and control annotations, regenerates all rows in memory and checks the committed file and validation receipt for exact agreement. The receipt in [validation.json](validation.json) records the SHA-256, byte length, language counts, cross-tabulation and uncertainty/contrast counts.
+[원자료](cases)는 조사·작성 단위별로 보관한다. 원자료를 수정한 뒤에는 검증 명령에 `--write`를 붙여 입력, 라벨, 분포 보고서의 집계, [검증 결과](validation.json)를 갱신하고 기본 명령을 다시 실행한다. 검증기는 JSONL의 UTF-8, 500행, 업로드 스키마, 정규화 중복, 원자료와 배포 파일의 일치, 출처 범위, 변형 단계 연결, 아나그램의 문자별 빈도, 초성 추출, 자모 분해, 한글 자판의 영문 키 대응을 검사한다. 기본 검증은 오프라인에서 재현할 수 있다.
 
-To edit authored content, update a file under `cases/`. A heading selects the category and, for uncertain cases, its subtype. Each data line has a term and a context template separated by a vertical bar. The fourth language bucket has one additional leading language column. A section sign marks where the target is inserted verbatim. IDs follow row numbers within each language bucket, before interleaving. Keep source records in their current order to preserve IDs when correcting wording.
-
-```sh
-node benchmarks/term-origins/benchmark.mjs --write
-node benchmarks/term-origins/benchmark.mjs
-```
+정렬 기준은 닉네임의 SHA-256이다. 의미 유형이나 조사 단위로 묶이지 않도록 파일 순서를 정하였다. 이 판본의 ID는 `ko-0501`부터 `ko-1000`까지다. 구판의 케이스와 구별되며 동일 판본의 실행 비교에는 데이터셋 해시와 ID를 함께 사용한다.

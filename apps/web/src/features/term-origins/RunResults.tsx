@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { LabRun } from '@pcu/contracts';
+import { labCaseFields, type LabRun } from '@pcu/contracts';
 import { Button, ProgressBar, SelectField, TextField } from '../../components/ui';
 import { labApi, type LabFormat } from '../../lib/api/lab';
 import { useViewerKey } from '../../lib/query/visibility';
@@ -71,7 +71,7 @@ export function RunResults({ id }: { id: string }) {
     </div>
     <LabError error={action.error || save.error} />
     <div className="lab-grid">
-      <TextField label="결과 검색" type="search" maxLength={160} placeholder="어구, 문맥 또는 케이스 ID" value={q} onChange={e => { setQ(e.target.value); setPage(1); }} />
+      <TextField label="결과 검색" type="search" maxLength={160} placeholder="닉네임 또는 케이스 ID" value={q} onChange={e => { setQ(e.target.value); setPage(1); }} />
       <SelectField label="처리 상태" value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}>
         <option value="">전체</option>
         {Object.entries(resultLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
@@ -80,7 +80,7 @@ export function RunResults({ id }: { id: string }) {
     <LabError error={rows.error} />
     {rows.isSuccess && <>
       {rows.data.items.map(item => <details className="lab-row" key={item.caseId}>
-        <summary><span>{item.caseId}</span> <strong>{item.testCase.term}</strong> <small>{resultLabels[item.status]} · {item.output?.controversyScore ?? '—'}점</small></summary>
+        <summary><span>{item.caseId}</span> <strong>{labCaseFields(item.testCase).term}</strong> <small>{resultLabels[item.status]} · {item.output?.controversyScore ?? '—'}점</small></summary>
         <ResultDetail item={item} />
       </details>)}
       {!rows.data.items.length && <p>조건에 맞는 결과가 없습니다.</p>}
@@ -112,13 +112,16 @@ export function RunCompare({ left, runs }: { left: LabRun; runs: LabRun[] }) {
       <TextField type="search" maxLength={160} label="비교 결과 검색" value={q} onChange={e => { setPage(1); setQ(e.target.value); }} />
       <LabError error={compare.error} />
       {compare.isSuccess && <>
-        {compare.data.items.map(row => <details className="lab-row" key={row.caseId}>
-          <summary><span>{row.caseId}</span> <strong>{(row.left ?? row.right)?.testCase.term}</strong>
-            <small>기준 {row.left?.output?.controversyScore ?? '—'} / 비교 {row.right?.output?.controversyScore ?? '—'}</small></summary>
-          <div className="lab-grid">{[row.left, row.right].map((value, i) => <section key={i}>
-            <h3>{i === 0 ? '기준 실험' : '비교 실험'}</h3>{value ? <ResultDetail item={value} /> : <p>실행 대상에서 제외됨</p>}
-          </section>)}</div>
-        </details>)}
+        {compare.data.items.map(row => {
+          const result = row.left ?? row.right;
+          return <details className="lab-row" key={row.caseId}>
+            <summary><span>{row.caseId}</span> <strong>{result && labCaseFields(result.testCase).term}</strong>
+              <small>기준 {row.left?.output?.controversyScore ?? '—'} / 비교 {row.right?.output?.controversyScore ?? '—'}</small></summary>
+            <div className="lab-grid">{[row.left, row.right].map((value, i) => <section key={i}>
+              <h3>{i === 0 ? '기준 실험' : '비교 실험'}</h3>{value ? <ResultDetail item={value} /> : <p>실행 대상에서 제외됨</p>}
+            </section>)}</div>
+          </details>;
+        })}
         <Pager page={page} total={compare.data.total} change={setPage} />
       </>}
     </>}

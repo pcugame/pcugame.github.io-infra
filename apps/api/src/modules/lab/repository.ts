@@ -8,6 +8,7 @@ import {
 	LabResultSchema,
 	LabRunSchema,
 	formatLabExport,
+	labCaseFields,
 	parseLabJsonl,
 	type LabCreateRun,
 	type LabResult,
@@ -101,19 +102,18 @@ export function createLabRepository(db: PrismaClient) {
 			} catch (e) {
 				throw badRequest(e instanceof Error ? e.message : 'Invalid dataset', 'VALIDATION_ERROR');
 			}
+			const version = 'nickname' in cases[0]! ? '2' : '1';
 			const hash = sha(jsonl);
 			const rows = cases.map((body, ordinal) => ({
 				caseId: body.id,
 				ordinal,
-				term: body.term,
-				context: body.context,
-				language: body.language,
+				...labCaseFields(body),
 				body,
 			}));
 			const dataset = await db.$transaction(async (tx) => {
 				const id = randomUUID();
 				const inserted = await tx.labDataset.createMany({
-					data: { id, ownerId: actor.id, name, hash, count: rows.length },
+					data: { id, ownerId: actor.id, name, hash, count: rows.length, version },
 					skipDuplicates: true,
 				});
 				if (inserted.count)
