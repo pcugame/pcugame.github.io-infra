@@ -17,7 +17,7 @@ export function Connections({ status }: { status: LabStatus }) {
   const labels = { available: '연결됨', unavailable: '연결 실패', unknown: '미확인' };
   const tools = { supported: '지원', unsupported: '미지원', unknown: '미확인' };
   return <div className="lab-connections">
-    <span>모델 서버 <strong>{labels[status.modelStatus]}</strong></span>
+    <span>모델 서버 <strong>{status.systemPromptSupported === false ? '시스템 지시 미지원 · 서버 갱신 필요' : labels[status.modelStatus]}</strong></span>
     <span>검색 서버 <strong>{labels[status.searchStatus]}</strong></span>
     <span>도구 호출 <strong>{tools[status.toolSupport]}</strong></span>
   </div>;

@@ -1,0 +1,12 @@
+use_default_settings:
+  engines:
+    keep_only: [naver, brave, duckduckgo]
+engines:
+  - name: naver
+    disabled: false
+search:
+  formats: [html, json]
+  default_lang: ko
+server:
+  limiter: false
+  public_instance: false

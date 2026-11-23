@@ -35,6 +35,15 @@ describe('lab evaluation boundaries', () => {
 		const systemPrompt = '  history\r\n🚀  ';
 		expect(LabCreateRunSchema.parse({ ...request, systemPrompt }).systemPrompt).toBe(systemPrompt);
 	});
+	it('accepts either a nickname or a dataset selection and defaults to retrieval', () => {
+		const settings = { systemPrompt: 'Assess usage.', model: 'local', temperature: 0, maxTokens: 256 };
+		const direct = { ...settings, nickname: '계집' };
+		expect(LabCreateRunSchema.parse(direct)).toMatchObject({ nickname: '계집', searchMode: 'backend_retrieval' });
+		for (const fields of [{ nickname: '' }, { nickname: '  ' }, { nickname: 'a\nb' },
+			{ nickname: '계집', size: 1 }, { nickname: '계집', datasetId: run.id, size: 1 }]) {
+			expect(LabCreateRunSchema.safeParse({ ...settings, ...fields }).success).toBe(false);
+		}
+	});
 	it('allows uncertainty but rejects out-of-range scores and confidence', () => {
 		const output = {
 			schemaVersion: '1',

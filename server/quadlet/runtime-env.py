@@ -26,7 +26,8 @@ SCOPES = (COMMON_KEYS, API_KEYS, PG_KEYS)
 # shared only by the API and benchmark worker; other workloads retain their scopes.
 LAB_PROFILE = dict(LAB_ENABLED='true', LAB_MODEL_PROVIDER='transformers-generate',
     LAB_MODEL='Qwen3-4B-Instruct-2507-Q4_K_M', LAB_MODEL_URL='http://127.0.0.1:18088', LAB_CONCURRENCY='1')
-LAB_KEYS = {'DATABASE_URL', *LAB_PROFILE}
+LAB_SEARCH_URL = 'http://127.0.0.1:18888'
+LAB_KEYS = {'DATABASE_URL', 'LAB_SEARXNG_URL', *LAB_PROFILE}
 
 
 def read_runtime_files(filenames, *, explicit=False):
@@ -52,11 +53,16 @@ def read_runtime_files(filenames, *, explicit=False):
                 raise ValueError()
             values[key] = value
         required = allowed - (COMMON_OPTIONAL_KEYS if index == 0 else API_OPTIONAL_KEYS if index == 1 else set())
+        if index == 3:
+            required = required - {'LAB_SEARXNG_URL'}
         if explicit and not required <= values.keys():
             raise ValueError()
         scopes.append(values)
     if len(scopes) == 4:
-        if not scopes[0].get('DATABASE_URL') or scopes[3] != LAB_PROFILE | {'DATABASE_URL': scopes[0]['DATABASE_URL']}:
+        expected = LAB_PROFILE | {'DATABASE_URL': scopes[0].get('DATABASE_URL')}
+        if 'LAB_SEARXNG_URL' in scopes[3]:
+            expected['LAB_SEARXNG_URL'] = LAB_SEARCH_URL
+        if not expected['DATABASE_URL'] or scopes[3] != expected:
             raise ValueError()
     return scopes
 

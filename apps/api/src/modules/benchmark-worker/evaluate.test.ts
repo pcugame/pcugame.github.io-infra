@@ -107,6 +107,15 @@ describe('bounded evidence collection and structured analysis', () => {
 		});
 		expect(fetcher).toHaveBeenCalledTimes(2);
 	});
+	it('keeps a scored zero distinct from an abstention', async () => {
+		const scored = { ...output, controversyScore: 0, abstained: false };
+		const fetcher = vi.fn().mockResolvedValueOnce(assistant({ content: JSON.stringify({ ...scored, abstained: true }) }))
+			.mockResolvedValueOnce(assistant({ content: JSON.stringify(scored) }));
+		vi.stubGlobal('fetch', fetcher);
+		expect(await evaluateCase(config, item, signal(), 'unknown')).toMatchObject({
+			jsonAttempts: 2, output: scored, error: null,
+		});
+	});
 	it('validates the exact case identity even when the output satisfies the JSON schema', async () => {
 		vi.stubGlobal('fetch', () =>
 			assistant({ content: JSON.stringify({ ...output, term: 'a different term' }) }),
@@ -201,7 +210,7 @@ describe('single-slot Transformers generation', () => {
 	const provider = 'transformers-generate' as const;
 	const settings = { ...config, provider };
 	const task = { ...item, provider, temperature: 0, maxTokens: 256 };
-	const health = { ok: true, busy: false, model: task.model, max_input_tokens: 1024, max_output_tokens: 256 };
+	const health = { ok: true, busy: false, supports_system_prompt: true, model: task.model, max_input_tokens: 1024, max_output_tokens: 256 };
 
 	it('advertises the wire limits and never generates on a mismatched or busy endpoint', async () => {
 		const fetcher = vi.fn(() => Response.json(health));
@@ -222,6 +231,39 @@ describe('single-slot Transformers generation', () => {
 		});
 		expect(fetcher).toHaveBeenCalledTimes(6);
 		expect(wait).toHaveBeenCalledTimes(3);
+	});
+
+	it('refuses a server that silently ignores the system prompt', async () => {
+		const fetcher = vi.fn(() => Response.json({ ...health, supports_system_prompt: undefined }));
+		vi.stubGlobal('fetch', fetcher);
+		expect((await evaluateCase(settings, task, signal(), 'unsupported')).error).toBe('MODEL_SYSTEM_PROMPT_UNSUPPORTED');
+		expect(fetcher).toHaveBeenCalledTimes(1);
+	});
+
+	it('distinguishes an unreachable search server, empty snippets and an uncited answer', async () => {
+		const searchTask = { ...task, directNickname: true, searchMode: 'backend_retrieval' };
+		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unavailable')));
+		expect(await evaluateCase(settings, searchTask, signal(), 'unsupported')).toMatchObject({
+			error: 'SEARCH_PROVIDER_UNREACHABLE', output: null, retryable: true, jsonAttempts: 0,
+		});
+		const hit = { url: 'https://example.org/usage', title: 'Usage', content: '' };
+		vi.stubGlobal('fetch', (url: string | URL) => {
+			if (String(url).startsWith(settings.searchUrl!)) return Response.json({ results: [hit] });
+			return String(url).endsWith('/health') ? Response.json(health) : Response.json({
+				text: JSON.stringify(output), input_tokens: 150, output_tokens: 100, seconds: 1,
+			});
+		});
+		expect(await evaluateCase(settings, searchTask, signal(), 'unsupported')).toMatchObject({
+			error: null, output: { sourceIds: [], controversyScore: null, abstained: true }, sources: [], searchCount: 1, jsonAttempts: 1,
+		});
+		hit.content = 'Unrelated results for another term.';
+		expect(await evaluateCase(settings, searchTask, signal(), 'unsupported')).toMatchObject({
+			error: null, output: { controversyScore: null, abstained: true }, sources: [],
+		});
+		hit.content = 'Background. '.repeat(30) + 'Modern window usage.';
+		expect(await evaluateCase(settings, searchTask, signal(), 'unsupported')).toMatchObject({
+			error: null, output: { sourceIds: [] }, sources: [{ snippet: hit.content, suppliedSnippet: expect.stringContaining('Modern window usage.') }],
+		});
 	});
 
 	it('rejects unsupported controls before I/O', async () => {
@@ -247,9 +289,10 @@ describe('single-slot Transformers generation', () => {
 			if (url.endsWith('/health')) return Response.json(health);
 			expect(url).toBe(settings.modelUrl + '/generate');
 			const body = JSON.parse(String(init.body));
-			expect(Object.keys(body).sort()).toEqual(['max_new_tokens', 'prompt']);
+			expect(Object.keys(body).sort()).toEqual(['max_new_tokens', 'prompt', 'system_prompt']);
 			expect(body.max_new_tokens).toBe(256);
-			expect(body.prompt.startsWith(experiment)).toBe(true);
+			expect(body.system_prompt).toBe(experiment);
+			expect(body.prompt).not.toContain(experiment);
 			expect(body.prompt).toContain('Quoted context: ' + JSON.stringify(storedCase.context));
 			expect(body.prompt).not.toContain('HIDDEN_HINT');
 			expect(body.prompt).toContain('S2');

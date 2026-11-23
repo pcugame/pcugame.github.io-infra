@@ -179,6 +179,16 @@ class Parity(unittest.TestCase):
                 self.assertEqual(unit['Pod'], ['graduationproject.pod'])
                 self.assertNotIn('PublishPort', unit)
             self.assertIn(f'"{temp}/runtime-env/lab.env"', directives(output / 'gp-api.container')['EnvironmentFile'])
+            # The independently installed search service shares only the pod's loopback.
+            search_name = 'gp-lab-search.container'
+            search_file = HERE / 'lab-search' / search_name
+            (output / search_name).write_bytes(search_file.read_bytes())
+            search = directives(search_file)
+            self.assertRegex(search['Image'][0], r'^docker\.io/searxng/searxng@sha256:[a-f0-9]{64}$')
+            self.assertEqual(search['Pod'], ['graduationproject.pod'])
+            self.assertNotIn('PublishPort', search)
+            self.assertIn('GRANIAN_HOST=127.0.0.1', search['Environment'])
+            self.assertEqual(search['EnvironmentFile'], ['%h/.config/pcu-lab-search/search.env'])
             generator = select_generator()
             if generator:
                 generated = root / 'generated'
@@ -186,7 +196,7 @@ class Parity(unittest.TestCase):
                 result = generate(generator, output, generated, clean_env() | {'HOME': temp})
                 self.assertEqual(result.returncode, 0, result.stderr)
                 pod = (generated / 'graduationproject-pod.service').read_text()
-                for name in ('gp-worker-benchmark.service', 'gp-lab-tunnel.service'):
+                for name in ('gp-worker-benchmark.service', 'gp-lab-tunnel.service', 'gp-lab-search.service'):
                     self.assertTrue((generated / name).is_file())
                     self.assertIn(name, pod)
 

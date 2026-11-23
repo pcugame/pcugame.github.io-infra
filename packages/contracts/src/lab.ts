@@ -118,6 +118,7 @@ export const LabSourceSchema = z.strictObject({
 	title: bounded(500),
 	url: webUrl,
 	snippet: pgText(4000),
+	suppliedSnippet: pgText(4000).optional(),
 	collectedAt: z.iso.datetime(),
 });
 export const LabOutputSchema = z.strictObject({
@@ -136,21 +137,29 @@ export const LabOutputSchema = z.strictObject({
 	abstained: z.boolean(),
 });
 export const LabSearchModeSchema = z.enum(['no_search', 'backend_retrieval', 'model_tool_call']);
-export const LabCreateRunSchema = z
+export const LAB_DIRECT_VERSION = 'direct-1';
+const runSettings = {
+	systemPrompt: bounded(16000).refine((value) => !!value.trim()),
+	model: bounded(200),
+	searchMode: LabSearchModeSchema.default('backend_retrieval'),
+	temperature: z.number().min(0).max(2),
+	maxTokens: z.number().int().min(128).max(4096),
+};
+const datasetRun = z
 	.strictObject({
+		...runSettings,
 		datasetId: z.uuid(),
 		size: z.union([z.literal(1), z.literal(10), z.literal(50), z.literal(500)]),
 		caseIds: z.array(caseId).min(1).max(500).optional(),
-		systemPrompt: bounded(16000).refine((value) => !!value.trim()),
-		model: bounded(200),
-		searchMode: LabSearchModeSchema,
-		temperature: z.number().min(0).max(2),
-		maxTokens: z.number().int().min(128).max(4096),
 	})
 	.refine(
 		(r) => !r.caseIds || (r.caseIds.length === r.size && new Set(r.caseIds).size === r.size),
 		'Select one distinct case ID per requested evaluation',
 	);
+export const LabCreateRunSchema = z.union([
+	datasetRun,
+	z.strictObject({ ...runSettings, nickname: nicknameCase.shape.nickname }),
+]);
 export const LabResultStatusSchema = z.enum(['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED']);
 export const LabRunStatusSchema = z.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'CANCELLED']);
 export const LabToolSupportSchema = z.enum(['supported', 'unsupported', 'unknown']);
@@ -160,6 +169,7 @@ export const LabStatusSchema = z.object({
 	provider: z.string(),
 	model: z.string(),
 	modelStatus: health,
+	systemPromptSupported: z.boolean().optional(),
 	searchStatus: health,
 	toolSupport: LabToolSupportSchema,
 	generationLimits: z
@@ -184,6 +194,7 @@ export const LabRunSchema = z.object({
 	datasetId: z.uuid(),
 	datasetHash: z.string(),
 	datasetVersion: z.string().optional(),
+	nickname: z.string().optional(),
 	systemPrompt: z.string(),
 	promptHash: z.string(),
 	model: z.string(),

@@ -20,17 +20,19 @@ export function parseGenerateHealth(model: string, raw: unknown) {
 			ok: z.literal(true),
 			model: z.literal(model),
 			busy: z.boolean(),
+			supports_system_prompt: z.boolean().optional(),
 			max_input_tokens: z.number().int().min(generateLimits.maxInputTokens),
 			max_output_tokens: z.number().int().min(generateLimits.maxOutputTokens),
 		})
 		.safeParse(raw);
 	if (!health.success) throw new LabFailure('MODEL_HEALTH_MISMATCH');
+	if (!health.data.supports_system_prompt) throw new LabFailure('MODEL_SYSTEM_PROMPT_UNSUPPORTED');
 	return health.data;
 }
 
 async function modelStatus(
 	config: LabConfig,
-): Promise<{ modelStatus: Availability; toolSupport: ToolSupport }> {
+): Promise<{ modelStatus: Availability; toolSupport: ToolSupport; systemPromptSupported?: boolean }> {
 	const unknown: { modelStatus: Availability; toolSupport: ToolSupport } = {
 		modelStatus: 'unavailable',
 		toolSupport: config.provider === 'transformers-generate' ? 'unsupported' : 'unknown',
@@ -40,7 +42,7 @@ async function modelStatus(
 	try {
 		if (config.provider === 'transformers-generate') {
 			await readGenerateHealth(config, options.signal);
-			return { modelStatus: 'available', toolSupport: 'unsupported' };
+			return { modelStatus: 'available', toolSupport: 'unsupported', systemPromptSupported: true };
 		}
 		if (config.provider === 'ollama') {
 			const raw = await requestJson(
@@ -64,7 +66,9 @@ async function modelStatus(
 			modelStatus: models.data.some(({ id }) => id === config.model) ? 'available' : 'unavailable',
 			toolSupport: 'unknown',
 		};
-	} catch {
+	} catch (error) {
+		if (error instanceof LabFailure && error.code === 'MODEL_SYSTEM_PROMPT_UNSUPPORTED')
+			return { ...unknown, systemPromptSupported: false };
 		return unknown;
 	}
 }

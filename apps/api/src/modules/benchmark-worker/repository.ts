@@ -1,4 +1,4 @@
-import { LAB_CASE_ATTEMPT_LIMIT } from '@pcu/contracts';
+import { LAB_CASE_ATTEMPT_LIMIT, LAB_DIRECT_VERSION } from '@pcu/contracts';
 import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import type { Attempt, WorkItem } from './evaluate.js';
@@ -65,11 +65,14 @@ export async function claimCase(db: PrismaClient, concurrency: number): Promise<
 			WHERE "runId"=${run.id} AND "caseId"=${result.caseId}`;
 			await tx.$executeRaw`UPDATE "LabRun" SET status='RUNNING',"startedAt"=COALESCE("startedAt",clock_timestamp() AT TIME ZONE 'UTC')
 			WHERE id=${run.id} AND status='QUEUED'`;
-			const { caseId: id, ...fields } = await tx.labTestCase.findUniqueOrThrow({
+			const { caseId: id, dataset, ...fields } = await tx.labTestCase.findUniqueOrThrow({
 				where: { datasetId_caseId: { datasetId: result.datasetId, caseId: result.caseId } },
-				select: { caseId: true, term: true, language: true, context: true },
+				select: { caseId: true, term: true, language: true, context: true, dataset: { select: { version: true } } },
 			});
-			return { runId: run.id, caseId: id, token, item: { ...run, testCase: { id, ...fields } } };
+			return {
+				runId: run.id, caseId: id, token,
+				item: { ...run, directNickname: dataset.version === LAB_DIRECT_VERSION, testCase: { id, ...fields } },
+			};
 		},
 		{ isolationLevel: 'ReadCommitted' },
 	);

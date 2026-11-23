@@ -34,9 +34,10 @@ class GenerateTest(unittest.TestCase):
                         self.assertEqual(rejected.exception.body["input_tokens"], token_count)
                         self.assertEqual([c[0] for c in calls], ["/apply-template", "/tokenize"])
                     else:
-                        reply = server.generate(" experiment text ", 12)
+                        reply = server.generate(" experiment text ", 12, " edited instruction ")
                         self.assertEqual((reply["text"], reply["seconds"], reply["input_tokens"]), ("OK", .25, 1024))
                         self.assertEqual(calls[0][1]["messages"], calls[2][1]["messages"])
+                        self.assertEqual(calls[2][1]["messages"][0], {"role": "system", "content": " edited instruction "})
                         self.assertEqual(calls[2][1]["messages"][1]["content"], " experiment text ")
                         self.assertEqual(calls[2][1]["max_tokens"], 12)
                         self.assertEqual(calls[2][1]["temperature"], 0)
@@ -69,14 +70,17 @@ class HTTPTest(unittest.TestCase):
         with patch.object(server, "generate", return_value={"text": "OK"}) as generate:
             status, reply = self.call("POST", "/generate", {"prompt": " next "})
             self.assertEqual((status, reply["text"]), (200, "OK"))
-            generate.assert_called_once_with(" next ", 192)
+            generate.assert_called_once_with(" next ", 192, server.SYSTEM_PROMPT)
+            self.call("POST", "/generate", {"prompt": "word", "system_prompt": " custom "})
+            generate.assert_called_with("word", 192, " custom ")
+        self.assertTrue(self.call("GET", "/health")[1]["supports_system_prompt"])
         self.assertFalse(self.call("GET", "/health")[1]["busy"])
         self.process.poll.return_value = 1
         self.assertEqual(self.call("GET", "/health")[0], 503)
 
     def test_invalid_requests_do_not_reach_model(self):
         with patch.object(server, "generate") as generate:
-            for body in [[], {}, {"prompt": " "}, {"prompt": "x", "max_new_tokens": True},
+            for body in [[], {}, {"prompt": "x", "system_prompt": " "}, {"prompt": "x", "system_prompt": None}, {"prompt": " "}, {"prompt": "x", "max_new_tokens": True},
                          {"prompt": "x", "max_new_tokens": 257}, {"prompt": "x" * 33000}]:
                 with self.subTest(body_type=type(body)):
                     self.assertEqual(self.call("POST", "/generate", body)[0], 400)
