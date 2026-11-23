@@ -67,7 +67,7 @@ export async function claimCase(db: PrismaClient, concurrency: number): Promise<
 			WHERE id=${run.id} AND status='QUEUED'`;
 			const { caseId: id, ...fields } = await tx.labTestCase.findUniqueOrThrow({
 				where: { datasetId_caseId: { datasetId: result.datasetId, caseId: result.caseId } },
-				select: { caseId: true, term: true, language: true },
+				select: { caseId: true, term: true, language: true, context: true },
 			});
 			return { runId: run.id, caseId: id, token, item: { ...run, testCase: { id, ...fields } } };
 		},

@@ -22,18 +22,23 @@ API_OPTIONAL_KEYS = {'VOTE_INVESTIGATION_SECRET', 'VOTE_PRIVACY_NOTICE'}
 API_KEYS = set(API_DEFAULTS) | API_OPTIONAL_KEYS
 PG_KEYS = set('POSTGRES_USER POSTGRES_DB POSTGRES_PASSWORD'.split())
 SCOPES = (COMMON_KEYS, API_KEYS, PG_KEYS)
+# The private production forward has a fixed wire profile. The lab file is
+# shared only by the API and benchmark worker; other workloads retain their scopes.
+LAB_PROFILE = dict(LAB_ENABLED='true', LAB_MODEL_PROVIDER='transformers-generate',
+    LAB_MODEL='Qwen3-4B-Instruct-2507-Q4_K_M', LAB_MODEL_URL='http://127.0.0.1:18088', LAB_CONCURRENCY='1')
+LAB_KEYS = {'DATABASE_URL', *LAB_PROFILE}
 
 
 def read_runtime_files(filenames, *, explicit=False):
-    """Return three scoped dicts, rejecting duplicates and unknown keys.
+    """Return the deployment scopes, rejecting duplicates and unknown keys.
 
     Values remain literal, including quotes, dollar signs and equals signs. Shell text is never executed; callers must suppress OS exception messages
     because those can include operator filenames.
     """
-    if len(filenames) != 3:
+    if len(filenames) not in (3, 4):
         raise ValueError()
     scopes = []
-    for index, (filename, allowed) in enumerate(zip(filenames, SCOPES)):
+    for index, (filename, allowed) in enumerate(zip(filenames, (*SCOPES, LAB_KEYS))):
         values = {}
         for line in Path(filename).read_text().split('\n'):
             if not line.strip() or line.lstrip().startswith('#'):
@@ -50,17 +55,23 @@ def read_runtime_files(filenames, *, explicit=False):
         if explicit and not required <= values.keys():
             raise ValueError()
         scopes.append(values)
+    if len(scopes) == 4:
+        if not scopes[0].get('DATABASE_URL') or scopes[3] != LAB_PROFILE | {'DATABASE_URL': scopes[0]['DATABASE_URL']}:
+            raise ValueError()
     return scopes
 
 
 def deployment_values(filenames):
-    common, api, postgres = read_runtime_files(filenames)
+    scopes = read_runtime_files(filenames)
+    common, api, postgres = scopes[:3]
     values = COMMON_DEFAULTS | API_DEFAULTS | common | api | postgres
     # Preserve the existing gate contract; adoption separately requires every
     # documented key, including POSTGRES_PASSWORD and defaulted values.
     required = COMMON_REQUIRED | {'FILE_GATEWAY_SECRET', 'TRUST_PROXY', 'POSTGRES_USER', 'POSTGRES_DB'}
     if not required <= values.keys():
         raise ValueError()
+    if len(scopes) == 4:
+        values['LAB_MODEL'] = scopes[3]['LAB_MODEL']
     return values
 
 

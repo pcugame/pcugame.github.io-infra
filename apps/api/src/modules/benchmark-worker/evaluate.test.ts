@@ -11,7 +11,7 @@ const config = readLabConfig({
 	LAB_MODEL_URL: 'http://model.test/v1',
 	LAB_SEARXNG_URL: 'https://search.test',
 });
-const storedCase = { id: 'en-0001', term: 'window', language: 'en', context: 'HIDDEN_CONTEXT', hint: 'HIDDEN_HINT' };
+const storedCase = { id: 'en-0001', term: 'window', language: 'en', context: 'Original quoted context', hint: 'HIDDEN_HINT' };
 const item: WorkItem = {
 	systemPrompt: 'Inspect in context.',
 	provider: config.provider,
@@ -61,7 +61,7 @@ describe('bounded evidence collection and structured analysis', () => {
 			}
 			expect(String(url)).toBe(config.modelUrl + '/chat/completions');
 			const body = JSON.parse(String(init.body));
-			expect(JSON.parse(body.messages[1].content).case).toEqual({ id: 'en-0001', term: 'window', language: 'en' });
+			expect(JSON.parse(body.messages[1].content).case).toEqual({ id: 'en-0001', term: 'window', language: 'en', context: storedCase.context });
 			if (body.tools) {
 				expect(body.response_format).toBeUndefined();
 				const last = body.messages.at(-1);
@@ -250,7 +250,8 @@ describe('single-slot Transformers generation', () => {
 			expect(Object.keys(body).sort()).toEqual(['max_new_tokens', 'prompt']);
 			expect(body.max_new_tokens).toBe(256);
 			expect(body.prompt.startsWith(experiment)).toBe(true);
-			expect(body.prompt).not.toMatch(/HIDDEN_CONTEXT|HIDDEN_HINT/);
+			expect(body.prompt).toContain('Quoted context: ' + JSON.stringify(storedCase.context));
+			expect(body.prompt).not.toContain('HIDDEN_HINT');
 			expect(body.prompt).toContain('S2');
 			expect(body.prompt).not.toContain('S3');
 			generations++;

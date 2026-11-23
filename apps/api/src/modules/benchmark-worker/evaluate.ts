@@ -19,7 +19,7 @@ export type WorkItem = ChatParameters & {
 	systemPrompt: string;
 	provider: string;
 	searchMode: string;
-	testCase: { id: string; term: string; language: string };
+	testCase: { id: string; term: string; language: string; context?: string };
 };
 export type Attempt = {
 	sources: LabSource[];
@@ -68,8 +68,8 @@ export async function evaluateCase(
 	search: SearchProvider = createSearchProvider(config.searchUrl),
 ): Promise<Attempt> {
 	// Project at the provider boundary even when the caller holds a richer persisted case.
-	const { id, term, language } = item.testCase;
-	const modelCase = { id, term, language };
+	const { id, term, language, context } = item.testCase;
+	const modelCase = { id, term, language, ...(context ? { context } : {}) };
 	const attempt: Attempt = {
 		sources: [],
 		searchCount: 0,

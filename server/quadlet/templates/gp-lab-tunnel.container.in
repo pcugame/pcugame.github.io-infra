@@ -1,0 +1,21 @@
+[Unit]
+Description=Private SSH forward to the gameserver 4B model
+
+[Container]
+Image=@API_IMAGE@
+ContainerName=gp-lab-tunnel
+Pod=graduationproject.pod
+StartWithPod=true
+# Container root maps to the rootless deployment user who owns the 0600 key.
+User=0
+DropCapability=all
+NoNewPrivileges=true
+ReadOnly=true
+Volume=@LAB_SSH_VOLUME@
+Entrypoint=/usr/bin/ssh
+Exec=-F /etc/ssh/pcu-lab.conf -NT -L 127.0.0.1:18088:127.0.0.1:8088 gameserver-model
+StopTimeout=10
+
+[Service]
+Restart=always
+RestartSec=5

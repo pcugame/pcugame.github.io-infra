@@ -162,6 +162,35 @@ class Parity(unittest.TestCase):
 
     def test_defaults(self): self.scenario({})
 
+    def test_private_lab_profile(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / 'units'
+            env = clean_env() | {'API_IMAGE': IMAGE, 'DEPLOY_DIR': temp, 'LAB_RUNTIME_ENABLED': 'true'}
+            subprocess.run(['bash', str(HERE / 'render.sh'), str(output)], env=env, check=True)
+            worker = directives(output / 'gp-worker-benchmark.container')
+            tunnel = directives(output / 'gp-lab-tunnel.container')
+            self.assertEqual(worker['EnvironmentFile'], [f'"{temp}/runtime-env/lab.env"'])
+            self.assertEqual(worker['Exec'], ['dist/benchmark-worker.js'])
+            self.assertNotIn('EnvironmentFile', tunnel)
+            self.assertEqual(tunnel['Volume'], [temp + '/runtime-env/lab-ssh:/run/lab-ssh:ro,z'])
+            for unit in (worker, tunnel):
+                self.assertEqual(unit['Image'], [IMAGE])
+                self.assertEqual(unit['Pod'], ['graduationproject.pod'])
+                self.assertNotIn('PublishPort', unit)
+            self.assertIn(f'"{temp}/runtime-env/lab.env"', directives(output / 'gp-api.container')['EnvironmentFile'])
+            generator = select_generator()
+            if generator:
+                generated = root / 'generated'
+                generated.mkdir()
+                result = generate(generator, output, generated, clean_env() | {'HOME': temp})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                pod = (generated / 'graduationproject-pod.service').read_text()
+                for name in ('gp-worker-benchmark.service', 'gp-lab-tunnel.service'):
+                    self.assertTrue((generated / name).is_file())
+                    self.assertIn(name, pod)
+
+
     def test_explicit_generator_cannot_silently_skip(self):
         with tempfile.TemporaryDirectory() as temporary:
             with patch.dict(os.environ, {'QUADLET_GENERATOR': str(Path(temporary) / 'absent'),

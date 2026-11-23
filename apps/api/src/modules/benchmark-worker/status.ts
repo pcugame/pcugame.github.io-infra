@@ -11,10 +11,14 @@ export async function readGenerateHealth(config: LabConfig, signal: AbortSignal)
 		{ headers: jsonHeaders(config.apiKey), signal },
 		8192,
 	);
+	return parseGenerateHealth(config.model, raw);
+}
+
+export function parseGenerateHealth(model: string, raw: unknown) {
 	const health = z
 		.object({
 			ok: z.literal(true),
-			model: z.literal(config.model),
+			model: z.literal(model),
 			busy: z.boolean(),
 			max_input_tokens: z.number().int().min(generateLimits.maxInputTokens),
 			max_output_tokens: z.number().int().min(generateLimits.maxOutputTokens),

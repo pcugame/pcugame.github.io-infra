@@ -4,9 +4,14 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, openSync
 import { join, isAbsolute, dirname, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const names = ['gp-api', 'gp-worker-game-validation', 'gp-worker-webgl', 'gp-worker-video', 'gp-worker-image', 'gp-worker-export', 'gp-worker-project-publication'];
-const units = [...names.map(name => `${name}.service`), 'graduationproject-pod.service', 'gp-postgres.service', 'gp-pg-data-volume.service'];
-const sourceFiles = [...names.map(name => `${name}.container`), 'gp-postgres.container', 'graduationproject.pod', 'gp-pg-data.volume'];
+const baseNames = ['gp-api', 'gp-worker-game-validation', 'gp-worker-webgl', 'gp-worker-video', 'gp-worker-image', 'gp-worker-export', 'gp-worker-project-publication'];
+const labNames = ['gp-lab-tunnel', 'gp-worker-benchmark'];
+const allowedNames = [...baseNames, ...labNames];
+function runtimeNames(quadletDir) {
+ const installed = labNames.filter(name => existsSync(join(quadletDir, name + '.container')));
+ if (installed.length === 1) throw new Error('Incomplete lab runtime definitions');
+ return [...baseNames, ...installed];
+}
 const immutable = /^\S+@sha256:[a-f0-9]{64}$/;
 const hash = value => createHash('sha256').update(value).digest('hex');
 export function recoveryDecision(state, attempted, webVerified) {
@@ -17,7 +22,7 @@ export function recoveryDecision(state, attempted, webVerified) {
  if (state.version !== 2 || !state.definitionHash || !state.quadletDir) throw new Error('Invalid captured runtime definitions');
  const seen = new Set();
  for (const c of state.containers) {
-  if (!names.includes(c.name) || seen.has(c.name) || !immutable.test(c.imageName) || !/^(sha256:)?[a-f0-9]{64}$/.test(c.image)) throw new Error('Invalid captured container');
+  if (!allowedNames.includes(c.name) || seen.has(c.name) || !immutable.test(c.imageName) || !/^(sha256:)?[a-f0-9]{64}$/.test(c.image)) throw new Error('Invalid captured container');
   seen.add(c.name);
  }
  return 'restart';
@@ -35,7 +40,10 @@ function save(file, content) {
  const fd = openSync(file, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 // Hash definitions and environment contents; recovery state must never contain secrets.
-function definitions(quadletDir, systemctl) {
+function definitions(deployDir, quadletDir, systemctl) {
+ const names = runtimeNames(quadletDir);
+ const units = [...names.map(name => `${name}.service`), 'graduationproject-pod.service', 'gp-postgres.service', 'gp-pg-data-volume.service'];
+ const sourceFiles = [...names.map(name => `${name}.container`), 'gp-postgres.container', 'graduationproject.pod', 'gp-pg-data.volume'];
  const entries = [], environmentFiles = new Set();
  function collectEnvironment(content, source) {
   for (const match of content.matchAll(/^EnvironmentFile=(.+)$/gm)) {
@@ -62,6 +70,9 @@ function definitions(quadletDir, systemctl) {
   if (!/^NeedDaemonReload=no$/m.test(effective)) throw new Error(`Recovery unit requires daemon reload: ${unit}`);
   entries.push([`${unit}:effective`, hash(effective)]);
   collectEnvironment(content, unit);
+ }
+ if (names.includes('gp-lab-tunnel')) {
+  for (const file of ['identity', 'known_hosts']) environmentFiles.add(join(deployDir, 'runtime-env/lab-ssh', file));
  }
  for (const file of [...environmentFiles].sort()) entries.push([file, hash(readFileSync(file))]);
  return hash(JSON.stringify(entries));
@@ -100,7 +111,7 @@ export async function runRecovery(mode, key, {
   quadletDir = resolveQuadletDir();
   mkdirSync(dir, { mode: 0o700 });
   const containers = [];
-  for (const name of names) {
+  for (const name of runtimeNames(quadletDir)) {
    const current = inspect(name);
    if (current?.State.Status === 'running') {
     const imageName = current.ImageName;
@@ -111,7 +122,7 @@ export async function runRecovery(mode, key, {
     containers.push(c);
    }
   }
-  const state = { version: 2, quadletDir, containers, definitionHash: definitions(quadletDir, systemctl) };
+  const state = { version: 2, quadletDir, containers, definitionHash: definitions(deployDir, quadletDir, systemctl) };
   recoveryDecision(state, false, true);
   save(stateFile, JSON.stringify(state));
   console.log(`recovery_capture=${containers.length}`);
@@ -134,7 +145,7 @@ export async function runRecovery(mode, key, {
  const state = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, 'utf8')) : null;
  if (recoveryDecision(state, migrationAttempted(attemptFile), webVerified) === 'nothing') { console.log('recovery_not_needed=true'); return; }
  quadletDir = resolveQuadletDir();
- if (state.quadletDir !== quadletDir || state.definitionHash !== definitions(quadletDir, systemctl)) throw new Error('Runtime definitions changed since capture; refusing recovery');
+ if (state.quadletDir !== quadletDir || state.definitionHash !== definitions(deployDir, quadletDir, systemctl)) throw new Error('Runtime definitions changed since capture; refusing recovery');
  for (const c of state.containers) {
   const current = inspect(c.name);
   if (current && (current.Name?.replace(/^\//, '') !== c.name || current.Image !== c.image || current.ImageName !== c.imageName)) throw new Error(`Container image changed since capture: ${c.name}`);

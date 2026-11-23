@@ -41,6 +41,9 @@ try:
     # A matching base definition alone does not establish effective topology.
     if any(any(root.rglob('*.d')) for root in roots):
         raise ValueError()
+    for unit in ('gp-lab-tunnel.container', 'gp-worker-benchmark.container'):
+        if not (expected / unit).exists() and any((root / unit).exists() for root in roots):
+            raise ValueError()
     for candidate in expected.iterdir():
         current = installed / candidate.name
         if current.is_symlink() or not current.is_file():

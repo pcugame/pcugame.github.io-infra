@@ -39,7 +39,7 @@ Worker는 `GET /health`에서 모델 ID와 토큰 한도, 사용 중 여부를 �
 
 `systemctl enable qwen-coder.service`로 부팅 시 기동을 설정한다. 서비스는 GPU에서 준비용 추론을 마친 후 systemd에 준비 완료를 알린다. 엔진이 종료되면 systemd가 서비스를 다시 시작한다. `systemctl is-enabled qwen-coder`, `systemctl is-active qwen-coder`, `curl -fsS http://127.0.0.1:8088/health`로 상태를 확인한다. 응답의 `rss_mib`는 추론 프로세스의 RSS이며, 이전 PyTorch 전용 지표인 `gpu_peak_allocated_mib` 값은 이 엔진에서 `null`이다.
 
-기존 수동 기동 7B 구성으로 복구할 때는 4B drop-in을 설치한 상태에서 `systemctl disable qwen-coder.service`로 부팅 연결을 먼저 해제한다. 그 뒤 위의 `40-local-4b.conf`만 제거하고 `systemctl daemon-reload`, `systemctl restart qwen-coder.service`를 실행한다. `/health`에 `Qwen2.5-Coder-7B-Instruct`가 표시되고 `/generate`가 응답하는지 확인한다. 실험실을 연결하는 환경에서는 API와 Worker의 `LAB_MODEL`도 해당 모델 ID에 맞춘다.
+기존 수동 기동 7B 구성으로 복구할 때는 4B drop-in을 설치한 상태에서 `systemctl disable qwen-coder.service`로 부팅 연결을 먼저 해제한다. 그 뒤 위의 `40-local-4b.conf`만 제거하고 `systemctl daemon-reload`, `systemctl restart qwen-coder.service`를 실행한다. `/health`에 `Qwen2.5-Coder-7B-Instruct`가 표시되고 `/generate`가 응답하는지 확인한다. 개발 환경의 API와 Worker에는 복구한 모델 ID를 `LAB_MODEL`로 지정한다. 운영 4B 구성은 지정된 Qwen3 모델 ID를 검사한다.
 
 ## 해석과 실행 한도
 
@@ -53,11 +53,37 @@ Worker는 `GET /health`에서 모델 ID와 토큰 한도, 사용 중 여부를 �
 
 격리된 PostgreSQL과 Fake HTTP Provider로 실제 세션·API·독립 Worker를 확인하는 suite 이름은 `term-origins`다. 저장소 통합 환경에서는 `npm run test:integration:suite -- term-origins`로 실행한다. [데이터셋 검증과 출처](../../benchmarks/term-origins/README.md)에는 재생성 명령과 분포가 있다. Web 단독 화면 검증은 `npm run dev:mock -w apps/web`로 실행하며 화면과 내보내기 결과에 모의 실행임을 표시한다.
 
-## 운영 전 검증
+## 운영 4B 실험실 활성화
 
-일반 릴리스는 API와 기존 6개 Worker의 고정 Quadlet 구성을 검사한다. 현재 구성에서 실험실의 기본값은 비활성이며 추가 Worker를 자동 기동하지 않는다. 운영 활성화 전 다음 항목을 검증한다.
+운영자는 관리자 또는 베타 계정으로 평가를 실행하고 결과를 검토한다. `abstained`는 모델의 판단 보류 여부이고 `controversyScore`는 추가 검토 필요성이다. 두 값을 함께 표시한다. 구판 데이터셋으로 재실행하면 원래 문맥을 모델에 전달한다. 닉네임 판본에서는 닉네임과 케이스 식별 정보만 전달한다.
 
-- 실제 API·Worker 실행 위치에서 모델 ID, 구조화 JSON, 도구 호출, SearXNG JSON 형식, 검색 출처를 1개·10개 실행으로 확인한다. 모델·검색 서비스는 사설 네트워크로 접근을 제한하고, 추론 서버 자체의 동시 실행 제한과 GPU 메모리·취소 동작을 확인한다.
-- 별도 Worker unit의 전용 환경 파일과 리소스 한도를 구성한다. 기존 Worker 공용 환경 파일에 모델 비밀 값을 배포하지 않는다. 새 unit을 정식 topology에 편입할 때 drain·백업·migration·재기동·불변 이미지 확인·전체 health 검사를 함께 검증한다.
-- migration은 역할 enum 추가와 실험용 테이블·인덱스 생성으로 구성된다. 신규 역할을 부여하기 전에 Web과 모든 기존 API 인스턴스가 새 역할을 학생 권한으로 처리하는지 확인한다. 기존 writer 호환성, 백업 복원, 500건 저장·내보내기의 메모리, DB 용량과 데이터 보존 기간을 점검한다. 내보내기는 API 프로세스당 한 건을 처리하며 결과와 발췌문을 응답 생성 중 메모리에 적재한다.
-- 운영 migration은 기존 릴리스 절차에서 수행한다. migration 시도 이후 복구는 기존 runbook의 forward-fix 또는 데이터 복원 절차를 따른다. [배포 및 복구 절차](deployment.md)
+### 호스트와 SSH 키
+
+`gp-lab-tunnel`은 운영 Pod의 `127.0.0.1:18088`에서 `gameserver`의 `127.0.0.1:8088`로 SSH 연결을 전달한다. SSH 목적지는 Pod에서 보이는 `host.containers.internal:5050`이다. API와 `gp-worker-benchmark`는 Pod의 루프백을 공유한다.
+
+1. 서버 관리자는 호스트에서 `qwen-coder.service`의 활성 상태와 `curl -fsS http://127.0.0.1:8088/health`의 모델 ID를 확인한다. 전용 SSH 계정 `pcu-lab-forward`에 공개 키 인증을 설정한다. 해당 계정의 sshd 설정은 `AllowTcpForwarding local`, `PermitOpen 127.0.0.1:8088`, `AllowStreamLocalForwarding no`, `MaxSessions 0`으로 제한한다. 호스트의 SSH 접근 허용 목록에도 이 계정을 반영한다.
+2. 배포 계정은 `${DEPLOY_DIR}/runtime-env/lab-ssh`를 권한 0700으로 만들고 전용 Ed25519 키를 `identity`에 생성한다. 개인 키 권한은 0600으로 유지한다. 서버 관리자는 공개 키를 위 계정의 `authorized_keys`에 등록한다.
+3. 서버 관리자가 호스트에서 확인한 Ed25519 공개 키로 같은 디렉터리에 `known_hosts`를 작성한다. 한 줄 형식은 `[host.containers.internal]:5050 ssh-ed25519 <호스트 공개 키>`이다. 터널과 릴리스 사전 검사가 이 디렉터리를 읽기 전용으로 사용한다.
+
+### 배포 환경과 Quadlet 최초 구성
+
+기존 구성을 유지한 상태에서 이 변경이 포함된 검토 완료 리비전을 표준 절차로 먼저 배포한다. 이후 같은 리비전·이미지를 사용하여 실험실을 활성화한다. 환경 파일을 준비하고 Quadlet 정의를 설치하는 동안 다른 배포와 호스트 재시작을 중지한다. [배포 및 복구 절차](deployment.md)
+
+1. 배포 계정은 `runtime-env/common.env`의 `DATABASE_URL` 한 줄과 아래 다섯 줄을 권한 0600의 `runtime-env/lab.env.next`에 저장한다. DB 연결값은 기존 값을 그대로 복사한다. 운영 API와 평가 Worker가 같은 파일을 사용하며 검사기가 두 DB 연결값의 일치를 확인한다.
+
+   ```dotenv
+   LAB_ENABLED=true
+   LAB_MODEL_PROVIDER=transformers-generate
+   LAB_MODEL=Qwen3-4B-Instruct-2507-Q4_K_M
+   LAB_MODEL_URL=http://127.0.0.1:18088
+   LAB_CONCURRENCY=1
+   ```
+
+2. 설치된 API의 불변 이미지와 호스트의 기존 구조 설정(NAS 경로·CA·API 포트 등)을 사용하여 `LAB_RUNTIME_ENABLED=true bash "${DEPLOY_DIR}/quadlet/render.sh" "$stage/units"`로 새 디렉터리에 렌더링한다. `API_IMAGE`는 `podman inspect gp-api --format '{{.ImageName}}'`으로 확인한다. 기존 정의와 대조하여 변경 대상이 `gp-api.container`, `gp-lab-tunnel.container`, `gp-worker-benchmark.container` 세 개임을 확인한다. 기존 정의와 환경을 비공개 디렉터리에 보관한다.
+3. 위 세 정의를 기존 Quadlet 디렉터리에 권한 0600으로 설치한다. 준비한 `lab.env.next`를 같은 디렉터리 내 최종 이름 `runtime-env/lab.env`로 바꾸고 `systemctl --user daemon-reload`를 실행한다. 배포 스크립트는 이 파일의 존재로 실험실 구성을 선택한다. 동일한 배포 SHA·digest를 지정한 `deploy.sh release-artifact-preflight phase2`로 새 정의, SSH 연결, 모델 ID를 확인한다.
+4. 최초 구성 시에는 같은 검증된 digest의 `gp-lab-tunnel.service`와 `gp-worker-benchmark.service`를 순서대로 시작한다. `podman exec gp-worker-benchmark node dist/benchmark-model-health.js`로 전달 경로를 확인한다. 이 순서로 기동하면 배포 전 복구 기록에도 두 서비스가 포함된다. 이후 같은 SHA의 표준 `Deploy Release`에서 API가 새 환경을 읽고 터널과 Worker도 함께 교체된다.
+5. 릴리스 사전 검사는 현재 Pod에서 전용 키·호스트 키·4B 모델 ID와 토큰 한도를 확인한다. 배포는 터널과 Worker를 중지·백업·재기동·이미지 검증 대상에 포함한다. Web 게시 전과 최종 점검 시 API와 평가 Worker 각각에서 모델 상태를 확인한다. 마이그레이션 시도 이후의 장애는 배포 절차의 전진 수정 또는 데이터 복원 지침을 따른다.
+
+### 인증 사용자 검증
+
+관리자 또는 베타 계정으로 `/lab/term-origins`에 접속한다. 모델 상태가 사용 가능이면 닉네임 JSONL 500행을 등록하고 검색 없음·온도 0·출력 한도 256으로 1건과 10건을 차례로 실행한다. 완료 건수, 실패 건수, 케이스 ID와 내보낸 JSON을 확인한 뒤 500건 평가로 확대한다. 실제 계정 권한과 운영 실행 ID를 배포 기록에 남긴다. 결과를 검토할 때는 일반 표현, 문맥에 따른 비하 표현, 명시적 욕설의 오탐·누락·판단 보류를 구분한다.

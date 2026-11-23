@@ -48,6 +48,25 @@ function fixture(envName = 'common.env') {
   setDefinition: value => { definition = value; }, setReload: value => { reload = value; }, setEffective: value => { effective = value; }, setHealthy: value => { healthy = value; }, setFailure: value => { failure = value; },
   cleanup: () => rmSync(deployDir, { recursive: true, force: true }) };
 }
+test('lab capture covers both units and detects changed SSH trust before recovery', async () => {
+ const f = fixture();
+ try {
+  const keys = join(f.deployDir, 'runtime-env/lab-ssh');
+  mkdirSync(keys, { recursive: true });
+  for (const name of ['identity', 'known_hosts']) writeFileSync(join(keys, name), 'fixture');
+  for (const name of ['gp-lab-tunnel', 'gp-worker-benchmark']) {
+   writeFileSync(join(f.quadletDir, name + '.container'), `Image=${imageName}\n`);
+   f.containers.set(name, { ...f.containers.get('gp-api'), Name: name });
+  }
+  await runRecovery('capture', runKey, f.options);
+  f.containers.clear();
+  await runRecovery('recover', runKey, f.options);
+  assert.ok(f.containers.has('gp-worker-benchmark'));
+  assert.ok(f.containers.has('gp-lab-tunnel'));
+  writeFileSync(join(keys, 'known_hosts'), 'rotated fixture');
+  await assert.rejects(runRecovery('recover', runKey, f.options), /definitions changed/);
+ } finally { f.cleanup(); }
+});
 test('SQL attempt, missing previous web, and absent API fail before runtime starts', () => {
  const state = { version: 2, quadletDir: '/fixture', definitionHash: 'hash', containers: [{ name: 'gp-api', image: 'd'.repeat(64), imageName }] };
  assert.equal(recoveryDecision(state, false, true), 'restart');

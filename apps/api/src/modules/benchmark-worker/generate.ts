@@ -43,6 +43,7 @@ export function generatePrompt(
 			',',
 		'Then include originSummary (text), earliestAttestation (text/null), controversySummary (text), controversyScore (integer 0–100/null), controversyReason (text), originConfidence (0–1), sourceIds (array), uncertainties (array of short strings), abstained (boolean). Close the object.',
 		allowedCitations,
+		...(item.testCase.context ? ['Quoted context: ' + JSON.stringify(item.testCase.context)] : []),
 		'Evidence: ' + JSON.stringify(sources),
 	].join('\n\n');
 }

@@ -55,6 +55,7 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   const [systemPrompt, setPrompt] = useState('닉네임에서 복원 가능한 원문과 변형 규칙을 찾고, 은어·모욕·논란성 용례를 근거와 함께 설명하세요. 가능한 일반적 해석도 고려하고, 출처가 부족하거나 복원이 불분명하면 판단을 보류하세요. 사용자 의도나 소속을 단정하지 마세요. 점수는 추가 검토 필요성을 나타냅니다.');
   const limits = status.generationLimits;
   const outputLimit = limits?.maxOutputTokens ?? 4096;
+  const searchUnavailable = status.searchStatus === 'unavailable';
   const effectiveMode = status.toolSupport === 'unsupported' && searchMode === 'model_tool_call' ? 'no_search' : searchMode;
   const dataset = datasetsList.find(item => item.id === datasetId) ?? datasetsList[0];
   function selectDataset(id: string) { setDatasetId(id); setSelected([]); }
@@ -114,15 +115,15 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
       <div className="lab-grid lab-grid--settings">
         <SelectField label="검색 모드" value={effectiveMode} onChange={e => setMode(e.target.value as LabSearchMode)}>
           <option value="no_search">검색 없이 분석</option>
-          <option value="backend_retrieval">Worker 선검색</option>
-          <option value="model_tool_call" disabled={status.toolSupport === 'unsupported'}>모델 도구 호출</option>
+          <option value="backend_retrieval" disabled={searchUnavailable}>Worker 선검색</option>
+          <option value="model_tool_call" disabled={searchUnavailable || status.toolSupport === 'unsupported'}>모델 도구 호출</option>
         </SelectField>
         <TextField type="number" label="Temperature" min={0} max={2} step="any" required disabled={!!limits} value={limits?.fixedTemperature ?? temperature} onChange={e => setTemperature(e.target.value)} />
         <TextField type="number" label="최대 출력 토큰" min={128} max={outputLimit} step={1} required value={maxTokens} onChange={e => setMaxTokens(e.target.value)} />
       </div>
       <LabError error={create.error} />
       <div className="lab-actions">
-        <Button type="submit" disabled={!dataset || !status.model || !systemPrompt.trim() || upload.isPending || create.isPending || (selected.length > 0 && selected.length !== size)}>
+        <Button type="submit" disabled={!dataset || !status.model || (effectiveMode !== 'no_search' && searchUnavailable) || !systemPrompt.trim() || upload.isPending || create.isPending || (selected.length > 0 && selected.length !== size)}>
           {create.isPending ? '요청 중…' : `${size}개 평가 실행`}
         </Button>
         {selected.length > 0 && selected.length !== size && <span>직접 선택하려면 {size - selected.length}개를 더 선택하세요.</span>}

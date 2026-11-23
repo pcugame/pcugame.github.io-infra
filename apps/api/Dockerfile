@@ -57,11 +57,12 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg poppler-utils wget openssl && \
+    apt-get install -y --no-install-recommends ffmpeg poppler-utils wget openssl openssh-client && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --system --gid 1001 appgroup && \
     useradd --system --uid 1001 --gid appgroup --no-create-home --shell /usr/sbin/nologin appuser
 
+COPY apps/api/scripts/lab-model-ssh.conf /etc/ssh/pcu-lab.conf
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/packages/contracts ./packages/contracts

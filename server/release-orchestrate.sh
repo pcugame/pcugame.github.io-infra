@@ -17,7 +17,9 @@ deploy() { bash "${DEPLOY_DIR}/deploy.sh" "$@"; }
 login() { printf '%s' "${GHCR_TOKEN:?}" | podman login ghcr.io -u "${GHCR_USERNAME:?}" --password-stdin; }
 health() {
   # API smoke inside deploy.sh precedes workers. This gate checks the complete runtime.
-  for name in gp-api gp-worker-game-validation gp-worker-webgl gp-worker-video gp-worker-image gp-worker-export gp-worker-project-publication; do
+  local containers name client
+  containers="$(deploy runtime-containers)"
+  while IFS= read -r name; do
     [[ "$(podman inspect --format '{{.State.Status}}' "$name")" == running ]]
     [[ "$(systemctl --user is-active "${name}.service")" == active ]]
     deployed_id="$(podman inspect "$name" --format '{{.Image}}')"
@@ -25,7 +27,12 @@ health() {
     actual_digest="$(podman image inspect "$deployed_id" --format '{{.Digest}}')"
     [ "$actual_source" = "$RELEASE_SOURCE_SHA" ]
     [ "$actual_digest" = "${FINAL_IMAGE##*@}" ]
-  done
+    if [[ "$name" == gp-worker-benchmark ]]; then
+      for client in gp-api gp-worker-benchmark; do
+        podman exec "$client" node dist/benchmark-model-health.js
+      done
+    fi
+  done <<< "$containers"
   podman exec gp-api wget -qO- http://localhost:4000/api/health | grep -q '"ok":true'
 }
 final_smoke() {
