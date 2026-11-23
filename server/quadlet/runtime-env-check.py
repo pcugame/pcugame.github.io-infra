@@ -14,6 +14,7 @@ APP_NAMES = ('gp-api', 'gp-worker-game-validation', 'gp-worker-webgl',
              'gp-worker-video', 'gp-worker-image', 'gp-worker-export',
              'gp-worker-project-publication')
 NAMES = APP_NAMES + ('gp-postgres',)
+LAB_NAMES = ('gp-lab-tunnel', 'gp-worker-benchmark')
 RESERVED = {'NODE_ENV', 'PORT', 'NAS_EXPORT_ROOT', 'NODE_EXTRA_CA_CERTS'}
 # Fixed application key inventory: tests verify schema/direct-read coverage.
 # The checker runs from deployment scripts without requiring application sources.
@@ -61,8 +62,8 @@ def reject_constant(value):
     raise ValueError()
 
 
-def inspect_envs(document):
-    if not isinstance(document, list) or len(document) != len(NAMES):
+def inspect_envs(document, names=NAMES):
+    if not isinstance(document, list) or len(document) != len(names):
         raise ValueError()
     result = {}
     for item in document:
@@ -71,7 +72,7 @@ def inspect_envs(document):
         name = item.get('Name')
         if isinstance(name, str) and name.startswith('/'):
             name = name[1:]
-        if name not in NAMES or name in result:
+        if name not in names or name in result:
             raise ValueError()
         state, config = item.get('State'), item.get('Config')
         if not isinstance(state, dict) or state.get('Running') is not True or not isinstance(config, dict):
@@ -119,12 +120,17 @@ def postgres_loopback_equivalent(expected, actual):
 
 
 def compare(scopes, actual, nas_root, garage_ca):
-    common, api, postgres = scopes
+    common, api, postgres = scopes[:3]
+    lab = scopes[3] if len(scopes) == 4 else {}
     rows, matched = [], True
-    for name in NAMES:
+    for name in actual:
         expected = dict(postgres) if name == 'gp-postgres' else common | {'NODE_ENV': 'production'}
+        if name == 'gp-lab-tunnel':
+            expected = {'NODE_ENV': 'production'}
+        if name == 'gp-worker-benchmark':
+            expected = lab | {'NODE_ENV': 'production'}
         if name == 'gp-api':
-            expected.update(api | {'PORT': '4000'})
+            expected.update(api | lab | {'PORT': '4000'})
         if name == 'gp-worker-export':
             expected['NAS_EXPORT_ROOT'] = nas_root
         if name in APP_NAMES and garage_ca:
@@ -154,14 +160,19 @@ def main():
     parser.add_argument('common')
     parser.add_argument('api')
     parser.add_argument('postgres')
+    parser.add_argument('--lab', help='include the private 4B runtime environment and units')
     parser.add_argument('--nas-export-root', default='/nas')
     parser.add_argument('--garage-ca', action='store_true')
     options = parser.parse_args()
     root = options.nas_export_root
     if not root.startswith('/') or any(c in root for c in ':\\\n\r\0') or root != root.strip():
         raise ValueError()
-    scopes = RUNTIME['read_runtime_files']((options.common, options.api, options.postgres), explicit=True)
-    actual = inspect_envs(json.load(sys.stdin, object_pairs_hook=unique_object, parse_constant=reject_constant))
+    files = [options.common, options.api, options.postgres]
+    if options.lab:
+        files.append(options.lab)
+    scopes = RUNTIME['read_runtime_files'](files, explicit=True)
+    actual = inspect_envs(json.load(sys.stdin, object_pairs_hook=unique_object, parse_constant=reject_constant),
+                          NAMES + LAB_NAMES if options.lab else NAMES)
     rows, matched = compare(scopes, actual, root, options.garage_ca)
     print('\n'.join(rows))
     print('DATABASE_URL comparison is structural only; database connectivity is unverified')

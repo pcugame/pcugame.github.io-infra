@@ -21,7 +21,7 @@ PG_VOLUME="gp_pg_data"
 API_BIND_HOST="${API_BIND_HOST:-127.0.0.1}"
 HEALTHCHECK_TIMEOUT=90  # seconds
 CUTOVER_STATE_DIR="${CUTOVER_STATE_DIR:-${DEPLOY_DIR}/cutover-state}"
-RUNTIME_CONTAINERS=(
+BASE_CONTAINERS=(
   "$API_CONTAINER" "$GAME_WORKER_CONTAINER" "$WEBGL_WORKER_CONTAINER"
   "$VIDEO_WORKER_CONTAINER" "$IMAGE_WORKER_CONTAINER" "$EXPORT_WORKER_CONTAINER"
   "$PROJECT_PUBLICATION_WORKER_CONTAINER"
@@ -30,8 +30,8 @@ RUNTIME_CONTAINERS=(
 QUADLET_HELPERS="${DEPLOY_SCRIPT_DIR}/quadlet"
 POD_UNIT=graduationproject-pod.service
 PG_UNIT=gp-postgres.service
-APP_UNITS=()
-for ctr in "${RUNTIME_CONTAINERS[@]}"; do APP_UNITS+=("${ctr}.service"); done
+RUNTIME_CONTAINERS=("${BASE_CONTAINERS[@]}")
+APP_UNITS=("${RUNTIME_CONTAINERS[@]/%/.service}")
 
 load_env() {
   if [[ ! -f "$ENV_FILE" ]]; then
@@ -54,8 +54,18 @@ load_runtime_env() {
   APP_RUNTIME_ENV_FILE="${APP_RUNTIME_ENV_FILE:-${DEPLOY_DIR}/runtime-env/common.env}"
   API_RUNTIME_ENV_FILE="${API_RUNTIME_ENV_FILE:-${DEPLOY_DIR}/runtime-env/api.env}"
   POSTGRES_RUNTIME_ENV_FILE="${POSTGRES_RUNTIME_ENV_FILE:-${DEPLOY_DIR}/runtime-env/postgres.env}"
-  local assignments
-  assignments="$(python3 "$QUADLET_HELPERS/runtime-env.py" "$APP_RUNTIME_ENV_FILE" "$API_RUNTIME_ENV_FILE" "$POSTGRES_RUNTIME_ENV_FILE")" || return 1
+  local assignments lab_env="${DEPLOY_DIR}/runtime-env/lab.env"
+  local files=("$APP_RUNTIME_ENV_FILE" "$API_RUNTIME_ENV_FILE" "$POSTGRES_RUNTIME_ENV_FILE")
+  RUNTIME_CONTAINERS=("${BASE_CONTAINERS[@]}")
+  export LAB_RUNTIME_ENABLED=false
+  if [[ -e "$lab_env" || -L "$lab_env" ]]; then
+    [[ -f "$lab_env" && ! -L "$lab_env" ]] || return 1
+    LAB_RUNTIME_ENABLED=true
+    files+=("$lab_env")
+    RUNTIME_CONTAINERS+=(gp-lab-tunnel gp-worker-benchmark)
+  fi
+  APP_UNITS=("${RUNTIME_CONTAINERS[@]/%/.service}")
+  assignments="$(python3 "$QUADLET_HELPERS/runtime-env.py" "${files[@]}")" || return 1
   eval "$assignments"
 }
 

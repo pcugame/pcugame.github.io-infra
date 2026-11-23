@@ -9,6 +9,11 @@ on:
         type: choice
         default: release
         options: [release, snapshot, forward-fix]
+      activate_lab:
+        description: 'First lab activation using staged lab.env.next on the already deployed source and image'
+        required: false
+        type: boolean
+        default: false
       final_api_image:
         description: 'Immutable @sha256 API/worker image (required for forward fix)'
         required: false
@@ -216,6 +221,7 @@ jobs:
         if: ${{ inputs.operation == 'release' }}
         uses: appleboy/ssh-action@v1.0.3
         env:
+          ACTIVATE_LAB: ${{ inputs.activate_lab }}
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
@@ -230,7 +236,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
           script_stop: true
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
+          envs: ACTIVATE_LAB,GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
           command_timeout: 60m
           script: bash "${DEPLOY_DIR}/release-orchestrate.sh" preflight
 
@@ -238,6 +244,7 @@ jobs:
         if: ${{ inputs.operation == 'release' }}
         uses: appleboy/ssh-action@v1.0.3
         env:
+          ACTIVATE_LAB: ${{ inputs.activate_lab }}
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
@@ -252,7 +259,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
           script_stop: true
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
+          envs: ACTIVATE_LAB,GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
           command_timeout: 60m
           script: bash "${DEPLOY_DIR}/release-orchestrate.sh" backup
 

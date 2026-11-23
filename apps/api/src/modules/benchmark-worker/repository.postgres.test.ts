@@ -80,6 +80,24 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 				data: { leaseUntil: new Date(0) },
 			});
 		}
+		it('keeps a 4B case queued while the model tunnel is unavailable', async () => {
+			const id = await queued(1);
+			vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unavailable')));
+			const config = readLabConfig({
+				LAB_ENABLED: 'true',
+				LAB_MODEL_PROVIDER: 'transformers-generate',
+				LAB_MODEL: 'test-4b',
+				LAB_MODEL_URL: 'http://model.test',
+			});
+			expect(await processNextCase(db, config)).toBe(false);
+			expect(await db.labResult.findFirstOrThrow({ where: { runId: id } })).toMatchObject({
+				status: 'PENDING', attempts: 0,
+			});
+			const claim = await next();
+			expect(claim.item.testCase.context).toBe('context');
+			await finishCase(db, claim, failure);
+		});
+
 		it('limits concurrent claims globally, fences old holders and completes concurrent results exactly once', async () => {
 			const runId = await queued(2);
 			const claims = await Promise.all([claimCase(db, 1), claimCase(db, 1), claimCase(db, 1)]);

@@ -115,6 +115,25 @@ class RuntimeCheck(unittest.TestCase):
         self.write_files()
         self.assertEqual(self.run_check().returncode, 2)
 
+    def test_lab_database_scope_and_model_identity(self):
+        lab = RUNTIME['LAB_PROFILE'] | {'DATABASE_URL': self.scopes[0]['DATABASE_URL']}
+        file = self.root / 'lab.env'
+        file.write_text(''.join(f'{key}={value}\n' for key, value in lab.items()))
+        for key, value in lab.items():
+            self.change(0, key, value)
+        for name in CHECK['LAB_NAMES']:
+            values = {'NODE_ENV': 'production'}
+            if name == 'gp-worker-benchmark':
+                values.update(lab)
+            self.document.append({'Name': name, 'State': {'Running': True},
+                                  'Config': {'Env': [key + '=' + value for key, value in values.items()]}})
+        options = ['--lab', str(file)]
+        self.assertEqual(self.run_check(options=options).returncode, 0)
+        self.change(1, 'LAB_MODEL', lab['LAB_MODEL'])
+        self.assertEqual(self.run_check(options=options).returncode, 1)
+        file.write_text(file.read_text().replace('127.0.0.1:18088', 'other:8088'))
+        self.assertEqual(self.run_check(options=options).returncode, 2)
+
     def test_application_key_inventory_tracks_schema_and_direct_reads(self):
         source = HERE.parents[1] / 'apps' / 'api' / 'src'
         schema = (source / 'config' / 'env.ts').read_text()

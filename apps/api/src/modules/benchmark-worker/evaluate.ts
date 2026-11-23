@@ -19,7 +19,7 @@ export type WorkItem = ChatParameters & {
 	systemPrompt: string;
 	provider: string;
 	searchMode: string;
-	testCase: { id: string; term: string; context: string; language: string };
+	testCase: { id: string; term: string; language: string; context?: string };
 };
 export type Attempt = {
 	sources: LabSource[];
@@ -67,6 +67,9 @@ export async function evaluateCase(
 	toolSupport: ToolSupport,
 	search: SearchProvider = createSearchProvider(config.searchUrl),
 ): Promise<Attempt> {
+	// Project at the provider boundary even when the caller holds a richer persisted case.
+	const { id, term, language, context } = item.testCase;
+	const modelCase = { id, term, language, ...(context ? { context } : {}) };
 	const attempt: Attempt = {
 		sources: [],
 		searchCount: 0,
@@ -137,7 +140,7 @@ export async function evaluateCase(
 			if (toolSupport === 'unsupported') throw new LabFailure('MODEL_TOOLS_UNSUPPORTED');
 			const messages: Message[] = [
 				{ role: 'system', content: item.systemPrompt + '\n\n' + researchRules },
-				{ role: 'user', content: JSON.stringify({ case: item.testCase }) },
+				{ role: 'user', content: JSON.stringify({ case: modelCase }) },
 			];
 			for (let round = 0; round < 3; round++) {
 				const assistant = await generate(messages, 'tools');
@@ -176,7 +179,7 @@ export async function evaluateCase(
 						role: 'system',
 						content: item.systemPrompt + '\n\n' + outputRules + '\nJSON Schema: ' + contractText,
 					},
-					{ role: 'user', content: JSON.stringify({ case: item.testCase, sources: attempt.sources }) },
+					{ role: 'user', content: JSON.stringify({ case: modelCase, sources: attempt.sources }) },
 				];
 		let mode: 'schema' | 'json' | 'prompt' = promptOnly ? 'prompt' : 'schema';
 		for (let pass = 0; pass < 2; pass++) {

@@ -1,0 +1,19 @@
+[Unit]
+Description=Nickname benchmark worker
+After=gp-api.service gp-lab-tunnel.service
+
+[Container]
+Image=@API_IMAGE@
+ContainerName=gp-worker-benchmark
+Pod=graduationproject.pod
+StartWithPod=true
+EnvironmentFile=@LAB_ENV@
+Environment=NODE_ENV=production
+Entrypoint=node
+Exec=dist/benchmark-worker.js
+StopTimeout=15
+
+[Service]
+MemoryMax=512M
+Restart=always
+RestartSec=5

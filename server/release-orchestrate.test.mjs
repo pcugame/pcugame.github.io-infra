@@ -16,6 +16,7 @@ function fixture(t, overrides = {}) {
 set -eu
 printf 'deploy %s\\n' "$*" >> "$EVENTS"
 [[ "$*" != "\${FAIL_STAGE:-}" ]]
+if [[ "$1" == runtime-containers ]]; then printf '%s\\n' gp-api gp-worker-video gp-lab-tunnel gp-worker-benchmark; fi
 `);
   for (const file of ['ip-ban-audit.sh', 'release-db-snapshot.sh']) write(file, `#!/usr/bin/env bash
 set -eu
@@ -38,6 +39,7 @@ case "$*" in
   *image\\ inspect*revision*) if [[ "\${3:-}" == gp-worker-video && "\${FAIL_STAGE:-}" == worker-source ]]; then echo wrong; exit; fi; echo "\${ACTUAL_SOURCE:-$RELEASE_SOURCE_SHA}" ;;
   *image\\ inspect*Digest*) if [[ "\${3:-}" == gp-worker-video && "\${FAIL_STAGE:-}" == worker-digest ]]; then echo wrong; exit; fi; echo "\${ACTUAL_DIGEST:-\${FINAL_IMAGE##*@}}" ;;
   inspect*) echo "$2" ;;
+  exec*benchmark-model-health*) [[ "\${FAIL_STAGE:-}" != lab-model ]] || exit 1 ;;
   exec*) printf 'health checked\\n' >> "$EVENTS"; [[ "\${FAIL_STAGE:-}" != health ]]; echo '{"ok":true}' ;;
   *) exit 1 ;;
 esac
@@ -72,14 +74,26 @@ test('normal orchestration preserves phase order and records only verified final
   const record = readFileSync(join(f.env.DEPLOY_DIR, 'cutover-state', `deployed-${source}.txt`), 'utf8');
   assert.equal(record, `source_sha=${source}\nimage=${f.env.FINAL_IMAGE}\n`);
 });
-for (const stage of ['release-artifact-preflight phase2', 'release-assert phase2', 'release-db-snapshot.sh', 'drain', 'backup release-'+source, 'release-migrate apply-contract', 'up', 'health', 'worker', 'worker-source', 'worker-digest', 'mark-migration']) {
+test('first lab activation requires exact previous release and retains its disabled recovery capture', t => {
+  const f = fixture(t, { ACTIVATE_LAB: 'true' });
+  assert.notEqual(f.run('preflight').status, 0);
+  assert.doesNotMatch(f.events(), /install-first-lab/);
+  const record = join(f.env.DEPLOY_DIR, 'cutover-state', `deployed-${source}.txt`);
+  writeFileSync(record, `source_sha=${source}\nimage=${f.env.FINAL_IMAGE}\n`);
+  assert.equal(f.run('preflight').status, 0);
+  assert.equal(f.run('backup').status, 0);
+  assert.match(f.events(), /deploy install-first-lab[\s\S]+deploy release-artifact-preflight phase2[\s\S]+verify-first-lab[\s\S]+deploy drain/);
+  assert.doesNotMatch(f.events(), /release-recovery capture/);
+});
+
+for (const stage of ['release-artifact-preflight phase2', 'release-assert phase2', 'release-db-snapshot.sh', 'drain', 'backup release-'+source, 'release-migrate apply-contract', 'up', 'health', 'worker', 'worker-source', 'worker-digest', 'lab-model', 'mark-migration']) {
   test(`failure ${stage} prevents publication and final evidence`, t => {
     const f = fixture(t, { FAIL_STAGE: stage });
     assert.notEqual(f.release().status, 0);
     assert.doesNotMatch(f.events(), /publish/);
     assert.equal(f.evidence(), false);
     if (stage === 'mark-migration') assert.doesNotMatch(f.events(), /apply-contract/);
-    if (['release-migrate apply-contract', 'up', 'health', 'worker', 'worker-source', 'worker-digest', 'mark-migration'].includes(stage)) {
+    if (['release-migrate apply-contract', 'up', 'health', 'worker', 'worker-source', 'worker-digest', 'lab-model', 'mark-migration'].includes(stage)) {
       assert.equal(existsSync(f.env.ATTEMPT), true);
       assert.notEqual(f.run('assert-pre-migration').status, 0, 'marker blocks Pages recovery gate');
       assert.notEqual(f.run('recover').status, 0, 'persistent migration attempt forbids recovery');

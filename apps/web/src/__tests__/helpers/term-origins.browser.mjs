@@ -9,6 +9,7 @@ import { createServer } from 'vite';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
 const dataset = fileURLToPath(new URL('../../../../../benchmarks/term-origins/benchmark-500.jsonl', import.meta.url));
+const firstId = JSON.parse((await readFile(dataset, 'utf8')).split('\n')[0]).id;
 const vite = await createServer({
   root: 'apps/web', mode: 'mock',
   server: { host: '127.0.0.1', port: 0, watch: null, hmr: false },
@@ -35,7 +36,7 @@ try {
   await page.getByText('500개 케이스를 검증해 등록했습니다.').waitFor();
 
   await page.getByText('테스트케이스 미리보기', { exact: false }).click();
-  await input('케이스 검색').fill('ko-0001');
+  await input('케이스 검색').fill(firstId);
   await page.locator('.lab-cases label input').first().check();
   await input('시스템 프롬프트').fill('화면 점검용 시스템 프롬프트');
   await input('검색 모드').selectOption('model_tool_call');
@@ -56,12 +57,12 @@ try {
   await results.getByText('1 / 20 페이지 · 총 500개').waitFor();
   await results.getByRole('button', { name: '다음' }).click();
   await results.getByText('2 / 20 페이지 · 총 500개').waitFor();
-  await input('결과 검색').fill('ko-0001');
+  await input('결과 검색').fill(firstId);
   await results.locator('.lab-row summary').first().click();
   await results.getByText('개발용 합성 어원 응답', { exact: true }).waitFor();
 
   await input('비교할 실험').selectOption({ index: 1 });
-  await input('비교 결과 검색').fill('ko-0001');
+  await input('비교 결과 검색').fill(firstId);
   await panel('실험 비교').locator('.lab-row summary').first().click();
   await page.getByRole('heading', { name: '기준 실험', exact: true }).waitFor();
   const download = page.waitForEvent('download');

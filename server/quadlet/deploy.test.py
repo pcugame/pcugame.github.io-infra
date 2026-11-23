@@ -39,6 +39,7 @@ podman() {
       fi
       if [[ "$2" == gp-api ]]; then [[ "${FAIL:-}" != health ]] && echo '{"ok":true}'; fi ;;
     run)
+      if [[ "${*: -2}" == "dist/benchmark-model-health.js --ssh" ]]; then [[ "${FAIL:-}" != labssh ]]; return; fi
       [[ "${FAIL:-}" != schema ]] || return 32
       if [[ "${@: -1}" == apply-contract ]]; then
         [[ "${FAIL:-}" != migration ]] || return 33
@@ -96,7 +97,7 @@ esac
 '''
 
 class Deploy(unittest.TestCase):
-    def run_fixture(self, action='up', failure='', overrides=None, drift=False, missing=False):
+    def run_fixture(self, action='up', failure='', overrides=None, drift=False, missing=False, lab=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             runtime = root / 'runtime-env'
@@ -128,6 +129,18 @@ class Deploy(unittest.TestCase):
             environment = dict(PATH=os.environ['PATH'], HOME=str(root), DEPLOY_DIR=str(root), API_IMAGE=OLD,
                 MIGRATION_IMAGE=IMAGE, RELEASE_SOURCE_SHA='c'*40, FIXTURE=str(root), ACTION=action,
                 FAIL=failure, QUADLET_DIR=str(units), PYTHONDONTWRITEBYTECODE='1')
+            apps = APPS.copy()
+            if lab:
+                apps.extend(('gp-lab-tunnel', 'gp-worker-benchmark'))
+                environment['LAB_RUNTIME_ENABLED'] = 'true'
+                keys = runtime / 'lab-ssh'
+                keys.mkdir()
+                (keys / 'identity').write_text('fixture')
+                if failure != 'labkey':
+                    (keys / 'known_hosts').write_text('fixture')
+                (runtime / 'lab.env').write_text('DATABASE_URL=' + common['DATABASE_URL']
+                    + '\nLAB_ENABLED=true\nLAB_MODEL_PROVIDER=transformers-generate\nLAB_CONCURRENCY=1'
+                    + '\nLAB_MODEL=Qwen3-4B-Instruct-2507-Q4_K_M\nLAB_MODEL_URL=http://127.0.0.1:18088\n')
             result = subprocess.run(['bash', str(HERE / 'render.sh'), str(units)], env=environment, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0)
             if failure == 'quadletdropin': (units / 'container.d').mkdir()
@@ -138,7 +151,7 @@ class Deploy(unittest.TestCase):
                 environment['QUADLET_UNIT_DIRS'] = str(alternate)
             if drift: (units / 'gp-api.container').write_text((units / 'gp-api.container').read_text() + 'Environment=WRONG=true\n')
             if missing: (units / 'gp-worker-image.container').unlink()
-            for name in APPS: (root / name).write_text('running\n')
+            for name in apps: (root / name).write_text('running\n')
             (root / 'log').touch()
             prefix = (HERE.parent / 'deploy.sh').read_text().split('# ── Main ')[0]
             # Source modules from the repository, never operator deployment files.
@@ -160,8 +173,29 @@ class Deploy(unittest.TestCase):
             result = subprocess.run(command, env=environment, capture_output=True, text=True)
             log = (root / 'log').read_text().splitlines()
             marker = (root / 'cutover-state/mutation-drained').exists()
-            images = [(units / f'{name}.container').read_text().split('Image=')[1].splitlines()[0] for name in APPS if (units / f'{name}.container').exists()]
+            images = [(units / f'{name}.container').read_text().split('Image=')[1].splitlines()[0] for name in apps if (units / f'{name}.container').exists()]
             return result, log, marker, images
+
+    def test_missing_key_or_failed_ssh_probe_stops_before_maintenance(self):
+        for failure in ('labkey', 'labssh'):
+            with self.subTest(failure=failure):
+                result, log, _, _ = self.run_fixture('release', failure, lab=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(line.startswith('systemctl --user stop ') for line in log))
+                if failure == 'labssh':
+                    probe = next(line for line in log if line.endswith('dist/benchmark-model-health.js --ssh'))
+                    self.assertNotIn('DATABASE_URL', probe)
+                    self.assertNotIn('--env-file', probe)
+
+    def test_lab_release_drains_and_starts_both_units_with_the_release_digest(self):
+        result, log, _, images = self.run_fixture('release', lab=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stopped = next(line for line in log if line.startswith('systemctl --user stop '))
+        for unit in ('gp-lab-tunnel', 'gp-worker-benchmark'):
+            self.assertIn(unit + '.service', stopped)
+        self.assertLess(log.index('systemctl --user start gp-lab-tunnel.service'),
+                        log.index('systemctl --user start gp-worker-benchmark.service'))
+        self.assertEqual(images, [IMAGE] * 9)
 
     def test_release_success_orders_dump_contract_and_activation(self):
         result, log, marker, images = self.run_fixture('release')

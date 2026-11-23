@@ -18,7 +18,7 @@ export const LabCategorySchema = z.enum([
 	'neutral',
 	'uncertain',
 ]);
-export const LabCaseSchema = z.strictObject({
+const legacyCase = z.strictObject({
 	id: caseId,
 	term: bounded(300),
 	language,
@@ -44,7 +44,19 @@ export const LabCaseSchema = z.strictObject({
 			'Verified references require sources; unverified references cannot carry a verified score.',
 		),
 });
+const nicknameCase = z.strictObject({
+	id: caseId,
+	nickname: bounded(300).refine((s) => s.trim().length > 0 && !/[\r\n\u2028\u2029]/u.test(s)),
+});
+export const LabCaseSchema = z.union([nicknameCase, legacyCase]);
 export type LabCase = z.infer<typeof LabCaseSchema>;
+// Existing snapshots and CSV consumers use these column names.
+export function labCaseFields(row: LabCase) {
+	return 'nickname' in row
+		? { term: row.nickname, language: 'ko', context: '' }
+		: { term: row.term, language: row.language, context: row.context };
+}
+
 export const LAB_JSONL_MAX_BYTES = 4 * 1024 * 1024;
 export const LabUploadSchema = z.strictObject({ name: bounded(120), jsonl: bounded(LAB_JSONL_MAX_BYTES) });
 
@@ -60,6 +72,7 @@ export function parseLabJsonl(raw: string): LabCase[] {
 	const examples = new Set<string>();
 	const categories = { derogatory: 0, historical_conflict: 0, semantic_shift: 0, neutral: 0, uncertain: 0 };
 	const languages = { ko: 0, en: 0, ja: 0, other: 0 };
+	let nicknameCount = 0;
 	const rows = lines.map((line, index) => {
 		let row: LabCase;
 		try {
@@ -68,15 +81,21 @@ export function parseLabJsonl(raw: string): LabCase[] {
 			throw new Error(`Invalid JSONL case on line ${index + 1}`);
 		}
 		const norm = (s: string) => s.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
-		const key = JSON.stringify([norm(row.term), norm(row.context)]);
+		const key = 'nickname' in row ? norm(row.nickname) : JSON.stringify([norm(row.term), norm(row.context)]);
 		if (ids.has(row.id) || examples.has(key)) throw new Error(`Duplicate ID or example on line ${index + 1}`);
 		ids.add(row.id);
 		examples.add(key);
+		if ('nickname' in row) {
+			nicknameCount++;
+			return row;
+		}
 		categories[row.category]++;
 		const lang = row.language.split('-')[0];
 		languages[lang === 'ko' || lang === 'en' || lang === 'ja' ? lang : 'other']++;
 		return row;
 	});
+	if (nicknameCount === rows.length) return rows;
+	if (nicknameCount) throw new Error('Cannot mix nickname and legacy context cases');
 	if (
 		categories.derogatory !== 120 ||
 		categories.historical_conflict !== 100 ||
@@ -88,7 +107,7 @@ export function parseLabJsonl(raw: string): LabCase[] {
 		languages.ja !== 50 ||
 		languages.other !== 50
 	) {
-		throw new Error('Dataset category or language distribution differs from benchmark-500');
+		throw new Error('Invalid legacy dataset category or language distribution');
 	}
 	return rows;
 }
@@ -255,13 +274,14 @@ export function formatLabExport(
 		const safe = /^[\t\r\n]|^\s*[=+@-]/.test(str) ? "'" + str : str;
 		return '"' + safe.replaceAll('"', '""') + '"';
 	}
-	const rows = results.map((r) =>
-		[
+	const rows = results.map((r) => {
+		const { term, language, context } = labCaseFields(r.testCase);
+		return [
 			run.id,
 			r.caseId,
-			r.testCase.term,
-			r.testCase.language,
-			r.testCase.context,
+			term,
+			language,
+			context,
 			r.status,
 			r.output?.controversyScore,
 			r.output?.originConfidence,
@@ -271,7 +291,7 @@ export function formatLabExport(
 			JSON.stringify(r),
 		]
 			.map(cell)
-			.join(','),
-	);
+			.join(',');
+	});
 	return { filename, content: [columns.join(','), ...rows].join('\r\n') + '\r\n' };
 }

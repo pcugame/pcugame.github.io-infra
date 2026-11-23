@@ -54,6 +54,7 @@ Invalid input diagnostics do not echo supplied values.
 | `DEPLOY_DIR` | `/srv/graduationproject_v2` (path prefix only; `.env` is ignored) |
 | `API_BIND_HOST` | `127.0.0.1` |
 | `API_PORT` | `4000`; decimal 1–65535 |
+| `LAB_RUNTIME_ENABLED` | `false`; set to `true` to render the private 4B topology |
 | `NAS_EXPORT_HOST_PATH` | `/mnt/nas/pcu_storage/GraduationGame` |
 | `NAS_EXPORT_PATH` | `/nas` |
 | `S3_TLS_CA_HOST_PATH` | Empty; optional CA bind source |
@@ -134,6 +135,16 @@ the operator files (including `NODE_EXTRA_CA_CERTS` when the CA bind is absent).
 Release/migration, deployment validation, capacity, and cutover settings are not
 long-running container env inputs and remain responsibilities of the established
 release flow.
+
+## Optional 4B nickname lab
+
+The offline renderer selects the lab units with `LAB_RUNTIME_ENABLED=true`.
+The release host selects that same topology when `${DEPLOY_DIR}/runtime-env/lab.env` exists.
+The API and benchmark worker consume that file. Its literal database URL must match
+the common file. The tunnel receives only the SSH identity and pinned host keys.
+For an enabled host include `gp-lab-tunnel gp-worker-benchmark` in the Podman
+inspect input and pass `--lab "${DEPLOY_DIR}/runtime-env/lab.env"` to
+`runtime-env-check.py`. See the [private 4B setup and acceptance procedure](../../docs/operations/term-origin-lab.md).
 
 ## Database addressing and preserved process configuration
 

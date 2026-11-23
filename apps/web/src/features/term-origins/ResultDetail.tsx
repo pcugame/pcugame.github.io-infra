@@ -5,8 +5,8 @@ export function ResultDetail({ item }: { item: LabResult }) {
   const out = item.output;
   const sources = item.sources.filter(source => out?.sourceIds.includes(source.id));
   return <div className="lab-detail">
-    <p>{item.testCase.context}</p>
-    <p className="lab-meta">{item.testCase.id} · {item.testCase.language} · {item.testCase.category}</p>
+    <p>{'nickname' in item.testCase ? item.testCase.nickname : item.testCase.context}</p>
+    <p className="lab-meta">{item.testCase.id}{'category' in item.testCase && ` · ${item.testCase.language} · ${item.testCase.category}`}</p>
     <dl>
       <dt>처리 결과</dt><dd>{resultLabels[item.status]}{item.error && ` · ${item.error}`}</dd>
       <dt>JSON 검증</dt><dd>{item.jsonValid ? '통과' : item.status === 'FAILED' ? '유효한 결과 없음' : '미검증'}</dd>

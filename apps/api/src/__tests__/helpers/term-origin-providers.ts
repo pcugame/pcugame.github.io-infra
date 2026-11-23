@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import type { LabCase } from '@pcu/contracts';
+import assert from 'node:assert/strict';
+import type { WorkItem } from '../../modules/benchmark-worker/evaluate.js';
 
 // This is a fixture for the provider wire protocol. Only this test can start it.
 export function createProviderFixture() {
@@ -23,7 +24,8 @@ export function createProviderFixture() {
 			const parts: Buffer[] = [];
 			for await (const part of request) parts.push(Buffer.from(part));
 			const chat = JSON.parse(Buffer.concat(parts).toString());
-			const research = JSON.parse(chat.messages[1].content) as { case: LabCase; sources?: { id: string }[] };
+			const research = JSON.parse(chat.messages[1].content) as { case: WorkItem['testCase']; sources?: { id: string }[] };
+			assert.deepEqual(Object.keys(research.case).sort(), ['id', 'language', 'term']);
 			const toolCount = chat.messages.filter((m: { role: string }) => m.role === 'tool').length;
 			const tool = toolCount
 				? { name: 'web_open', arguments: '{"sourceId":"S1"}' }

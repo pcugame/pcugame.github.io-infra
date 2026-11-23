@@ -13,6 +13,13 @@ export async function processNextCase(
 	signal?: AbortSignal,
 ): Promise<boolean> {
 	if (!config.enabled || signal?.aborted) return false;
+	let probe = probes.get(config);
+	if (!probe) {
+		probe = createLabStatus(config);
+		probes.set(config, probe);
+	}
+	// An unavailable tunnel must leave queued work available for recovery.
+	if (config.provider === 'transformers-generate' && (await probe()).modelStatus !== 'available') return false;
 	const claim = await claimCase(db, config.concurrency);
 	if (!claim) return false;
 	if (claim === 'reaped') return true;
@@ -33,13 +40,9 @@ export async function processNextCase(
 		controller.abort();
 	})();
 	try {
-		let probe = probes.get(config);
-		if (!probe) {
-			probe = createLabStatus(config);
-			probes.set(config, probe);
-		}
 		const { toolSupport } = await probe();
 		const outcome = await evaluateCase(config, claim.item, workSignal, toolSupport);
+		if (config.provider === 'transformers-generate' && outcome.retryable) probes.delete(config);
 		if (signal?.aborted) {
 			// Leave the interrupted case recoverable even on graceful shutdown.
 			outcome.output = null;

@@ -1,51 +1,38 @@
 {
   "rows": 500,
-  "sha256": "32df43875a9d452341584ecc0d2cf9ab5a98efe5805bcc1ed2cf97fa526acdb6",
-  "bytes": 185579,
-  "languageByCategory": {
-    "ko": {
-      "derogatory": 72,
-      "historical_conflict": 60,
-      "semantic_shift": 60,
-      "neutral": 60,
-      "uncertain": 48
-    },
-    "en": {
-      "derogatory": 24,
-      "historical_conflict": 20,
-      "semantic_shift": 20,
-      "neutral": 20,
-      "uncertain": 16
-    },
-    "ja": {
-      "derogatory": 12,
-      "historical_conflict": 10,
-      "semantic_shift": 10,
-      "neutral": 10,
-      "uncertain": 8
-    },
-    "other": {
-      "derogatory": 12,
-      "historical_conflict": 10,
-      "semantic_shift": 10,
-      "neutral": 10,
-      "uncertain": 8
-    }
+  "inputSha256": "5865faa209205b1088a39ce02b755e67dcc7991d56cf6ef99802fbd2a7dd8888",
+  "labelsSha256": "2e32b524d8bdea0422f0368281dd691a9a2599c17c39ce50e77fdf0a167bbee1",
+  "inputBytes": 20524,
+  "distinctBases": 470,
+  "kind": {
+    "attested": 344,
+    "synthetic": 156
   },
-  "languages": {
-    "ko": 300,
-    "en": 100,
-    "ja": 50,
-    "es": 10,
-    "fr": 10,
-    "de": 9,
-    "zh": 9,
-    "pt": 6,
-    "mul": 6
+  "family": {
+    "community": 102,
+    "gaming": 29,
+    "history": 35,
+    "insult": 109,
+    "politics": 42,
+    "social": 183
   },
-  "sameLanguageContrastTerms": 19,
-  "invented": 40,
-  "underdetermined": 40,
-  "unverifiedReferences": 500,
-  "sourceUrls": 0
+  "method": {
+    "compound": 10,
+    "direct": 338,
+    "initials": 12,
+    "jamo": 9,
+    "jamo_anagram": 8,
+    "kana": 10,
+    "keyboard": 11,
+    "multi": 19,
+    "omission": 9,
+    "romanization": 11,
+    "spacing": 8,
+    "substitution": 24,
+    "syllable_anagram": 18,
+    "symbols": 13
+  },
+  "distinctSourceUrls": 311,
+  "syntheticWithBaseSource": 156,
+  "checkedPermutations": 41
 }

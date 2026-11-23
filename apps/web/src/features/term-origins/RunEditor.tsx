@@ -18,7 +18,7 @@ function DatasetCases({ dataset, size, selected, change }: {
   });
   return <details className="lab-preview">
     <summary>테스트케이스 미리보기 · {dataset.count}개</summary>
-    <TextField type="search" maxLength={160} label="케이스 검색" placeholder="어구, 문맥 또는 케이스 ID" value={q} onChange={e => { setQ(e.target.value); setPage(1); }} />
+    <TextField type="search" maxLength={160} label="케이스 검색" placeholder="닉네임 또는 케이스 ID" value={q} onChange={e => { setQ(e.target.value); setPage(1); }} />
     <p>직접 선택한 케이스가 없으면 파일 순서대로 {size}개를 실행합니다.</p>
     <div className="lab-actions"><strong>직접 선택 {selected.length} / {size}개</strong>
       {!!selected.length && <Button size="small" variant="secondary" onClick={() => change([])}>선택 해제</Button>}
@@ -29,7 +29,8 @@ function DatasetCases({ dataset, size, selected, change }: {
         <label><input type="checkbox" checked={selected.includes(item.id)}
           disabled={selected.length >= size && !selected.includes(item.id)} onChange={e =>
             change(e.target.checked ? [...selected, item.id] : selected.filter(id => id !== item.id))} />
-          <span><small>{item.id} · {item.language} · {item.category}</small><strong>{item.term}</strong><span>{item.context}</span></span>
+          <span><small>{item.id}{'category' in item && ` · ${item.language} · ${item.category}`}</small>
+            <strong>{'nickname' in item ? item.nickname : item.term}</strong>{'context' in item && <span>{item.context}</span>}</span>
         </label>
       </li>)}</ul>
       <Pager page={page} change={setPage} total={cases.data.total} />
@@ -51,9 +52,10 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   const [searchMode, setMode] = useState<LabSearchMode>('no_search');
   const [temperature, setTemperature] = useState('0.2');
   const [maxTokens, setMaxTokens] = useState(String(Math.min(1024, status.generationLimits?.maxOutputTokens ?? 4096)));
-  const [systemPrompt, setPrompt] = useState('주어진 어구가 이 문맥에서 어떻게 쓰였는지 분석하세요. 어원, 사회적 논란, 근거를 구분하고 불확실한 내용은 명시하세요.');
+  const [systemPrompt, setPrompt] = useState('닉네임에서 복원 가능한 원문과 변형 규칙을 찾고, 은어·모욕·논란성 용례를 근거와 함께 설명하세요. 가능한 일반적 해석도 고려하고, 출처가 부족하거나 복원이 불분명하면 판단을 보류하세요. 사용자 의도나 소속을 단정하지 마세요. 점수는 추가 검토 필요성을 나타냅니다.');
   const limits = status.generationLimits;
   const outputLimit = limits?.maxOutputTokens ?? 4096;
+  const searchUnavailable = status.searchStatus === 'unavailable';
   const effectiveMode = status.toolSupport === 'unsupported' && searchMode === 'model_tool_call' ? 'no_search' : searchMode;
   const dataset = datasetsList.find(item => item.id === datasetId) ?? datasetsList[0];
   function selectDataset(id: string) { setDatasetId(id); setSelected([]); }
@@ -113,15 +115,15 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
       <div className="lab-grid lab-grid--settings">
         <SelectField label="검색 모드" value={effectiveMode} onChange={e => setMode(e.target.value as LabSearchMode)}>
           <option value="no_search">검색 없이 분석</option>
-          <option value="backend_retrieval">Worker 선검색</option>
-          <option value="model_tool_call" disabled={status.toolSupport === 'unsupported'}>모델 도구 호출</option>
+          <option value="backend_retrieval" disabled={searchUnavailable}>Worker 선검색</option>
+          <option value="model_tool_call" disabled={searchUnavailable || status.toolSupport === 'unsupported'}>모델 도구 호출</option>
         </SelectField>
         <TextField type="number" label="Temperature" min={0} max={2} step="any" required disabled={!!limits} value={limits?.fixedTemperature ?? temperature} onChange={e => setTemperature(e.target.value)} />
         <TextField type="number" label="최대 출력 토큰" min={128} max={outputLimit} step={1} required value={maxTokens} onChange={e => setMaxTokens(e.target.value)} />
       </div>
       <LabError error={create.error} />
       <div className="lab-actions">
-        <Button type="submit" disabled={!dataset || !status.model || !systemPrompt.trim() || upload.isPending || create.isPending || (selected.length > 0 && selected.length !== size)}>
+        <Button type="submit" disabled={!dataset || !status.model || (effectiveMode !== 'no_search' && searchUnavailable) || !systemPrompt.trim() || upload.isPending || create.isPending || (selected.length > 0 && selected.length !== size)}>
           {create.isPending ? '요청 중…' : `${size}개 평가 실행`}
         </Button>
         {selected.length > 0 && selected.length !== size && <span>직접 선택하려면 {size - selected.length}개를 더 선택하세요.</span>}
