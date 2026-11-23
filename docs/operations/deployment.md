@@ -44,6 +44,7 @@ GitHub Actions에서 **Deploy Release**를 선택하고 다음과 같이 실행�
 
 - Branch: `master`
 - `operation`: `release`
+- `activate_lab`은 기본값 `false`를 사용한다. 최초 활성화는 비활성 배포 성공 후 같은 SHA·digest의 두 번째 실행에서만 선택한다. [최초 구성과 복구](term-origin-lab.md#배포-환경과-quadlet-최초-구성)
 - `final_api_image`: 비워 둔다.
 - `forward_fix_acknowledgement`: 비워 둔다.
 

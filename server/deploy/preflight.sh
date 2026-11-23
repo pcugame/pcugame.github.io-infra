@@ -264,6 +264,20 @@ validate_release_artifacts() {
   validate_release_entries
 }
 
+do_install_first_lab() (
+  load_env
+  require_immutable_release_images
+  load_runtime_env
+  [[ "$LAB_RUNTIME_ENABLED" == false ]] || { echo "First lab activation requires the disabled runtime" >&2; exit 1; }
+  assert_quadlet_adopted
+  python3 "$QUADLET_HELPERS/runtime-env.py" "$APP_RUNTIME_ENV_FILE" "$API_RUNTIME_ENV_FILE" "$POSTGRES_RUNTIME_ENV_FILE" "${DEPLOY_DIR}/runtime-env/lab.env.next" >/dev/null
+  local stage
+  stage=$(mktemp -d)
+  trap 'rm -rf -- "$stage"' EXIT
+  LAB_RUNTIME_ENABLED=true bash "$QUADLET_HELPERS/render.sh" "$stage/units"
+  QUADLET_DIR="$QUADLET_DIR" node "${DEPLOY_DIR}/release-recovery.mjs" install-first-lab "${RELEASE_RUN_KEY:?}" "$stage/units"
+)
+
 do_release_artifact_preflight() {
   local release_schema_phase="${1:-}"
   load_env

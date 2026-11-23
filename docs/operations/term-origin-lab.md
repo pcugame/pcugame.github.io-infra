@@ -61,7 +61,7 @@ Worker는 `GET /health`에서 모델 ID와 토큰 한도, 사용 중 여부를 �
 
 `gp-lab-tunnel`은 운영 Pod의 `127.0.0.1:18088`에서 `gameserver`의 `127.0.0.1:8088`로 SSH 연결을 전달한다. SSH 목적지는 Pod에서 보이는 `host.containers.internal:5050`이다. API와 `gp-worker-benchmark`는 Pod의 루프백을 공유한다.
 
-1. 서버 관리자는 호스트에서 `qwen-coder.service`의 활성 상태와 `curl -fsS http://127.0.0.1:8088/health`의 모델 ID를 확인한다. 전용 SSH 계정 `pcu-lab-forward`에 공개 키 인증을 설정한다. 해당 계정의 sshd 설정은 `AllowTcpForwarding local`, `PermitOpen 127.0.0.1:8088`, `AllowStreamLocalForwarding no`, `MaxSessions 0`으로 제한한다. 호스트의 SSH 접근 허용 목록에도 이 계정을 반영한다.
+1. 서버 관리자는 호스트에서 `qwen-coder.service`의 활성 상태와 `curl -fsS http://127.0.0.1:8088/health`의 모델 ID를 확인한다. 전용 SSH 계정 `pcu-lab-forward`에 공개 키 인증을 설정한다. 해당 계정의 sshd 설정은 `AllowTcpForwarding local`, `PermitOpen 127.0.0.1:8088`, `AllowStreamLocalForwarding no`, `MaxSessions 0`으로 제한한다. 기존 관리자 세션을 유지한 상태에서 SSH 허용 목록에 이 계정을 추가한다. `sshd -t`와 사용자별 `sshd -T -C`로 구문과 유효 설정을 확인한 뒤 SSH 서비스를 reload한다. 새 연결에서 `song`과 `gh-deploy` 로그인을 각각 확인한다.
 2. 배포 계정은 `${DEPLOY_DIR}/runtime-env/lab-ssh`를 권한 0700으로 만들고 전용 Ed25519 키를 `identity`에 생성한다. 개인 키 권한은 0600으로 유지한다. 서버 관리자는 공개 키를 위 계정의 `authorized_keys`에 등록한다.
 3. 서버 관리자가 호스트에서 확인한 Ed25519 공개 키로 같은 디렉터리에 `known_hosts`를 작성한다. 한 줄 형식은 `[host.containers.internal]:5050 ssh-ed25519 <호스트 공개 키>`이다. 터널과 릴리스 사전 검사가 이 디렉터리를 읽기 전용으로 사용한다.
 
@@ -79,11 +79,17 @@ Worker는 `GET /health`에서 모델 ID와 토큰 한도, 사용 중 여부를 �
    LAB_CONCURRENCY=1
    ```
 
-2. 설치된 API의 불변 이미지와 호스트의 기존 구조 설정(NAS 경로·CA·API 포트 등)을 사용하여 `LAB_RUNTIME_ENABLED=true bash "${DEPLOY_DIR}/quadlet/render.sh" "$stage/units"`로 새 디렉터리에 렌더링한다. `API_IMAGE`는 `podman inspect gp-api --format '{{.ImageName}}'`으로 확인한다. 기존 정의와 대조하여 변경 대상이 `gp-api.container`, `gp-lab-tunnel.container`, `gp-worker-benchmark.container` 세 개임을 확인한다. 기존 정의와 환경을 비공개 디렉터리에 보관한다.
-3. 위 세 정의를 기존 Quadlet 디렉터리에 권한 0600으로 설치한다. 준비한 `lab.env.next`를 같은 디렉터리 내 최종 이름 `runtime-env/lab.env`로 바꾸고 `systemctl --user daemon-reload`를 실행한다. 배포 스크립트는 이 파일의 존재로 실험실 구성을 선택한다. 동일한 배포 SHA·digest를 지정한 `deploy.sh release-artifact-preflight phase2`로 새 정의, SSH 연결, 모델 ID를 확인한다.
-4. 최초 구성 시에는 같은 검증된 digest의 `gp-lab-tunnel.service`와 `gp-worker-benchmark.service`를 순서대로 시작한다. `podman exec gp-worker-benchmark node dist/benchmark-model-health.js`로 전달 경로를 확인한다. 이 순서로 기동하면 배포 전 복구 기록에도 두 서비스가 포함된다. 이후 같은 SHA의 표준 `Deploy Release`에서 API가 새 환경을 읽고 터널과 Worker도 함께 교체된다.
-5. 릴리스 사전 검사는 현재 Pod에서 전용 키·호스트 키·4B 모델 ID와 토큰 한도를 확인한다. 배포는 터널과 Worker를 중지·백업·재기동·이미지 검증 대상에 포함한다. Web 게시 전과 최종 점검 시 API와 평가 Worker 각각에서 모델 상태를 확인한다. 마이그레이션 시도 이후의 장애는 배포 절차의 전진 수정 또는 데이터 복원 지침을 따른다.
+2. 첫 번째 `Deploy Release`는 `operation=release`, `activate_lab=false`로 실행한다. `runtime-env/lab.env`와 두 lab Quadlet이 없는 상태에서 배포 성공을 확인하고 병합 SHA·이미지 digest·실행 링크를 기록한다.
+3. 같은 `master` SHA에서 `operation=release`, `activate_lab=true`로 두 번째 `Deploy Release`를 실행한다. 첫 활성화의 설치와 사전 검사는 이 실행에 포함된다. 이전 배포 기록과 실행 중인 컨테이너의 SHA·digest가 일치해야 진행한다. 배포 계정의 복구 디렉터리 `cutover-state/recovery-<run_id>-<attempt>`에 기존 API 정의와 실행 중인 서비스, `lab.env`와 두 lab 정의의 부재를 기록한다.
+4. 릴리스는 기존 호스트 설정으로 렌더링한 `gp-api.container`, `gp-lab-tunnel.container`, `gp-worker-benchmark.container`와 준비한 환경 파일을 설치하고 user manager를 reload한다. `release-artifact-preflight phase2`가 운영 Pod에서 SSH 키·호스트 키·모델 ID·토큰 한도를 검사한다. 통과하면 터널과 Worker를 순서대로 시작하고 Worker의 모델 연결을 검사한다.
+5. 기존 복구 기록을 유지한 채 DB 백업·앱 중지·migration·앱 기동을 수행한다. Web 게시 전과 최종 점검 시 API와 Worker 각각의 모델 상태와 실행 이미지 digest를 확인한다. 활성화가 완료되면 준비용 `runtime-env/lab.env.next`를 정리한다. 이후 일반 배포는 `activate_lab=false`와 설치된 `lab.env`를 사용한다.
+
+### 최초 활성화 실패 시 복구
+
+- 복구 기록 작성 전 실패하면 기존 API·환경 정의를 유지한다. 설정 설치 중에 실패하거나 사전 검사·DB 백업·앱 중지 이후 장애가 발생하면 해당 실행의 `migration-attempted` 기록을 확인한다.
+- Migration 시도 전에는 표준 릴리스가 기존 Pages 상태를 검증한 뒤 새 Worker와 터널을 중지한다. 기존 API 정의를 복원하고 추가한 두 정의와 `lab.env`를 제거한 후 user manager를 reload한다. 기존 API의 이미지·비활성 설정·상태 응답과 기존 Worker의 실행 상태를 확인한다. 운영자가 설치 파일을 별도로 변경한 경우 복구를 중단하므로 해당 실행의 기록과 실제 파일을 대조한다.
+- `migration-attempted`가 있으면 DB 이력과 실제 schema를 확인하고 전진 수정 또는 데이터 복원 절차를 따른다. [배포 및 복구 절차](deployment.md)
 
 ### 인증 사용자 검증
 
-관리자 또는 베타 계정으로 `/lab/term-origins`에 접속한다. 모델 상태가 사용 가능이면 닉네임 JSONL 500행을 등록하고 검색 없음·온도 0·출력 한도 256으로 1건과 10건을 차례로 실행한다. 완료 건수, 실패 건수, 케이스 ID와 내보낸 JSON을 확인한 뒤 500건 평가로 확대한다. 실제 계정 권한과 운영 실행 ID를 배포 기록에 남긴다. 결과를 검토할 때는 일반 표현, 문맥에 따른 비하 표현, 명시적 욕설의 오탐·누락·판단 보류를 구분한다.
+관리자 또는 베타 계정으로 `/lab/term-origins`에 접속한다. 모델 상태가 사용 가능이면 닉네임 JSONL 500행을 등록하고 검색 없음·온도 0·출력 한도 256으로 1건과 10건을 차례로 실행한다. 두 실행이 각각 1/1건과 10/10건 성공하고 실패가 0건인지 확인한다. 결과 화면의 케이스 ID와 JSON 내보내기의 ID·건수가 일치하면 최초 사용 검증을 완료한다. 배포 기록에 계정 역할, 두 실행 ID, 배포 SHA·이미지 digest와 두 릴리스 링크를 남긴다. 결과를 검토할 때는 일반 표현, 문맥에 따른 비하 표현, 명시적 욕설의 오탐·누락·판단 보류를 구분한다.

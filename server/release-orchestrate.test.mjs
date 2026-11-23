@@ -74,6 +74,18 @@ test('normal orchestration preserves phase order and records only verified final
   const record = readFileSync(join(f.env.DEPLOY_DIR, 'cutover-state', `deployed-${source}.txt`), 'utf8');
   assert.equal(record, `source_sha=${source}\nimage=${f.env.FINAL_IMAGE}\n`);
 });
+test('first lab activation requires exact previous release and retains its disabled recovery capture', t => {
+  const f = fixture(t, { ACTIVATE_LAB: 'true' });
+  assert.notEqual(f.run('preflight').status, 0);
+  assert.doesNotMatch(f.events(), /install-first-lab/);
+  const record = join(f.env.DEPLOY_DIR, 'cutover-state', `deployed-${source}.txt`);
+  writeFileSync(record, `source_sha=${source}\nimage=${f.env.FINAL_IMAGE}\n`);
+  assert.equal(f.run('preflight').status, 0);
+  assert.equal(f.run('backup').status, 0);
+  assert.match(f.events(), /deploy install-first-lab[\s\S]+deploy release-artifact-preflight phase2[\s\S]+verify-first-lab[\s\S]+deploy drain/);
+  assert.doesNotMatch(f.events(), /release-recovery capture/);
+});
+
 for (const stage of ['release-artifact-preflight phase2', 'release-assert phase2', 'release-db-snapshot.sh', 'drain', 'backup release-'+source, 'release-migrate apply-contract', 'up', 'health', 'worker', 'worker-source', 'worker-digest', 'lab-model', 'mark-migration']) {
   test(`failure ${stage} prevents publication and final evidence`, t => {
     const f = fixture(t, { FAIL_STAGE: stage });

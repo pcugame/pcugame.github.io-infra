@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, openSync, closeSync, fsyncSync, unlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, openSync, closeSync, fsyncSync, unlinkSync, mkdtempSync, renameSync, rmdirSync } from 'node:fs';
 import { join, isAbsolute, dirname, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -35,12 +35,15 @@ function migrationAttempted(file) {
   throw error;
  }
 }
+function syncPath(path) {
+ const fd = openSync(path, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
+}
 function save(file, content) {
  writeFileSync(file, content, { mode: 0o600, flag: 'wx' });
- const fd = openSync(file, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
+ syncPath(file);
 }
 // Hash definitions and environment contents; recovery state must never contain secrets.
-function definitions(deployDir, quadletDir, systemctl) {
+function definitions(deployDir, quadletDir, systemctl, acrossReload = false) {
  const names = runtimeNames(quadletDir);
  const units = [...names.map(name => `${name}.service`), 'graduationproject-pod.service', 'gp-postgres.service', 'gp-pg-data-volume.service'];
  const sourceFiles = [...names.map(name => `${name}.container`), 'gp-postgres.container', 'graduationproject.pod', 'gp-pg-data.volume'];
@@ -68,7 +71,10 @@ function definitions(deployDir, quadletDir, systemctl) {
   const effective = systemctl(['--user', 'show', unit, '--property=LoadState,NeedDaemonReload,FragmentPath,SourcePath,DropInPaths,Environment,EnvironmentFiles,Requires,Wants,After,Before,PartOf,BindsTo,Restart']);
   if (!/^LoadState=loaded$/m.test(effective)) throw new Error(`Recovery unit is not loaded: ${unit}`);
   if (!/^NeedDaemonReload=no$/m.test(effective)) throw new Error(`Recovery unit requires daemon reload: ${unit}`);
-  entries.push([`${unit}:effective`, hash(effective)]);
+  // A manager reload can reorder unordered systemd dependency lists.
+  const stable = acrossReload ? effective.replace(/^(Requires|Wants|After|Before|PartOf|BindsTo)=(.*)$/gm,
+   (_, property, units) => property + '=' + units.split(/\s+/).sort().join(' ')) : effective;
+  entries.push([`${unit}:effective`, hash(stable)]);
   collectEnvironment(content, unit);
  }
  if (names.includes('gp-lab-tunnel')) {
@@ -77,9 +83,36 @@ function definitions(deployDir, quadletDir, systemctl) {
  for (const file of [...environmentFiles].sort()) entries.push([file, hash(readFileSync(file))]);
  return hash(JSON.stringify(entries));
 }
+const labUnits = ['gp-api', ...labNames].map(name => name + '.container');
+function labFiles(deployDir, quadletDir) {
+ return Object.fromEntries([...labUnits.map(name => [name, join(quadletDir, name)]),
+  ['lab.env', join(deployDir, 'runtime-env/lab.env')]]);
+}
+function fileHash(path) {
+ const stat = lstatSync(path, { throwIfNoEntry: false });
+ if (!stat) return null;
+ if (!stat.isFile()) throw new Error(`Expected a regular file: ${path}`);
+ return hash(readFileSync(path));
+}
+function replaceFile(path, content) {
+ const temp = mkdtempSync(join(dirname(path), '.lab-install-'));
+ const file = join(temp, 'content');
+ try {
+  save(file, content);
+  renameSync(file, path);
+ } finally {
+  if (existsSync(file)) unlinkSync(file);
+  rmdirSync(temp);
+ }
+}
+function labEnabled(container) {
+ if (!Array.isArray(container?.Config?.Env)) throw new Error('Cannot verify running API lab configuration');
+ return container.Config.Env.includes('LAB_ENABLED=true');
+}
 export async function runRecovery(mode, key, {
  deployDir = process.env.DEPLOY_DIR || '/srv/graduationproject_v2',
  quadletDir = process.env.QUADLET_DIR,
+ stagedUnits,
  webVerified = process.env.WEB_RECOVERY_VERIFIED === 'true',
  podman = args => execFileSync('podman', args, { encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }),
  systemctl = args => execFileSync('systemctl', args, { encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'] }),
@@ -107,7 +140,8 @@ export async function runRecovery(mode, key, {
   const current = inspect(c.name), unitState = active(c.name);
   if (!current || current.Name?.replace(/^\//, '') !== c.name || current.Image !== c.image || current.ImageName !== c.imageName || current.State.Status !== 'running' || !/^ActiveState=active$/m.test(unitState) || !/^SubState=running$/m.test(unitState)) throw new Error(`Previous runtime recovery identity/state failed: ${c.name}`);
  };
- if (mode === 'capture') {
+ const firstLab = mode === 'install-first-lab';
+ if (mode === 'capture' || firstLab) {
   quadletDir = resolveQuadletDir();
   mkdirSync(dir, { mode: 0o700 });
   const containers = [];
@@ -122,16 +156,52 @@ export async function runRecovery(mode, key, {
     containers.push(c);
    }
   }
-  const state = { version: 2, quadletDir, containers, definitionHash: definitions(deployDir, quadletDir, systemctl) };
+  const state = { version: 2, quadletDir, containers, definitionHash: definitions(deployDir, quadletDir, systemctl, firstLab) };
+  const paths = labFiles(deployDir, quadletDir);
+  let incoming;
+  if (firstLab) {
+   if (labEnabled(inspect('gp-api')) || labNames.some(name => inspect(name)?.State.Status === 'running')) throw new Error('Lab is already running');
+   const nextEnv = paths['lab.env'] + '.next';
+   if ((lstatSync(nextEnv).mode & 0o777) !== 0o600 || !fileHash(nextEnv)) throw new Error('Expected private staged lab.env.next');
+   incoming = {};
+   const installed = {};
+   for (const [name, path] of Object.entries(paths)) {
+    const previous = fileHash(path);
+    if (name === 'gp-api.container') {
+     if (!previous) throw new Error('Missing previous API definition');
+     save(join(dir, name), readFileSync(path));
+    } else if (previous !== null) throw new Error(`First activation requires absent ${name}`);
+    incoming[name] = readFileSync(name === 'lab.env' ? nextEnv : join(stagedUnits, name));
+    installed[name] = hash(incoming[name]);
+   }
+   state.firstLab = { installed, previousApi: fileHash(paths['gp-api.container']) };
+  } else if (runtimeNames(quadletDir).includes('gp-lab-tunnel') && !labEnabled(inspect('gp-api'))) {
+   throw new Error('Lab definitions differ from the running API. Use first lab activation.');
+  }
   recoveryDecision(state, false, true);
   save(stateFile, JSON.stringify(state));
+  if (firstLab) {
+   syncPath(dir);
+   syncPath(dirname(dir));
+   for (const [name, path] of Object.entries(paths)) replaceFile(path, incoming[name]);
+   systemctl(['--user', 'daemon-reload']);
+  }
   console.log(`recovery_capture=${containers.length}`);
+  return;
+ }
+ if (mode === 'verify-first-lab') {
+  const state = JSON.parse(readFileSync(stateFile));
+  quadletDir = resolveQuadletDir();
+  if (!state.firstLab || state.quadletDir !== quadletDir || migrationAttempted(attemptFile)) throw new Error('Missing eligible first lab capture');
+  for (const [name, path] of Object.entries(labFiles(deployDir, quadletDir))) {
+   if (fileHash(path) !== state.firstLab.installed[name]) throw new Error(`First lab configuration drift: ${name}`);
+  }
   return;
  }
  if (mode === 'mark-migration') {
   if (!existsSync(stateFile)) throw new Error('Runtime recovery capture is missing');
   save(attemptFile, `${new Date().toISOString()}\n`);
-  const fd = openSync(dir, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
+  syncPath(dir);
   return;
  }
  if (mode === 'assert-pre-migration') {
@@ -145,13 +215,38 @@ export async function runRecovery(mode, key, {
  const state = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, 'utf8')) : null;
  if (recoveryDecision(state, migrationAttempted(attemptFile), webVerified) === 'nothing') { console.log('recovery_not_needed=true'); return; }
  quadletDir = resolveQuadletDir();
- if (state.quadletDir !== quadletDir || state.definitionHash !== definitions(deployDir, quadletDir, systemctl)) throw new Error('Runtime definitions changed since capture; refusing recovery');
+ if (state.quadletDir !== quadletDir) throw new Error('Quadlet directory changed since capture');
  for (const c of state.containers) {
   const current = inspect(c.name);
   if (current && (current.Name?.replace(/^\//, '') !== c.name || current.Image !== c.image || current.ImageName !== c.imageName)) throw new Error(`Container image changed since capture: ${c.name}`);
  }
+ if (state.firstLab) {
+  const paths = labFiles(deployDir, quadletDir);
+  if (existsSync(join(dir, 'recovered'))) { console.log('first_lab_already_recovered=true'); return; }
+  const backup = join(dir, 'gp-api.container');
+  if (fileHash(backup) !== state.firstLab.previousApi) throw new Error('Previous API definition changed since capture');
+  // A setup failure or a retry may leave any subset of the four files installed.
+  for (const [name, path] of Object.entries(paths)) {
+   const previous = name === 'gp-api.container' ? state.firstLab.previousApi : null;
+   const current = fileHash(path);
+   if (current !== previous && current !== state.firstLab.installed[name]) throw new Error(`First lab configuration drift: ${name}`);
+  }
+  for (const name of [...labNames].reverse()) {
+   const load = systemctl(['--user', 'show', name + '.service', '--property=LoadState', '--value']).trim();
+   if (load === 'loaded') systemctl(['--user', 'stop', name + '.service']);
+   else if (load !== 'not-found') throw new Error(`Cannot verify lab unit: ${name}`);
+   if (inspect(name)?.State.Status === 'running') throw new Error(`Lab service still running: ${name}`);
+  }
+  const api = inspect('gp-api');
+  if (api?.State.Status === 'running' && labEnabled(api)) systemctl(['--user', 'stop', 'gp-api.service']);
+  replaceFile(paths['gp-api.container'], readFileSync(backup));
+  for (const [name, path] of Object.entries(paths)) if (name !== 'gp-api.container' && fileHash(path) !== null) unlinkSync(path);
+  systemctl(['--user', 'daemon-reload']);
+ }
+ if (state.definitionHash !== definitions(deployDir, quadletDir, systemctl, Boolean(state.firstLab))) throw new Error('Runtime definitions changed since capture; refusing recovery');
  systemctl(['--user', 'start', 'gp-api.service']);
  verify(state.containers.find(c => c.name === 'gp-api'));
+ if (state.firstLab && labEnabled(inspect('gp-api'))) throw new Error('Recovered API still has lab enabled');
  let healthy = false;
  for (let i = 0; i < 30; i++) {
   try { healthy = JSON.parse(podman(['exec', 'gp-api', 'wget', '-qO-', 'http://localhost:4000/api/health'])).ok === true; } catch { /* bounded startup wait */ }
@@ -167,5 +262,5 @@ export async function runRecovery(mode, key, {
  console.log('previous_runtime_recovered=true');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
- runRecovery(process.argv[2], process.argv[3]).catch(error => { console.error(error.message); process.exitCode = 1; });
+ runRecovery(process.argv[2], process.argv[3], { stagedUnits: process.argv[4] }).catch(error => { console.error(error.message); process.exitCode = 1; });
 }
