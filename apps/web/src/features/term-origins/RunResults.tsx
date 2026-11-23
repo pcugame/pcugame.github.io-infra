@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { labCaseFields, type LabRun } from '@pcu/contracts';
+import { LAB_DIRECT_VERSION, labCaseFields, type LabRun } from '@pcu/contracts';
 import { Button, ProgressBar, SelectField, TextField } from '../../components/ui';
 import { labApi, type LabFormat } from '../../lib/api/lab';
 import { useViewerKey } from '../../lib/query/visibility';
 import { LabError, Pager } from './common';
-import { active, resultLabels, runLabel, runLabels } from './labels';
+import { active, controversyLabel, resultLabels, runLabel, runLabels } from './labels';
 import { ResultDetail } from './ResultDetail';
 
 async function download(id: string, format: LabFormat) {
@@ -70,21 +70,21 @@ export function RunResults({ id }: { id: string }) {
         <Button key={format} variant="secondary" size="small" disabled={save.isPending} onClick={() => save.mutate(format)}>{format.toUpperCase()} 다운로드</Button>)}
     </div>
     <LabError error={action.error || save.error} />
-    <div className="lab-grid">
+    {info.size > 1 && <div className="lab-grid">
       <TextField label="결과 검색" type="search" maxLength={160} placeholder="닉네임 또는 케이스 ID" value={q} onChange={e => { setQ(e.target.value); setPage(1); }} />
       <SelectField label="처리 상태" value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}>
         <option value="">전체</option>
         {Object.entries(resultLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
       </SelectField>
-    </div>
+    </div>}
     <LabError error={rows.error} />
     {rows.isSuccess && <>
-      {rows.data.items.map(item => <details className="lab-row" key={item.caseId}>
-        <summary><span>{item.caseId}</span> <strong>{labCaseFields(item.testCase).term}</strong> <small>{resultLabels[item.status]} · {item.output?.controversyScore ?? '—'}점</small></summary>
+      {rows.data.items.map(item => <details className="lab-row" key={item.caseId} open={info.datasetVersion === LAB_DIRECT_VERSION && !active(info)}>
+        <summary>{info.datasetVersion !== LAB_DIRECT_VERSION && <span>{item.caseId}</span>} <strong>{labCaseFields(item.testCase).term}</strong> <small>{resultLabels[item.status]} · {controversyLabel(item)}</small></summary>
         <ResultDetail item={item} />
       </details>)}
       {!rows.data.items.length && <p>조건에 맞는 결과가 없습니다.</p>}
-      <Pager page={page} total={rows.data.total} change={setPage} />
+      {info.size > 1 && <Pager page={page} total={rows.data.total} change={setPage} />}
     </>}
   </>;
 }
@@ -108,15 +108,19 @@ export function RunCompare({ left, runs }: { left: LabRun; runs: LabRun[] }) {
       <option value="">실험 선택</option>{candidates.map(run => <option key={run.id} value={run.id}>{runLabel(run)}</option>)}
     </SelectField>
     {right && <>
+      <details className="lab-metadata"><summary>두 실험의 시스템 프롬프트</summary>
+        <dl><dt>기준 실험</dt><dd>{left.systemPrompt}</dd><dt>비교 실험</dt><dd>{right.systemPrompt}</dd></dl>
+      </details>
       <p>평균 점수 · 기준 {left.stats.meanScore?.toFixed(1) ?? '—'} / 비교 {right.stats.meanScore?.toFixed(1) ?? '—'}</p>
       <TextField type="search" maxLength={160} label="비교 결과 검색" value={q} onChange={e => { setPage(1); setQ(e.target.value); }} />
       <LabError error={compare.error} />
       {compare.isSuccess && <>
         {compare.data.items.map(row => {
           const result = row.left ?? row.right;
-          return <details className="lab-row" key={row.caseId}>
+          return <details className="lab-row" key={row.caseId}
+            open={left.datasetVersion === LAB_DIRECT_VERSION && left.datasetId === right.datasetId && !active(left) && !active(right)}>
             <summary><span>{row.caseId}</span> <strong>{result && labCaseFields(result.testCase).term}</strong>
-              <small>기준 {row.left?.output?.controversyScore ?? '—'} / 비교 {row.right?.output?.controversyScore ?? '—'}</small></summary>
+              <small>기준 {controversyLabel(row.left)} / 비교 {controversyLabel(row.right)}</small></summary>
             <div className="lab-grid">{[row.left, row.right].map((value, i) => <section key={i}>
               <h3>{i === 0 ? '기준 실험' : '비교 실험'}</h3>{value ? <ResultDetail item={value} /> : <p>실행 대상에서 제외됨</p>}
             </section>)}</div>

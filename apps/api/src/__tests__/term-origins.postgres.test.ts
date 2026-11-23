@@ -84,6 +84,22 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 			throw new Error('Worker did not complete the evaluation');
 		}
 
+		function startWorker() {
+			worker = spawn(process.execPath, ['--import', 'tsx', 'src/benchmark-worker.ts'], {
+				cwd: fileURLToPath(new URL('../../', import.meta.url)),
+				stdio: 'inherit',
+				env: { ...process.env, DATABASE_URL: database.url },
+			});
+			workerClosed = once(worker, 'close');
+		}
+
+		async function stopWorker() {
+			if (worker && worker.exitCode === null && worker.signalCode === null) {
+				worker.kill('SIGTERM');
+				await workerClosed;
+			}
+		}
+
 		beforeAll(async () => {
 			database = await createIsolatedMigratedDatabase(process.env.DATABASE_URL!);
 			fake.server.listen(0, '127.0.0.1');
@@ -133,10 +149,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 			cookies.second = google.cookies[0]!.name + '=' + google.cookies[0]!.value;
 		}, 60_000);
 		afterAll(async () => {
-			if (worker && worker.exitCode === null) {
-				worker.kill('SIGTERM');
-				await workerClosed;
-			}
+			await stopWorker();
 			await app?.close();
 			fake.server.closeAllConnections();
 			if (fake.server.listening) await new Promise<void>((resolve) => fake.server.close(() => resolve()));
@@ -210,6 +223,46 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 			expect([403, 404]).toContain((await call('GET', own, 'second')).statusCode);
 		});
 
+		it('compares direct evaluations from an empty beta workspace and keeps snapshots private', async () => {
+			expect(await api('GET', '/datasets')).toEqual([]);
+			const input = { nickname: '계집', systemPrompt: prompt, model: 'fixture-8b', temperature: 0, maxTokens: 256 };
+			const [first, second] = await Promise.all([
+				api('POST', '/runs', 202, input),
+				api('POST', '/runs', 202, { ...input, systemPrompt: 'Inspect modern use separately.' }),
+			]);
+			const other = await api('POST', '/runs', 202, input, 'second');
+			startWorker();
+			try {
+				const firstRun = await done(first.runId, 1);
+				const secondRun = await done(second.runId, 1);
+				expect(firstRun).toMatchObject({ searchMode: 'backend_retrieval', nickname: input.nickname });
+				await api('GET', '/datasets/' + firstRun.datasetId + '/cases', 404);
+				expect(secondRun.datasetId).toBe(firstRun.datasetId);
+				expect(secondRun.promptHash).not.toBe(firstRun.promptHash);
+				const { items, total } = await api('GET', `/compare?left=${first.runId}&right=${second.runId}`);
+				expect(total).toBe(1);
+				for (const result of [items[0].left, items[0].right]) {
+					expect(result).toMatchObject({
+						caseId: items[0].caseId, testCase: { nickname: input.nickname },
+						output: { sourceIds: ['S1'] }, sources: [{ id: 'S1', snippet: 'Synthetic source for the fixture.' }],
+					});
+				}
+				expect((await api('GET', '/runs/' + other.runId, 200, undefined, 'second')).datasetId).not.toBe(firstRun.datasetId);
+				await api('GET', '/runs/' + first.runId + '/results', 404, undefined, 'second');
+				expect(JSON.parse((await api('GET', `/runs/${first.runId}/export?format=jsonl`)).content).caseId).toBe(items[0].caseId);
+				// Historical 4B snapshots can contain both a number and an explicit abstention.
+				const db = database.createClient();
+				await db.labResult.updateMany({ where: { runId: first.runId }, data: {
+					output: { ...items[0].left.output, controversyScore: 0, abstained: true },
+				} });
+				expect((await api('GET', '/runs/' + first.runId)).stats).toEqual({ scored: 0, meanScore: null, abstained: 1 });
+				expect((await api('GET', '/runs/' + first.runId + '/results')).items[0].output.controversyScore).toBe(0);
+				expect(await api('GET', '/datasets', 200, undefined, 'ADMIN')).toEqual([]);
+			} finally {
+				await stopWorker();
+			}
+		}, 30_000);
+
 		it('validates and persists all rows, reuses the snapshot and isolates datasets', async () => {
 			dataset = await readFile(datasetPath, 'utf8');
 			rows = parseLabJsonl(dataset);
@@ -245,12 +298,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 				temperature: 0,
 				maxTokens: 256,
 			});
-			worker = spawn(process.execPath, ['--import', 'tsx', 'src/benchmark-worker.ts'], {
-				cwd: fileURLToPath(new URL('../../', import.meta.url)),
-				stdio: 'inherit',
-				env: { ...process.env, DATABASE_URL: database.url },
-			});
-			workerClosed = once(worker, 'close');
+			startWorker();
 			expect((await done(smoke, 1)).systemPrompt).toBe(prompt);
 			const [result] = (await api('GET', `/runs/${smoke}/results`)).items.map((v: unknown) =>
 				LabResultSchema.parse(v),

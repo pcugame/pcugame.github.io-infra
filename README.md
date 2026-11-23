@@ -29,7 +29,7 @@
 
 ### 어원·사회언어학 평가 실험실
 
-`/lab/term-origins`에서 베타 테스터와 관리자가 한국어 기반 닉네임 500개로 로컬 LLM을 평가한다. 비동기 실행, 프롬프트별 결과 비교, JSON·JSONL·CSV 내보내기를 지원한다. 기본 설정은 비활성이다. [실험실 설정 및 운영 검증](docs/operations/term-origin-lab.md) · [기준 데이터셋](benchmarks/term-origins/benchmark-500.jsonl)
+`/lab/term-origins`에서 베타 테스터와 관리자가 닉네임 하나를 입력해 웹 용례를 검색하고 로컬 LLM의 판정과 인용 근거를 확인한다. 데이터셋 실험에서는 500행 벤치마크를 실행한다. 비동기 실행, 프롬프트별 결과 비교, JSON·JSONL·CSV 내보내기를 지원한다. 기본 설정은 비활성이다. [실험실 설정 및 운영 검증](docs/operations/term-origin-lab.md) · [기준 데이터셋](benchmarks/term-origins/benchmark-500.jsonl)
 
 ## Safari 로그인 안내
 

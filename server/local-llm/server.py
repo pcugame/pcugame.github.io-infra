@@ -49,9 +49,9 @@ class InputError(ValueError):
         self.body = {"error": message, **fields}
 
 
-def generate(prompt, limit):
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]
-    # Count the rendered chat so special tokens and the fixed system prompt use the same budget as inference.
+def generate(prompt, limit, system_prompt=SYSTEM_PROMPT):
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]
+    # Count the rendered chat so special tokens and the system prompt use the same budget as inference.
     rendered = engine_request("/apply-template", {"messages": messages})["prompt"]
     tokens = engine_request("/tokenize", {"content": rendered, "add_special": True, "parse_special": True})["tokens"]
     if len(tokens) > MAX_INPUT:
@@ -103,7 +103,7 @@ class Handler(BaseHTTPRequestHandler):
         alive = self.server.engine.poll() is None
         self.reply(200 if alive else 503, {
             "ok": alive, "model": MODEL, "quantization": "Q4_K_M", "busy": self.server.gate.locked(),
-            "max_input_tokens": MAX_INPUT, "max_output_tokens": MAX_OUTPUT,
+            "supports_system_prompt": True, "max_input_tokens": MAX_INPUT, "max_output_tokens": MAX_OUTPUT,
         })
 
     def do_POST(self):
@@ -114,17 +114,24 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < length <= MAX_BODY:
                 raise ValueError()
             body = json.loads(self.rfile.read(length))
-            prompt = body.get("prompt") if isinstance(body, dict) else None
-            limit = body.get("max_new_tokens", 192) if isinstance(body, dict) else None
+            if not isinstance(body, dict):
+                raise ValueError()
+            prompt = body.get("prompt")
+            system_prompt = body.get("system_prompt", SYSTEM_PROMPT)
+            if not isinstance(system_prompt, str) or not system_prompt.strip():
+                raise InputError("system_prompt must be a nonempty string")
+            limit = body.get("max_new_tokens", 192)
             if not isinstance(prompt, str) or not prompt.strip() or type(limit) is not int or not 1 <= limit <= MAX_OUTPUT:
                 raise ValueError()
+        except InputError as error:
+            return self.reply(400, error.body)
         except (ValueError, RecursionError, TimeoutError):
             return self.reply(400, {"error": "a prompt and max_new_tokens in 1..256 are required (32 KiB body limit)"})
 
         if not self.server.gate.acquire(blocking=False):
             return self.reply(503, {"error": "one generation at a time"})
         try:
-            result = generate(prompt, limit)
+            result = generate(prompt, limit, system_prompt)
             status = Path(f"/proc/{self.server.engine.pid}/status").read_text()
             line = next(line for line in status.splitlines() if line.startswith("VmRSS:"))
             result["rss_mib"] = round(int(line.split()[1]) / 1024, 1)

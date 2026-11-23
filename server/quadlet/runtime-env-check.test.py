@@ -129,6 +129,15 @@ class RuntimeCheck(unittest.TestCase):
                                   'Config': {'Env': [key + '=' + value for key, value in values.items()]}})
         options = ['--lab', str(file)]
         self.assertEqual(self.run_check(options=options).returncode, 0)
+        url = RUNTIME['LAB_SEARCH_URL']
+        file.write_text(file.read_text() + 'LAB_SEARXNG_URL=' + url + '\n')
+        self.change(0, 'LAB_SEARXNG_URL', url)
+        self.change(-1, 'LAB_SEARXNG_URL', url)
+        self.assertEqual(self.run_check(options=options).returncode, 0)
+        with_search = file.read_text()
+        file.write_text(with_search.replace(url, 'http://example.org'))
+        self.assertEqual(self.run_check(options=options).returncode, 2)
+        file.write_text(with_search)
         self.change(1, 'LAB_MODEL', lab['LAB_MODEL'])
         self.assertEqual(self.run_check(options=options).returncode, 1)
         file.write_text(file.read_text().replace('127.0.0.1:18088', 'other:8088'))

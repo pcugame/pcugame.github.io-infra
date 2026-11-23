@@ -32,6 +32,23 @@ try {
   await page.getByRole('heading', { name: '접근 권한이 없습니다' }).waitFor();
   await input('Mock 사용자').selectOption('BETA_TESTER');
   await page.getByText('개발용 모의 진행률', { exact: false }).waitFor();
+  assert.equal(await input('검색 모드').inputValue(), 'backend_retrieval');
+  assert.equal(await input('데이터셋 등록 · JSONL 500개').count(), 0);
+  await input('닉네임').fill('계집');
+  await button('검색 후 평가').click();
+  const directResult = panel('실험 결과').locator('.lab-row[open]');
+  await directResult.getByText('판정 이유').waitFor();
+  const firstRun = await input('저장된 실험').inputValue();
+  await input('시스템 프롬프트').fill('현대 용례를 따로 평가하세요.');
+  await button('검색 후 평가').click();
+  await page.waitForFunction(id => new URLSearchParams(location.search).get('run') !== id, firstRun);
+  await directResult.getByText('판정 이유').waitFor();
+  assert.equal(await input('닉네임').inputValue(), '계집');
+  assert.equal(await input('시스템 프롬프트').inputValue(), '현대 용례를 따로 평가하세요.');
+  await input('비교할 실험').selectOption(firstRun);
+  await panel('실험 비교').getByText('판정 이유', { exact: true }).nth(1).waitFor();
+  await page.getByRole('tab', { name: '데이터셋 실험' }).click();
+  assert.equal(await input('데이터셋').inputValue(), '');
   await input('데이터셋 등록 · JSONL 500개').setInputFiles(dataset);
   await page.getByText('500개 케이스를 검증해 등록했습니다.').waitFor();
 
@@ -86,7 +103,7 @@ try {
   await button('베타 권한 회수').click();
   await button('베타 권한 부여').waitFor();
   assert.deepEqual(errors, []);
-  console.log('Passed mock browser workflow for 1, 10 and 500 cases, including reload, comparison, export and role changes.');
+  console.log('Passed nickname prompt comparison and dataset workflows for 1, 10 and 500 cases, including reload, export and role changes.');
 } finally {
   await browser?.close();
   await vite.close();

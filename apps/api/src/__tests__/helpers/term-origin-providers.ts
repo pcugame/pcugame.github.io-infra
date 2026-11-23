@@ -14,7 +14,7 @@ export function createProviderFixture() {
 			body = {
 				results: [
 					{
-						title: 'Synthetic test excerpt',
+						title: 'Synthetic test excerpt for ' + url.searchParams.get('q'),
 						url: 'https://example.org/test-source',
 						content: 'Synthetic source for the fixture.',
 					},

@@ -1,5 +1,5 @@
 import {
-  LAB_ACTIVE_RUN_LIMIT, LAB_CASE_ATTEMPT_LIMIT, LAB_PAGE_SIZE, LabBetaUserSchema, LabCompareQuerySchema, LabCreateRunSchema, LabExportFormatSchema, LabOutputSchema, LabPageQuerySchema,
+  LAB_ACTIVE_RUN_LIMIT, LAB_DIRECT_VERSION, LAB_CASE_ATTEMPT_LIMIT, LAB_PAGE_SIZE, LabBetaUserSchema, LabCompareQuerySchema, LabCreateRunSchema, LabExportFormatSchema, LabOutputSchema, LabPageQuerySchema,
   LabResultsQuerySchema, LabRoleChangeSchema, LabUploadSchema, formatLabExport, labCaseFields, parseLabJsonl,
   type LabCase, type LabDataset, type LabResult, type LabRun, type LabStatus,
 } from '@pcu/contracts';
@@ -97,7 +97,7 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
   const state = ctx.state.lab ??= { roles: {}, audits: [], datasets: [], runs: [] } as MockLabState;
   const query = Object.fromEntries(new URL(path, 'http://mock.local').searchParams);
   const visible = (record: { ownerId: number }) => record.ownerId === actor.id || actor.role === 'ADMIN';
-  const dataset = (id: string) => state.datasets.find(item => item.info.id === id && visible(item)) ?? missing('Dataset not found');
+  const dataset = (id: string) => state.datasets.find(item => item.info.id === id && item.info.version !== LAB_DIRECT_VERSION && visible(item)) ?? missing('Dataset not found');
   const run = (id: string) => state.runs.find(item => item.info.id === id && visible(item)) ?? missing('Run not found');
   const ownedActive = (ownerId: number) => state.runs.filter(r => r.ownerId === ownerId && ['QUEUED', 'RUNNING'].includes(r.info.status)).length;
   if (pathname === '/api/lab/status') { allowMethod(method, 'GET'); return STATUS; }
@@ -126,7 +126,7 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
     allowMethod(method, 'GET', 'POST');
     if (method === 'GET') {
       const { page } = parseInput(LabPageQuerySchema, query);
-      return pageOf(state.datasets.filter(visible).map(record => record.info), page);
+      return pageOf(state.datasets.filter(d => visible(d) && d.info.version !== LAB_DIRECT_VERSION).map(record => record.info), page);
     }
     const { name, jsonl } = parseInput(LabUploadSchema, bodyObject(options));
     let cases: LabCase[];
@@ -153,14 +153,31 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
     const input = parseInput(LabCreateRunSchema, bodyObject(options));
     if (input.model !== STATUS.model) throw new MockHttpError(400, 'VALIDATION_ERROR', 'Unknown model');
     if (ownedActive(actor.id) >= 3) conflict('Three evaluations are already queued or running');
-    const d = dataset(input.datasetId);
-    const { caseIds, ...settings } = input;
-    const byId = new Map(d.cases.map(c => [c.id, c]));
-    const cases = caseIds ? caseIds.map(id => byId.get(id) ?? missing('Case not found')) : d.cases.slice(0, input.size);
+    let d: StoredDataset;
+    let cases: LabCase[];
+    if ('nickname' in input) {
+      const nickname = input.nickname.trim();
+      const hash = await sha256(JSON.stringify(['direct', nickname]));
+      const existing = state.datasets.find(record => record.ownerId === actor.id && record.info.hash === hash);
+      if (existing) d = existing;
+      else {
+        const id = crypto.randomUUID();
+        d = { ownerId: actor.id, info: { id, name: nickname, hash, version: LAB_DIRECT_VERSION, count: 1, createdAt: ctx.now() }, cases: [{ id, nickname }] };
+        state.datasets.unshift(d);
+      }
+      cases = d.cases;
+    } else {
+      d = dataset(input.datasetId);
+      const byId = new Map(d.cases.map(c => [c.id, c]));
+      cases = input.caseIds ? input.caseIds.map(id => byId.get(id) ?? missing('Case not found')) : d.cases.slice(0, input.size);
+      if (cases.length !== input.size) throw new MockHttpError(400, 'VALIDATION_ERROR', 'Invalid case selection');
+    }
+    const { systemPrompt, searchMode, model, maxTokens, temperature } = input;
+    const settings = { datasetId: d.info.id, size: cases.length, systemPrompt, searchMode, model, maxTokens, temperature };
     const id = crypto.randomUUID();
     state.runs.unshift({
       ownerId: actor.id, nextAt: Date.now() + 300, rows: cases.map(pending),
-      info: { ...settings, id, datasetVersion: d.info.version, datasetHash: d.info.hash, promptHash: await sha256(input.systemPrompt), provider: STATUS.provider,
+      info: { ...settings, ...('nickname' in input ? { nickname: d.info.name } : {}), id, datasetVersion: d.info.version, datasetHash: d.info.hash, promptHash: await sha256(input.systemPrompt), provider: STATUS.provider,
         status: 'QUEUED', createdAt: ctx.now(), startedAt: null, completedAt: null, success: 0, failed: 0, cancelled: 0,
         stats: { meanScore: null, scored: 0, abstained: 0 } },
     });

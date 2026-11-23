@@ -56,6 +56,8 @@ export function createLabController(
 				if (config.provider === 'transformers-generate') {
 					const problem = invalidGenerateSetting(r.body);
 					if (problem) throw badRequest(problem);
+					if ((await status()).systemPromptSupported === false)
+						throw badRequest('The 4B model server requires an update to support system_prompt');
 				}
 				if (r.body.searchMode !== 'no_search' && !config.searchUrl)
 					throw badRequest('Search provider is not configured');
