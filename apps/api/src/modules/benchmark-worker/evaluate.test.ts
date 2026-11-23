@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readLabConfig } from './config.js';
 import { evaluateCase, type WorkItem } from './evaluate.js';
 import { createLabStatus } from './status.js';
+import { generateEvidence } from './generate.js';
 
 const config = readLabConfig({
 	LAB_ENABLED: 'true',
@@ -264,6 +265,25 @@ describe('single-slot Transformers generation', () => {
 		expect(await evaluateCase(settings, searchTask, signal(), 'unsupported')).toMatchObject({
 			error: null, output: { sourceIds: [] }, sources: [{ snippet: hit.content, suppliedSnippet: expect.stringContaining('Modern window usage.') }],
 		});
+	});
+
+	it.each([
+		['BlueFox', 'BlueFox', 177],
+		['BlueFox', 'bluefox', 240],
+		['가람', '가람'.normalize('NFD'), 240],
+	])('preserves the original matched spelling in a bounded excerpt for %s', (term, spelling, offset) => {
+		const snippet = 'a'.repeat(Number(offset)) + spelling + ' appeared here.';
+		const source = { id: 'S1', title: 'Usage', snippet, url: 'https://example.org', collectedAt: new Date().toISOString() };
+		const [shown] = generateEvidence([source], String(term));
+		expect(shown?.snippet).toContain(spelling);
+		expect(Array.from(shown!.snippet).length).toBeLessThanOrEqual(180);
+		expect(snippet).toContain(shown!.snippet);
+	});
+
+	it('skips a match that cannot fit and admits the next source with a complete mention', () => {
+		const term = '가'.repeat(100);
+		const source = { id: 'S1', title: term, snippet: 'Usage', url: 'https://example.org', collectedAt: new Date().toISOString() };
+		expect(generateEvidence([source, { ...source, id: 'S2', snippet: term }], term).map(s => s.id)).toEqual(['S2']);
 	});
 
 	it('rejects unsupported controls before I/O', async () => {

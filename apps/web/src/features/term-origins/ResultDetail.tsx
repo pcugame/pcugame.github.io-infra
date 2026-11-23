@@ -14,6 +14,9 @@ function failureMessage(error: string) {
 export function ResultDetail({ item }: { item: LabResult }) {
   const out = item.output;
   const sources = item.sources.filter(source => out?.sourceIds.includes(source.id));
+  const attempt = item.history.at(-1);
+  const supplied = attempt && typeof attempt === 'object' && 'suppliedSourceIds' in attempt ? attempt.suppliedSourceIds : undefined;
+  const usableCount = Array.isArray(supplied) ? supplied.length : item.sources.length;
   return <div className="lab-detail">
     {out && <dl>
       <dt>논란 가능성</dt><dd><strong>{controversyLabel(item)}</strong></dd>
@@ -21,7 +24,7 @@ export function ResultDetail({ item }: { item: LabResult }) {
       <dt>인용한 발췌문</dt><dd>{sources.length ? <ul>{sources.map(source => <li key={source.id}>
         {/^https?:\/\//i.test(source.url) && <a href={source.url} target="_blank" rel="noopener noreferrer">{source.id} · {source.title}</a>}
         <span>{source.suppliedSnippet ?? source.snippet}</span><small>{source.collectedAt}</small>
-      </li>)}</ul> : item.sources.length ? '모델이 검색 출처를 인용하지 않았습니다.' : item.searchCount ? '사용할 검색 발췌문 0건' : '검색 없이 평가함'}</dd>
+      </li>)}</ul> : usableCount ? '모델이 검색 출처를 인용하지 않았습니다.' : item.searchCount ? '사용할 검색 발췌문 0건' : '검색 없이 평가함'}</dd>
       <dt>논란의 배경</dt><dd>{out.controversySummary}</dd>
       <dt>어원과 기원</dt><dd>{out.originSummary}</dd>
       <dt>최초 용례</dt><dd>{out.earliestAttestation ?? '미확인'}</dd>

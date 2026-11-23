@@ -5,21 +5,33 @@ import type { WorkItem } from './evaluate.js';
 import type { LabConfig } from './config.js';
 import { jsonHeaders, LabFailure, requestJson } from './http.js';
 import { readGenerateHealth } from './status.js';
+import { normalizeMention } from './search.js';
 
 // Keep the exact prompt and case intact. Bound quoted evidence to leave room in the 1,024-token context.
-function excerpt(text: string, limit: number, term?: string) {
-	const index = term ? text.indexOf(term) : -1;
-	const prefix = index < 0 ? 0 : Array.from(text.slice(0, index)).length;
-	const start = prefix < limit ? 0 : prefix - Math.floor(limit / 4);
-	return Array.from(text).slice(start, start + limit).join('');
+function excerpt(text: string, limit: number, phrase?: string) {
+	const chars = Array.from(text);
+	const head = chars.slice(0, limit).join('');
+	if (!phrase || chars.length <= limit || normalizeMention(head).includes(phrase)
+		|| !normalizeMention(text).includes(phrase)) return head;
+	// Match on normalized windows but quote original characters, including decomposed Korean.
+	for (let start = chars.length - limit; start > 0; start--) {
+		const window = chars.slice(start, start + limit).join('');
+		if (normalizeMention(window).includes(phrase)) return window;
+	}
+	return head;
 }
 
 export function generateEvidence(sources: LabSource[], term?: string) {
-	return sources.slice(0, 2).map((source) => ({
-		id: source.id,
-		title: excerpt(source.title, 64, term),
-		snippet: excerpt(source.snippet, 180, term),
-	}));
+	const phrase = term && normalizeMention(term);
+	const evidence = [];
+	for (const source of sources) {
+		const title = excerpt(source.title, 64, phrase);
+		const snippet = excerpt(source.snippet, 180, phrase);
+		if (phrase && !normalizeMention(title).includes(phrase) && !normalizeMention(snippet).includes(phrase)) continue;
+		evidence.push({ id: source.id, title, snippet });
+		if (evidence.length === 2) break;
+	}
+	return evidence;
 }
 
 export function generatePrompt(

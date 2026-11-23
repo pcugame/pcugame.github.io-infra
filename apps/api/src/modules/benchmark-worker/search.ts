@@ -7,6 +7,7 @@ export interface SearchProvider {
 }
 
 const hitSchema = z.object({ title: z.string(), url: z.string(), content: z.string().optional() });
+export const normalizeMention = (text: string) => text.normalize('NFKC').toLowerCase();
 function publicLink(value: string) {
 	const url = URL.parse(value);
 	if (
@@ -56,8 +57,7 @@ export function createSearchProvider(searchUrl?: string): SearchProvider {
 				throw new LabFailure('SEARCH_ENGINES_UNAVAILABLE', true);
 			const collectedAt = new Date().toISOString();
 			const results = [];
-			const normalize = (text: string) => text.normalize('NFKC').toLowerCase();
-			const phrase = normalize(query);
+			const phrase = normalizeMention(query);
 			for (const item of parsed.data.results.slice(0, 20)) {
 				const hit = hitSchema.safeParse(item);
 				if (!hit.success || !hit.data.content?.trim() || !publicLink(hit.data.url)) continue;
@@ -67,7 +67,7 @@ export function createSearchProvider(searchUrl?: string): SearchProvider {
 					url: hit.data.url,
 					collectedAt,
 				};
-				if (requireMention && !normalize(result.title).includes(phrase) && !normalize(result.snippet).includes(phrase)) continue;
+				if (requireMention && !normalizeMention(result.title).includes(phrase) && !normalizeMention(result.snippet).includes(phrase)) continue;
 				if (LabSourceSchema.safeParse({ id: 'S1', ...result }).success) results.push(result);
 				if (results.length >= 4) break;
 			}
