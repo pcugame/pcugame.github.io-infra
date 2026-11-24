@@ -1,0 +1,6807 @@
+[
+  {
+    "id": "ko-roh-title",
+    "expression": "노고무통현대전령",
+    "variants": [
+      {
+        "text": "노고무통현대전령",
+        "provenance": "original",
+        "evidence": [
+          {
+            "source": "rohPermutation",
+            "locator": "본문 마지막 회고 문장"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "인명·직함의 재배열을 이용한 조롱 후보이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "노무현 전 대통령"
+        },
+        "evidence": [
+          {
+            "source": "rohPermutation",
+            "locator": "본문 마지막 회고 문장"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "deceased",
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "2017년 회고 게시물은 노무현 합성 사진과 MC무현을 언급하고, 노고무통현대전령의 경우의 수를 계산한 경험을 회고한다. 이 문자열이 해당 공간에서 사용된 근거이며 개별 이용자의 소속 증거는 아니다.",
+        "evidence": [
+          {
+            "source": "rohPermutation",
+            "locator": "본문 마지막 회고 문장"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "복원된 존칭 자체는 비하가 아니다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "노고무통현대전령 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-gender-drum",
+    "expression": "한대남가리뚝스딱스",
+    "variants": [
+      {
+        "text": "한대남가리뚝스딱스",
+        "provenance": "original",
+        "evidence": [
+          {
+            "source": "bangName",
+            "locator": "공개 프로필 이름"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "재분절하면 대상·신체·타격이 연결된다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "한국 남성"
+        },
+        "evidence": [
+          {
+            "source": "bangDiscussion",
+            "locator": "본문의 닉네임 회고; 최초 유래는 확정하지 않음"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "violence"
+    ],
+    "contexts": [
+      {
+        "use": "unknown",
+        "description": "공개 프로필 화면의 이름에 한대남가리뚝스딱스가 표시된다. 이 자료는 정확한 문자열의 실사용만 뒷받침하며 뱅드림에서의 최초 사용과 사용 의도는 입증하지 않는다.",
+        "evidence": [
+          {
+            "source": "bangName",
+            "locator": "공개 프로필 이름"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "뚝스딱스만으로는 드럼 의성어도 가능하다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "한대남가리뚝스딱스 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-regional-base",
+    "expression": "북괴멀티전라도",
+    "variants": [
+      {
+        "text": "북괴멀티전라도",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "cyphersRegionalName",
+            "locator": "기사 첨부 방송 화면"
+          }
+        ]
+      },
+      {
+        "text": "7시 멀티",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "regionalBaseMeaning",
+            "locator": "기사 본문의 발언 인용"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "실제 지역을 북한의 확장 거점으로 낙인찍는 독법이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "전라도 주민"
+        },
+        "evidence": [
+          {
+            "source": "regionalBaseMeaning",
+            "locator": "7시 멀티 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "region",
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "2013년 뉴스1 보도에 첨부된 온게임넷 사이퍼즈 선수 소개 화면에서 닉네임 북괴멀티전라도가 확인된다. 기사 제목은 북괴멀티 전라도로 띄어 쓴다. 방송에 해당 표기가 노출된 기록이며 작성자의 성향·소속을 증명하지 않는다.",
+        "evidence": [
+          {
+            "source": "cyphersRegionalName",
+            "locator": "기사 첨부 방송 화면"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "게임의 지도 방향과 확장 기지를 말할 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "북괴멀티전라도 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-gwangju-fruit",
+    "expression": "광주 특산물 포도",
+    "variants": [
+      {
+        "text": "광주 특산물 포도",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "홍어·7시·포도 단락"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "사건을 폭동으로 왜곡한 받침 생략 표현이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "5·18 민주화운동과 광주"
+        },
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "홍어·7시·포도 단락"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "history",
+      "region"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "보도는 광주 특산물 포도를 5·18을 폭동으로 왜곡하는 용례로 설명한다. 지역과 과일 단어의 결합이 역사적 사건을 가리키는 맥락이며, 포도라는 일반어 전체에 같은 뜻을 부여하지 않는다.",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "홍어·7시·포도 단락"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "실제 광주의 농산물 안내일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "광주 특산물 포도 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-jindo-whale",
+    "expression": "진도 고래밥",
+    "variants": [
+      {
+        "text": "진도 고래밥",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "disasterStudy",
+            "locator": "인쇄면 134쪽"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "참사 장소와 먹이 표현을 결합한 조롱이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "세월호 희생자"
+        },
+        "evidence": [
+          {
+            "source": "disasterStudy",
+            "locator": "인쇄면 134쪽"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "disaster"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "134쪽은 5·18 희생자 사진에 홍어택배라는 표현을 붙인 사례와 세월호 유가족의 영정 사진을 진도 고래밥으로 조롱한 사례를 기록한다.",
+        "evidence": [
+          {
+            "source": "disasterStudy",
+            "locator": "인쇄면 134쪽"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "지명과 과자 이름의 일반 조합도 가능하다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "진도 고래밥 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-danwon-fishcake",
+    "expression": "어묵",
+    "variants": [
+      {
+        "text": "어묵",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "fishcake",
+            "locator": "본문의 교복 사진·삭제 게시물 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "단원고 교복·참사와 결합한 피해자 조롱 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "세월호 희생학생"
+        },
+        "evidence": [
+          {
+            "source": "fishcake",
+            "locator": "본문의 교복 사진·삭제 게시물 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "disaster"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "2015년 보도는 단원고 교복과 어묵 사진을 결합해 세월호 희생학생을 조롱한 게시물을 설명한다. 음식 자체가 아니라 학교와 참사 피해자의 결합 문맥이 모욕 해석의 근거다.",
+        "evidence": [
+          {
+            "source": "fishcake",
+            "locator": "본문의 교복 사진·삭제 게시물 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "음식명이나 급식 메뉴가 기본 독법이다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "어묵 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-roh-death",
+    "expression": "운지",
+    "variants": [
+      {
+        "text": "운지",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "owlMockery",
+            "locator": "교실 발언 취재"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "죽음을 희화화하거나 추락을 지시하는 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "노무현 전 대통령"
+        },
+        "evidence": [
+          {
+            "source": "owlMockery",
+            "locator": "교실 발언 취재"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "deceased",
+      "violence"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "학교 경험 취재이며 게임 원문 관측은 아니다.",
+        "evidence": [
+          {
+            "source": "owlMockery",
+            "locator": "교실 발언 취재"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "운지법처럼 악기 손가락 동작을 뜻할 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "운지 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-human-housing",
+    "expression": "휴거",
+    "variants": [
+      {
+        "text": "휴거",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "raptureHousing",
+            "locator": "본문의 휴먼시아 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "주거 브랜드와 빈곤 비하를 결합한 호칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "휴먼시아 임대주택 거주 학생"
+        },
+        "evidence": [
+          {
+            "source": "raptureHousing",
+            "locator": "본문의 휴먼시아 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "housing"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "휴먼시아와 거지를 결합한 휴거가 임대주택 거주 학생을 비하하는 데 쓰였다고 취재한다. 종교 용어와 동일한 표기이므로 주거 관련 단서를 확인해야 한다.",
+        "evidence": [
+          {
+            "source": "raptureHousing",
+            "locator": "본문의 휴먼시아 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "종교적 휴거를 뜻할 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "휴거 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-lh-housing",
+    "expression": "엘사",
+    "variants": [
+      {
+        "text": "엘사",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "housingIncome",
+            "locator": "주거 차별 사례"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "주거 형태에 따른 비하 호칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "LH 임대주택 거주자"
+        },
+        "evidence": [
+          {
+            "source": "elsaHousing",
+            "locator": "LH 거주자 호칭 설명"
+          },
+          {
+            "source": "housingIncome",
+            "locator": "LH 거주자 호칭 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "housing"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "학교 생활의 주거·소득 비하 보도이다. 개별 온라인 유통 자료는 확보하지 않았다.",
+        "evidence": [
+          {
+            "source": "housingIncome",
+            "locator": "주거 차별 사례"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "영화 인물 이름이나 실제 인명일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "엘사 혐오 표현 국내 용례",
+      "note": "학교 생활의 주거·소득 비하 보도이다. 개별 온라인 유통 자료는 확보하지 않았다."
+    }
+  },
+  {
+    "id": "ko-monthly-rent",
+    "expression": "월거지",
+    "variants": [
+      {
+        "text": "월거지",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "raptureHousing",
+            "locator": "본문 첫 사례"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "월세 거주를 빈곤과 결부한 비하이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "월세 거주자"
+        },
+        "evidence": [
+          {
+            "source": "raptureHousing",
+            "locator": "본문 첫 사례"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "housing"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "휴먼시아와 거지를 결합한 휴거가 임대주택 거주 학생을 비하하는 데 쓰였다고 취재한다. 종교 용어와 동일한 표기이므로 주거 관련 단서를 확인해야 한다.",
+        "evidence": [
+          {
+            "source": "raptureHousing",
+            "locator": "본문 첫 사례"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "인용·자조 여부를 살핀다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "월거지 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-deposit-rent",
+    "expression": "전거지",
+    "variants": [
+      {
+        "text": "전거지",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "raptureHousing",
+            "locator": "본문 두 번째 단락"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "전세 거주를 빈곤과 결부한 비하이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "전세 거주자"
+        },
+        "evidence": [
+          {
+            "source": "raptureHousing",
+            "locator": "본문 두 번째 단락"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "housing"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "휴먼시아와 거지를 결합한 휴거가 임대주택 거주 학생을 비하하는 데 쓰였다고 취재한다. 종교 용어와 동일한 표기이므로 주거 관련 단서를 확인해야 한다.",
+        "evidence": [
+          {
+            "source": "raptureHousing",
+            "locator": "본문 두 번째 단락"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "주거 차별을 비판하는 인용일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "전거지 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-welfare",
+    "expression": "기생수",
+    "variants": [
+      {
+        "text": "기생수",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "housingIncome",
+            "locator": "기초생활수급자 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "복지 수급자를 낮추어 부르는 축약어이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "기초생활수급자"
+        },
+        "evidence": [
+          {
+            "source": "housingIncome",
+            "locator": "기초생활수급자 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "class"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "학교 생활의 주거·소득 비하 보도이다. 개별 온라인 유통 자료는 확보하지 않았다.",
+        "evidence": [
+          {
+            "source": "housingIncome",
+            "locator": "기초생활수급자 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "동명 만화·애니메이션 제목일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "기생수 혐오 표현 국내 용례",
+      "note": "학교 생활의 주거·소득 비하 보도이다. 개별 온라인 유통 자료는 확보하지 않았다."
+    }
+  },
+  {
+    "id": "ko-income-200",
+    "expression": "200충",
+    "variants": [
+      {
+        "text": "200충",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "housingIncome",
+            "locator": "부모 월수입 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "가족 소득에 따라 학생을 벌레에 빗대는 호칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "부모 월수입으로 분류된 학생"
+        },
+        "evidence": [
+          {
+            "source": "housingIncome",
+            "locator": "부모 월수입 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "class"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "학교 생활의 주거·소득 비하 보도이다. 개별 온라인 유통 자료는 확보하지 않았다.",
+        "evidence": [
+          {
+            "source": "housingIncome",
+            "locator": "부모 월수입 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "숫자는 게임 능력치일 수도 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "200충 혐오 표현 국내 용례",
+      "note": "학교 생활의 주거·소득 비하 보도이다. 개별 온라인 유통 자료는 확보하지 않았다."
+    }
+  },
+  {
+    "id": "ko-income-300",
+    "expression": "300충",
+    "variants": [
+      {
+        "text": "300충",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "housingIncome",
+            "locator": "부모 월수입 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "다른 소득 구간에도 같은 서열화를 적용한 호칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "부모 월수입으로 분류된 학생"
+        },
+        "evidence": [
+          {
+            "source": "housingIncome",
+            "locator": "부모 월수입 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "class"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "학교 생활의 주거·소득 비하 보도이다. 개별 온라인 유통 자료는 확보하지 않았다.",
+        "evidence": [
+          {
+            "source": "housingIncome",
+            "locator": "부모 월수입 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "숫자만으로 가족 소득을 추정하지 않는다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "300충 혐오 표현 국내 용례",
+      "note": "학교 생활의 주거·소득 비하 보도이다. 개별 온라인 유통 자료는 확보하지 않았다."
+    }
+  },
+  {
+    "id": "ko-democracy",
+    "expression": "민주화",
+    "variants": [
+      {
+        "text": "민주화",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "기사 첫 단락"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "배척·억압을 뜻하도록 변형한 커뮤니티 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "민주화 운동 또는 배척되는 상대"
+        },
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "기사 첫 단락"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "history",
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "보도는 광주 특산물 포도를 5·18을 폭동으로 왜곡하는 용례로 설명한다. 지역과 과일 단어의 결합이 역사적 사건을 가리키는 맥락이며, 포도라는 일반어 전체에 같은 뜻을 부여하지 않는다.",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "기사 첫 단락"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "민주주의 확대를 의미인 일반 용법이다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "민주화 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-journalist",
+    "expression": "기레기",
+    "variants": [
+      {
+        "text": "기레기",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "레기 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "직업 집단을 쓰레기에 빗댄 멸칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "기자"
+        },
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "레기 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "보도는 광주 특산물 포도를 5·18을 폭동으로 왜곡하는 용례로 설명한다. 지역과 과일 단어의 결합이 역사적 사건을 가리키는 맥락이며, 포도라는 일반어 전체에 같은 뜻을 부여하지 않는다.",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "레기 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "언론 비판의 논점과 집단 멸시를 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "기레기 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-skate",
+    "expression": "홍어",
+    "variants": [
+      {
+        "text": "홍어",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "지역 비하 단락"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "지역 특산물로 주민을 낮추어 부르는 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "전라도 주민"
+        },
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "지역 비하 단락"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "region"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "보도는 광주 특산물 포도를 5·18을 폭동으로 왜곡하는 용례로 설명한다. 지역과 과일 단어의 결합이 역사적 사건을 가리키는 맥락이며, 포도라는 일반어 전체에 같은 뜻을 부여하지 않는다.",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "지역 비하 단락"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "생선·음식의 이름이다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "홍어 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-jeolla",
+    "expression": "전라디언",
+    "variants": [
+      {
+        "text": "전라디언",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "방송 자막 사례"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "지역민을 별개 집단으로 낮추어 부르는 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "전라도 주민"
+        },
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "방송 자막 사례"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "region"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "보도는 광주 특산물 포도를 5·18을 폭동으로 왜곡하는 용례로 설명한다. 지역과 과일 단어의 결합이 역사적 사건을 가리키는 맥락이며, 포도라는 일반어 전체에 같은 뜻을 부여하지 않는다.",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "방송 자막 사례"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "실제 출신이나 소속을 단어만으로 확정하지 않는다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "전라디언 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-nomu",
+    "expression": "노무노무",
+    "variants": [
+      {
+        "text": "노무노무",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "기사 후반"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "인명을 변형해 반복하는 조롱 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "노무현 전 대통령"
+        },
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "기사 후반"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "deceased",
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "보도는 광주 특산물 포도를 5·18을 폭동으로 왜곡하는 용례로 설명한다. 지역과 과일 단어의 결합이 역사적 사건을 가리키는 맥락이며, 포도라는 일반어 전체에 같은 뜻을 부여하지 않는다.",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "기사 후반"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "너무의 장난스러운 표기로도 읽힐 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "노무노무 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-yellow",
+    "expression": "노오랗다",
+    "variants": [
+      {
+        "text": "노오랗다",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "기사 후반"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "색 표현과 인명을 연결하는 조롱 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "노무현 전 대통령"
+        },
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "기사 후반"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "deceased",
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "보도는 광주 특산물 포도를 5·18을 폭동으로 왜곡하는 용례로 설명한다. 지역과 과일 단어의 결합이 역사적 사건을 가리키는 맥락이며, 포도라는 일반어 전체에 같은 뜻을 부여하지 않는다.",
+        "evidence": [
+          {
+            "source": "codedFruit",
+            "locator": "기사 후반"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "노랗다의 강조 표기일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "노오랗다 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-gwangju-parcel",
+    "expression": "홍어택배",
+    "variants": [
+      {
+        "text": "홍어택배",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "disasterStudy",
+            "locator": "인쇄면 134쪽"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "희생자를 물건·음식 취급하는 조롱이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "5·18 희생자"
+        },
+        "evidence": [
+          {
+            "source": "disasterStudy",
+            "locator": "인쇄면 134쪽"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "disaster",
+      "history",
+      "region"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "134쪽은 5·18 희생자 사진에 홍어택배라는 표현을 붙인 사례와 세월호 유가족의 영정 사진을 진도 고래밥으로 조롱한 사례를 기록한다.",
+        "evidence": [
+          {
+            "source": "disasterStudy",
+            "locator": "인쇄면 134쪽"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "실제 홍어 배송 문맥일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "홍어택배 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-tank",
+    "expression": "전땅크",
+    "variants": [
+      {
+        "text": "전땅크",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "disasterStudy",
+            "locator": "인쇄면 134쪽"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "군사 폭력을 영웅화하는 용례가 보고되었다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "전두환"
+        },
+        "evidence": [
+          {
+            "source": "disasterStudy",
+            "locator": "인쇄면 134쪽"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "history",
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "134쪽은 5·18 희생자 사진에 홍어택배라는 표현을 붙인 사례와 세월호 유가족의 영정 사진을 진도 고래밥으로 조롱한 사례를 기록한다.",
+        "evidence": [
+          {
+            "source": "disasterStudy",
+            "locator": "인쇄면 134쪽"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "비판적 별명 인용인지 찬양인지 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "전땅크 혐오 표현 국내 용례",
+      "note": "표기 확인과 의미 해석은 별도 검토한다. 원문 작성자의 신원·소속·최초 유래를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-hannam",
+    "expression": "한남충",
+    "variants": [
+      {
+        "text": "한남충",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      },
+      {
+        "text": "한남",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "23쪽"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "성별·국적 집단을 벌레에 비유한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "한국 남성"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "한남은 지명이기도 하며 자칭도 가능하다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "한남충 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-kimchi-woman",
+    "expression": "김치녀",
+    "variants": [
+      {
+        "text": "김치녀",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "음식명과 성별을 결합한 집단 비하이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "한국 여성"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "음식 소재 이름과 타인 비하를 문맥으로 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "김치녀 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-doenjang-woman",
+    "expression": "된장녀",
+    "variants": [
+      {
+        "text": "된장녀",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "설문에서 여성을 비하하는 표현으로 분류한 호칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "여성"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "된장 관련 일반 표현과 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "된장녀 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-gay-bug",
+    "expression": "똥꼬충",
+    "variants": [
+      {
+        "text": "똥꼬충",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "성적 지향을 신체·벌레에 빗대어 비하한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "성소수자"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "orientation"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "비판적 인용을 직접 사용으로 판정하지 않는다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "똥꼬충 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-mother-bug",
+    "expression": "맘충",
+    "variants": [
+      {
+        "text": "맘충",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "양육자를 벌레에 비유하는 호칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "양육 여성"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "age"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "자칭·차별 비판 인용 여부를 살핀다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "맘충 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-school-bug",
+    "expression": "급식충",
+    "variants": [
+      {
+        "text": "급식충",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "학교 급식을 나이 집단의 멸칭으로 전환한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "학생·청소년"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "age"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "급식이나 학생이라는 말 자체는 비하가 아니다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "급식충 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-japanese",
+    "expression": "쪽발이",
+    "variants": [
+      {
+        "text": "쪽발이",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "국적 집단을 낮추어 부르는 호칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "일본인"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "ethnicity"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "인용·보도 여부를 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "쪽발이 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-chinese",
+    "expression": "짱깨",
+    "variants": [
+      {
+        "text": "짱깨",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "국적·민족 집단에 대한 비하 호칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "중국인"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "ethnicity"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "음식 주문 등의 문맥에서도 사람 지칭 여부를 확인한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "짱깨 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-islam",
+    "expression": "개슬람",
+    "variants": [
+      {
+        "text": "개슬람",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "종교 집단에 모욕 접두사를 결합한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "무슬림"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "religion",
+      "ethnicity"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "종교 비판과 신자 집단 비하를 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "개슬람 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-christian",
+    "expression": "개독교",
+    "variants": [
+      {
+        "text": "개독교",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      },
+      {
+        "text": "개독",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "27쪽"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "종교명을 모욕 형태로 변형한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "기독교인"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "religion"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "신앙·조직 비판 자체와 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "개독교 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-disabled",
+    "expression": "병신",
+    "variants": [
+      {
+        "text": "병신",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "장애를 무능의 비유로 사용한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "장애인 또는 무능하다고 공격받는 사람"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "disability"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "간지 병신년 등 동음이의어가 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "병신 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-mute",
+    "expression": "벙어리",
+    "variants": [
+      {
+        "text": "벙어리",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "언어장애를 낮추어 지칭하는 말이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "언어장애인"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "disability"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "역사적 인용·관용 표현은 문맥을 별도 검토한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "벙어리 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-gwamegi",
+    "expression": "과메기",
+    "variants": [
+      {
+        "text": "과메기",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "음식을 지역민 비하에 전용한 사례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "경상도 주민"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "region"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "음식명이 기본 독법이다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "과메기 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-rental-poor",
+    "expression": "임대거지",
+    "variants": [
+      {
+        "text": "임대거지",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "임대 거주를 빈곤 멸시와 결합한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "임대주택 거주자"
+        },
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "housing"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "설문에 제시한 표기·대상 범주이다. 개별 온라인 발화는 미확보이다.",
+        "evidence": [
+          {
+            "source": "hrc2022",
+            "locator": "표 c35~c43"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "주거 차별 비판 인용일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "임대거지 혐오 표현 국내 용례",
+      "note": "표 c35~c43의 설문 자극어와 대상 범주를 확인하였다. 설문 제시와 응답 경험은 특정 온라인 게시물·게임 닉네임 관측이 아니다."
+    }
+  },
+  {
+    "id": "ko-smelly-man",
+    "expression": "냄저",
+    "variants": [
+      {
+        "text": "냄저",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 22쪽의 해당 표현 설명·예문"
+          }
+        ]
+      },
+      {
+        "text": "냄져",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "22쪽"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "냄새를 성별 집단의 속성으로 일반화한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "한국 남성"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 22쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 22쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "위생 관련 개별 묘사와 집단 비하를 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "냄저 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-older-man",
+    "expression": "개저씨",
+    "variants": [
+      {
+        "text": "개저씨",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 22쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "연령·성별 호칭에 모욕을 결합한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "중년 남성"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 22쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "age"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 22쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "무례한 행동 비판과 모든 중년 남성의 비하를 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "개저씨 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-driver-woman",
+    "expression": "김여사",
+    "variants": [
+      {
+        "text": "김여사",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 20쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "운전 미숙을 성별로 일반화하는 호칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "여성 운전자"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 20쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 20쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "김씨 성의 여성에 대한 실제 존칭일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "김여사 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-three-days",
+    "expression": "삼일한",
+    "variants": [
+      {
+        "text": "삼일한",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 21쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "주기적 폭행을 정당화하는 축약 표현이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "성별로 지목된 집단"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 21쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "violence"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 21쪽의 해당 표현 설명·예문"
+          }
+        ]
+      },
+      {
+        "use": "direct",
+        "description": "연구의 예문에는 성별 집단을 향한 폭행 지지와 대상을 뒤바꾼 미러링이 함께 있다. 연구자의 인용 자체는 폭행 지지가 아니다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 20~21쪽 예문 (9라), (9라-1)"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "비판 인용·미러링에서는 지칭 대상이 달라진다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "삼일한 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-sexual-offer",
+    "expression": "주절먹",
+    "variants": [
+      {
+        "text": "주절먹",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 22쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "상대방을 성적 기회로 취급하는 축약어이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "성적 대상으로 지목된 사람"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 22쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "sexual"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 22쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "게임 보상·아이템을 받는 의미로도 읽힐 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "주절먹 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-southeast",
+    "expression": "똥남아",
+    "variants": [
+      {
+        "text": "똥남아",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 23쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "지명을 배설물과 연결하는 비하이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "동남아시아인"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 23쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "ethnicity"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 23쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "지역명 동남아 자체는 비하가 아니다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "똥남아 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-chinese-sound",
+    "expression": "중꿔",
+    "variants": [
+      {
+        "text": "중꿔",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 24쪽의 해당 표현 설명·예문"
+          }
+        ]
+      },
+      {
+        "text": "쭝꿔",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "23쪽"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "중국어 발음을 모방한 표기의 비하 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "중국인 또는 중국"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 24쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "ethnicity"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 24쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "중국어 발음 소개·중립적 지칭도 가능하다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "중꿔 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-black-brother",
+    "expression": "흑형",
+    "variants": [
+      {
+        "text": "흑형",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 24쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "칭찬처럼 보여도 신체 능력을 인종에 고정할 수 있다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "흑인 남성"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 24쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "ethnicity"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 24쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "친밀 호칭 여부와 상대방 수용을 확인한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "흑형 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-critical-error",
+    "expression": "병크",
+    "variants": [
+      {
+        "text": "병크",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 25쪽의 해당 표현 설명·예문"
+          }
+        ]
+      },
+      {
+        "text": "병신크리",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "25쪽"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "장애 비하 표현이 실수라는 은어로 축약되었다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "실수한 사람·행동"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 25쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "disability",
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 25쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "실수 지적 자체와 장애 비유를 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "병크 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-skill-eunuch",
+    "expression": "셀카고자",
+    "variants": [
+      {
+        "text": "셀카고자",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 25쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "능력 부족을 성 기능 장애에 비유한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "기술이 부족하다고 지목된 사람"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 25쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "disability"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 25쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "자조도 가능하며 실제 장애 여부를 추정하지 않는다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "셀카고자 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-turns-out-jeolla",
+    "expression": "까보전",
+    "variants": [
+      {
+        "text": "까보전",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 26쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "문제의 원인을 출신 지역에 돌리는 축약어이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "전라도 출신으로 지목된 사람"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 26쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "region"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 26쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "실제 출신 확인 자료로 사용하지 않는다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "까보전 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-gyeongsang",
+    "expression": "개쌍도",
+    "variants": [
+      {
+        "text": "개쌍도",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 26쪽의 해당 표현 설명·예문"
+          }
+        ]
+      },
+      {
+        "text": "개상도",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "26쪽"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "지명을 모욕 형태로 변형한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "경상도 주민"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 26쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "region"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 26쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "비판 인용과 직접 비하를 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "개쌍도 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-left-zombie",
+    "expression": "좌좀",
+    "variants": [
+      {
+        "text": "좌좀",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 27쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "정치 상대를 좀비에 빗대어 낮춘다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "진보·좌파로 지목된 사람"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 27쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 27쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "정책·이념 설명과 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "좌좀 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-left-red",
+    "expression": "좌빨",
+    "variants": [
+      {
+        "text": "좌빨",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 27쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "정치 성향을 적대 집단 낙인으로 치환한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "진보·좌파로 지목된 사람"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 27쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 27쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "실제 북한 관련성의 증거가 아니다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "좌빨 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-right-stubborn",
+    "expression": "수꼴",
+    "variants": [
+      {
+        "text": "수꼴",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 27쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "정치 상대를 고집불통으로 낮추는 축약어이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "보수·우파로 지목된 사람"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 27쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 27쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "정책에 대한 구체적 비판과 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "수꼴 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-elder",
+    "expression": "틀딱",
+    "variants": [
+      {
+        "text": "틀딱",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 28쪽의 해당 표현 설명·예문"
+          }
+        ]
+      },
+      {
+        "text": "틀딱충",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "28쪽"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "틀니 소리를 이용해 노인을 조롱한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "노인"
+        },
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 28쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "age"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "연구에 인용된 온라인 사례이다. 직접 사용·미러링·비판적 인용이 함께 있으므로 원 발화 기능을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "nikl2017",
+            "locator": "인쇄면 28쪽의 해당 표현 설명·예문"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "비판적 인용·자칭과 직접 공격을 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "틀딱 혐오 표현 국내 용례",
+      "note": "인쇄면 20~28쪽의 설명과 트위터 인용문이다. 연구자가 인용한 온라인 사용이며 이번 조사에서 원 게시물을 직접 확보한 것은 아니다."
+    }
+  },
+  {
+    "id": "ko-hyeji",
+    "expression": "혜지",
+    "variants": [
+      {
+        "text": "혜지",
+        "provenance": "original",
+        "evidence": [
+          {
+            "source": "womenGames",
+            "locator": "제목·본문·각주"
+          },
+          {
+            "source": "hyejiForum",
+            "locator": "게시물 제목과 본문"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "실력 부족과 의존성을 여성에게 일반화한 호칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "여성 게이머"
+        },
+        "evidence": [
+          {
+            "source": "womenGames",
+            "locator": "제목·본문·각주"
+          },
+          {
+            "source": "hyejiPress",
+            "locator": "여성 이름과 게임 멸칭 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "critical",
+        "description": "게임 경험을 비판적으로 기록한 당사자 에세이이다. 직접 혐오 발화가 아니다.",
+        "evidence": [
+          {
+            "source": "womenGames",
+            "locator": "제목·본문·각주"
+          }
+        ]
+      },
+      {
+        "use": "critical",
+        "description": "게시물 작성자는 해당 호칭의 사용에 반대한다. 비하 표현의 인용을 직접 혐오 발화로 분류하지 않는다.",
+        "evidence": [
+          {
+            "source": "hyejiForum",
+            "locator": "본문의 여성 혐오 비판"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "실제 사람 이름이다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "혜지 혐오 표현 국내 용례",
+      "note": "회원이 게임 경험을 비판적으로 서술한 에세이이다. 에세이의 실제 표기와 회고를 확인하며 원 게임 채팅을 직접 관측한 자료로 쓰지 않는다."
+    }
+  },
+  {
+    "id": "ko-bormercy",
+    "expression": "보르시",
+    "variants": [
+      {
+        "text": "보르시",
+        "provenance": "original",
+        "evidence": [
+          {
+            "source": "womenGames",
+            "locator": "제목·본문·각주"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "게임 캐릭터와 성별을 성적 비하에 결합한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "여성 메르시 사용자"
+        },
+        "evidence": [
+          {
+            "source": "womenGames",
+            "locator": "제목·본문·각주"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "sexual",
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "critical",
+        "description": "게임 경험을 비판적으로 기록한 당사자 에세이이다. 직접 혐오 발화가 아니다.",
+        "evidence": [
+          {
+            "source": "womenGames",
+            "locator": "제목·본문·각주"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "캐릭터 메르시의 일반 지칭과 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "보르시 혐오 표현 국내 용례",
+      "note": "회원이 게임 경험을 비판적으로 서술한 에세이이다. 에세이의 실제 표기와 회고를 확인하며 원 게임 채팅을 직접 관측한 자료로 쓰지 않는다."
+    }
+  },
+  {
+    "id": "ko-moon-loyal",
+    "expression": "대깨문",
+    "variants": [
+      {
+        "text": "대깨문",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "politics2019",
+            "locator": "유행어 의미 변화 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "자칭 지지 구호가 상대 진영의 멸칭으로도 쓰인다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "문재인 지지자"
+        },
+        "evidence": [
+          {
+            "source": "politics2019",
+            "locator": "유행어 의미 변화 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "지지 구호의 조롱 전환 및 정치 멸칭을 설명한다. 인용·자칭·정책 비판과 타인 비하를 구별한다.",
+        "evidence": [
+          {
+            "source": "politics2019",
+            "locator": "유행어 의미 변화 설명"
+          }
+        ]
+      },
+      {
+        "use": "self_reference",
+        "description": "지지자 자신의 지지를 표현하는 용법과 상대의 조롱 용법이 함께 기록되어 있다.",
+        "evidence": [
+          {
+            "source": "politics2019",
+            "locator": "대깨문의 의미 변화 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "자기 지지 의사나 인용일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "대깨문 혐오 표현 국내 용례",
+      "note": "지지 구호의 조롱 전환 및 정치 멸칭을 설명한다. 인용·자칭·정책 비판과 타인 비하를 구별한다."
+    }
+  },
+  {
+    "id": "ko-moon-islam",
+    "expression": "문슬람",
+    "variants": [
+      {
+        "text": "문슬람",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "politics2019",
+            "locator": "유행어 의미 변화 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "정치 지지를 종교적 광신으로 비유한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "문재인 지지자와 무슬림"
+        },
+        "evidence": [
+          {
+            "source": "politics2019",
+            "locator": "유행어 의미 변화 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "political",
+      "religion"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "지지 구호의 조롱 전환 및 정치 멸칭을 설명한다. 인용·자칭·정책 비판과 타인 비하를 구별한다.",
+        "evidence": [
+          {
+            "source": "politics2019",
+            "locator": "유행어 의미 변화 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "비판적 인용을 실제 지지자 공격으로 처리하지 않는다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "문슬람 혐오 표현 국내 용례",
+      "note": "지지 구호의 조롱 전환 및 정치 멸칭을 설명한다. 인용·자칭·정책 비판과 타인 비하를 구별한다."
+    }
+  },
+  {
+    "id": "ko-moon-disaster",
+    "expression": "문재앙",
+    "variants": [
+      {
+        "text": "문재앙",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "politics2019",
+            "locator": "유행어 의미 변화 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "인명을 재앙과 결합한 멸칭이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "문재인"
+        },
+        "evidence": [
+          {
+            "source": "politics2019",
+            "locator": "유행어 의미 변화 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "지지 구호의 조롱 전환 및 정치 멸칭을 설명한다. 인용·자칭·정책 비판과 타인 비하를 구별한다.",
+        "evidence": [
+          {
+            "source": "politics2019",
+            "locator": "유행어 의미 변화 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "보도 인용과 직접 모욕을 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "문재앙 혐오 표현 국내 용례",
+      "note": "지지 구호의 조롱 전환 및 정치 멸칭을 설명한다. 인용·자칭·정책 비판과 타인 비하를 구별한다."
+    }
+  },
+  {
+    "id": "ko-young-kid",
+    "expression": "잼민이",
+    "variants": [
+      {
+        "text": "잼민이",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "age2023",
+            "locator": "연령·초보자 표현 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "어린이를 미숙한 집단으로 낮추는 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "어린이"
+        },
+        "evidence": [
+          {
+            "source": "age2023",
+            "locator": "연령·초보자 표현 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "age"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "세대·초보자 관련 호칭을 비판적으로 설명한 보도이다. 자칭과 타인 멸시가 같은 문자열을 사용할 수 있다.",
+        "evidence": [
+          {
+            "source": "age2023",
+            "locator": "연령·초보자 표현 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "장난스러운 자칭·친밀 호칭일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "잼민이 혐오 표현 국내 용례",
+      "note": "세대·초보자 관련 호칭을 비판적으로 설명한 보도이다. 자칭과 타인 멸시가 같은 문자열을 사용할 수 있다."
+    }
+  },
+  {
+    "id": "ko-kkondae",
+    "expression": "꼰대",
+    "variants": [
+      {
+        "text": "꼰대",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "age2023",
+            "locator": "연령·초보자 표현 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "권위적 태도 비판과 연령 집단 멸시가 겹친다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "권위적인 사람 또는 기성세대"
+        },
+        "evidence": [
+          {
+            "source": "age2023",
+            "locator": "연령·초보자 표현 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "age"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "세대·초보자 관련 호칭을 비판적으로 설명한 보도이다. 자칭과 타인 멸시가 같은 문자열을 사용할 수 있다.",
+        "evidence": [
+          {
+            "source": "age2023",
+            "locator": "연령·초보자 표현 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "특정 행동을 비판하는 경우에는 연령을 확정하지 않는다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "꼰대 혐오 표현 국내 용례",
+      "note": "세대·초보자 관련 호칭을 비판적으로 설명한 보도이다. 자칭과 타인 멸시가 같은 문자열을 사용할 수 있다."
+    }
+  },
+  {
+    "id": "ko-beginner-child",
+    "expression": "주린이",
+    "variants": [
+      {
+        "text": "주린이",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "age2023",
+            "locator": "연령·초보자 표현 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "미숙함을 어린이에 빗대는 표현이라는 논란이 있다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "초보 투자자·비유 대상인 어린이"
+        },
+        "evidence": [
+          {
+            "source": "age2023",
+            "locator": "연령·초보자 표현 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "age",
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "세대·초보자 관련 호칭을 비판적으로 설명한 보도이다. 자칭과 타인 멸시가 같은 문자열을 사용할 수 있다.",
+        "evidence": [
+          {
+            "source": "age2023",
+            "locator": "연령·초보자 표현 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "초보자의 일반적인 자칭 용례도 보존한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "주린이 혐오 표현 국내 용례",
+      "note": "세대·초보자 관련 호칭을 비판적으로 설명한 보도이다. 자칭과 타인 멸시가 같은 문자열을 사용할 수 있다."
+    }
+  },
+  {
+    "id": "ko-cancer",
+    "expression": "암 걸린다",
+    "variants": [
+      {
+        "text": "암 걸린다",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      },
+      {
+        "text": "발암",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "환자 가족의 비판 인용"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "질병을 답답함의 비유로 쓰는 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "암 환자·답답함을 유발한 상대"
+        },
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "illness"
+    ],
+    "contexts": [
+      {
+        "use": "critical",
+        "description": "온라인 질병 은유와 이에 대한 환자·가족의 비판을 인용한다. 질병의 문자 그대로의 언급은 희화화와 구별한다.",
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "실제 질병·의학 보도 문맥이 가능하다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "암 걸린다 혐오 표현 국내 용례",
+      "note": "온라인 질병 은유와 이에 대한 환자·가족의 비판을 인용한다. 질병의 문자 그대로의 언급은 희화화와 구별한다."
+    }
+  },
+  {
+    "id": "ko-brain-freeze",
+    "expression": "뇌 정지",
+    "variants": [
+      {
+        "text": "뇌 정지",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "당황을 신체 기능 정지에 비유한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "인지 곤란을 겪는 사람"
+        },
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "illness"
+    ],
+    "contexts": [
+      {
+        "use": "critical",
+        "description": "온라인 질병 은유와 이에 대한 환자·가족의 비판을 인용한다. 질병의 문자 그대로의 언급은 희화화와 구별한다.",
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "의학·응급 상황이나 일시적 당황의 서술일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "뇌 정지 혐오 표현 국내 용례",
+      "note": "온라인 질병 은유와 이에 대한 환자·가족의 비판을 인용한다. 질병의 문자 그대로의 언급은 희화화와 구별한다."
+    }
+  },
+  {
+    "id": "ko-seizure",
+    "expression": "발작 버튼",
+    "variants": [
+      {
+        "text": "발작 버튼",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "감정 격화를 발작에 빗대어 조롱할 수 있다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "감정적으로 반응하는 사람"
+        },
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "illness"
+    ],
+    "contexts": [
+      {
+        "use": "critical",
+        "description": "온라인 질병 은유와 이에 대한 환자·가족의 비판을 인용한다. 질병의 문자 그대로의 언급은 희화화와 구별한다.",
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "질병 설명·장치 관련 문맥을 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "발작 버튼 혐오 표현 국내 용례",
+      "note": "온라인 질병 은유와 이에 대한 환자·가족의 비판을 인용한다. 질병의 문자 그대로의 언급은 희화화와 구별한다."
+    }
+  },
+  {
+    "id": "ko-ptsd",
+    "expression": "PTSD",
+    "variants": [
+      {
+        "text": "PTSD",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "사소한 불쾌감을 중대한 질환에 비유하는 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "외상후스트레스장애 환자"
+        },
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "illness"
+    ],
+    "contexts": [
+      {
+        "use": "critical",
+        "description": "온라인 질병 은유와 이에 대한 환자·가족의 비판을 인용한다. 질병의 문자 그대로의 언급은 희화화와 구별한다.",
+        "evidence": [
+          {
+            "source": "illness2021",
+            "locator": "본문의 질병 표현 예시"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "진단명·치료·당사자 경험 서술이 기본 독법이다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "PTSD 혐오 표현 국내 용례",
+      "note": "온라인 질병 은유와 이에 대한 환자·가족의 비판을 인용한다. 질병의 문자 그대로의 언급은 희화화와 구별한다."
+    }
+  },
+  {
+    "id": "ko-decision-disability",
+    "expression": "결정장애",
+    "variants": [
+      {
+        "text": "결정장애",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "disability2023",
+            "locator": "보도 제목 시정 권고 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "판단의 어려움을 장애의 열등함에 비유한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "장애인·결정을 망설이는 사람"
+        },
+        "evidence": [
+          {
+            "source": "disability2023",
+            "locator": "보도 제목 시정 권고 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "disability"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "보도 제목의 장애 비유에 관한 시정 권고를 취재하였다. 게임 사용 여부나 개별 발화 의도를 입증하지 않는다.",
+        "evidence": [
+          {
+            "source": "disability2023",
+            "locator": "보도 제목 시정 권고 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "자기 상태 설명과 타인 비하의 기능을 구별한다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "결정장애 혐오 표현 국내 용례",
+      "note": "보도 제목의 장애 비유에 관한 시정 권고를 취재하였다. 게임 사용 여부나 개별 발화 의도를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-blind-money",
+    "expression": "눈먼 돈",
+    "variants": [
+      {
+        "text": "눈먼 돈",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "disability2023",
+            "locator": "보도 제목 시정 권고 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "관리되지 않는 자금을 시각장애에 빗댄 표현이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "none",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "disability2023",
+            "locator": "보도 제목 시정 권고 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "disability"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "보도 제목의 장애 비유에 관한 시정 권고를 취재하였다. 게임 사용 여부나 개별 발화 의도를 입증하지 않는다.",
+        "evidence": [
+          {
+            "source": "disability2023",
+            "locator": "보도 제목 시정 권고 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "특정 사람·집단을 직접 지칭하지 않는 관용구이다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "눈먼 돈 혐오 표현 국내 용례",
+      "note": "보도 제목의 장애 비유에 관한 시정 권고를 취재하였다. 게임 사용 여부나 개별 발화 의도를 입증하지 않는다."
+    }
+  },
+  {
+    "id": "ko-stabbing",
+    "expression": "칼부림",
+    "variants": [
+      {
+        "text": "칼부림",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "arcadeThreat",
+            "locator": "오락실 위협 게시물 보도"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "행동 예고와 결합하면 신체 위해 위협을 검토한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "unknown",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "arcadeThreat",
+            "locator": "오락실 위협 게시물 보도"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "violence"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "보도된 사건의 대상과 이 단어만 있는 합성 닉네임의 대상은 다르다.",
+        "evidence": [
+          {
+            "source": "arcadeThreat",
+            "locator": "오락실 위협 게시물 보도"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "사건 보도·예방·비판적 인용일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "칼부림 혐오 표현 국내 용례",
+      "note": "게임 커뮤니티의 폭력 예고 게시물을 보도한다. 사건 보도와 실제 위협을 구별하며, 일반화한 합성 닉네임에 사건 가담을 부여하지 않는다."
+    }
+  },
+  {
+    "id": "ko-industry",
+    "expression": "산업화",
+    "variants": [
+      {
+        "text": "산업화",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "industry2013",
+            "locator": "민주화·산업화 대조 설명"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "커뮤니티에서 추천·긍정적 변화 뜻으로 전용되었다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "커뮤니티 밖의 상대"
+        },
+        "evidence": [
+          {
+            "source": "industry2013",
+            "locator": "민주화·산업화 대조 설명"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "history",
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "커뮤니티에서 민주화·산업화의 의미가 변형된 광고 사례를 보도한다. 경제·역사 용어의 일반 사용은 별도이다.",
+        "evidence": [
+          {
+            "source": "industry2013",
+            "locator": "민주화·산업화 대조 설명"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "산업 발전이라는 역사·경제 용어이다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "산업화 혐오 표현 국내 용례",
+      "note": "커뮤니티에서 민주화·산업화의 의미가 변형된 광고 사례를 보도한다. 경제·역사 용어의 일반 사용은 별도이다."
+    }
+  },
+  {
+    "id": "ko-mother-insult",
+    "expression": "느금마",
+    "variants": [
+      {
+        "text": "느금마",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "family2017",
+            "locator": "메신저 대화 인용"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "부모를 끌어들여 상대방을 모욕하는 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "상대방 어머니"
+        },
+        "evidence": [
+          {
+            "source": "family2017",
+            "locator": "메신저 대화 인용"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "family"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "메신저 인용에 대한 비판 보도이다. 부모 지칭만으로 성적 가해 의미 전체를 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "family2017",
+            "locator": "메신저 대화 인용"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "방언의 부모 지칭이나 비판 인용일 수 있다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "느금마 혐오 표현 국내 용례",
+      "note": "메신저 인용에 대한 비판 보도이다. 부모 지칭만으로 성적 가해 의미 전체를 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-father-insult",
+    "expression": "느개비",
+    "variants": [
+      {
+        "text": "느개비",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "family2017",
+            "locator": "반응 인용"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "부모를 끌어들여 상대방을 모욕하는 용례이다.",
+        "confidence": "supported",
+        "target": {
+          "state": "identified",
+          "label": "상대방 아버지"
+        },
+        "evidence": [
+          {
+            "source": "family2017",
+            "locator": "반응 인용"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "family"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "메신저 인용에 대한 비판 보도이다. 부모 지칭만으로 성적 가해 의미 전체를 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "family2017",
+            "locator": "반응 인용"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "단독 표기에서 구체적 성적 의미는 확정하지 않는다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "표기와 의미 설명을 해당 출처 범위에서 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "느개비 혐오 표현 국내 용례",
+      "note": "메신저 인용에 대한 비판 보도이다. 부모 지칭만으로 성적 가해 의미 전체를 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-boryu",
+    "expression": "보이루",
+    "variants": [
+      {
+        "text": "보이루",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "boryu2023",
+            "locator": "인사말 어원 정정 보도"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "보겸과 하이루를 결합한 인사말이라는 근거를 우선한다.",
+        "confidence": "supported",
+        "target": {
+          "state": "none",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "boryu2023",
+            "locator": "인사말 어원 정정 보도"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "reporting",
+        "description": "2023년 보도는 인사말의 성적 어원 단정이 잘못되었다는 판결을 설명한다. 앞선 경험조사 응답을 어원의 확정 근거로 삼지 않는다.",
+        "evidence": [
+          {
+            "source": "boryu2023",
+            "locator": "인사말 어원 정정 보도"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "일반 인사·방송 유행어이다."
+    ],
+    "review": {
+      "decision": "accepted",
+      "status": "verified",
+      "reason": "과거 경험조사 목록의 포함 사실만으로 성적 어원을 확정할 수 없어 오탐 점검용으로 채택한다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "보이루 혐오 표현 국내 용례",
+      "note": "2023년 보도는 인사말의 성적 어원 단정이 잘못되었다는 판결을 설명한다. 앞선 경험조사 응답을 어원의 확정 근거로 삼지 않는다."
+    }
+  },
+  {
+    "id": "ko-jabalkkom",
+    "expression": "자발꼼",
+    "variants": [
+      {
+        "text": "자발꼼",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "성적 가해를 암시하는 축약어 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "unknown",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "sexual",
+      "violence"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "정확한 복원·표기 변형부터 확인해야 한다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "자발꼼 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-gangnam-woman",
+    "expression": "강남녀",
+    "variants": [
+      {
+        "text": "강남녀",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "지역·성별을 이용한 비하 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "강남 여성"
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "거주 지역의 중립적 설명일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "강남녀 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-pregnancy-seat",
+    "expression": "질싸인증석",
+    "variants": [
+      {
+        "text": "질싸인증석",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "임산부 배려석을 성적으로 낮추는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "임산부"
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "sexual"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "원문에서 지칭한 시설·대상을 확인해야 한다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "질싸인증석 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-delisted-woman",
+    "expression": "상폐녀",
+    "variants": [
+      {
+        "text": "상폐녀",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "나이를 상품 가치에 비유하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "여성"
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "age"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "금융 용어의 비유적 사용 범위 확인이 필요하다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "상폐녀 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-woman-loss",
+    "expression": "여필패",
+    "variants": [
+      {
+        "text": "여필패",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "패배를 성별에 귀속하는 축약어 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "여성 게이머"
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "원문에서 여의 복원과 게임 맥락을 확인해야 한다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "여필패 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-open-car",
+    "expression": "보픈카",
+    "variants": [
+      {
+        "text": "보픈카",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "차량과 성적 접근을 결합한 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "여성"
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "sexual"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "차량 일반 표현과 구별할 문맥이 필요하다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "보픈카 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-women-enemy",
+    "expression": "보적보",
+    "variants": [
+      {
+        "text": "보적보",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "여성 간 적대가 본성이라는 일반화 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "여성"
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "비판 인용일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "보적보 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-touch-run",
+    "expression": "슴만튀",
+    "variants": [
+      {
+        "text": "슴만튀",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "신체 접촉 후 도주를 희화화하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "unknown",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "sexual",
+      "violence"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "게임 장면·인용 여부와 피해 대상은 미확인이다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "슴만튀 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-bojeonggi",
+    "expression": "보정기",
+    "variants": [
+      {
+        "text": "보정기",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "조사에서 성적 비하로 경험되었다는 표기이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "unknown",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "sexual"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "기기 이름·영상 보정 의미와 동형일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "보정기 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-direct-company",
+    "expression": "직접기업",
+    "variants": [
+      {
+        "text": "직접기업",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "경험조사에 등재되었으나 정확한 뜻은 미확인이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "unknown",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "sexual"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "기업 관련 일반 명사나 오기일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "직접기업 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-yangkimochi",
+    "expression": "양기모찌",
+    "variants": [
+      {
+        "text": "양기모찌",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "성적 유행어로 경험된 표기 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "unknown",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "sexual"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "다른 표기의 오기인지 원문 확인이 필요하다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "양기모찌 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-bojeonkkae",
+    "expression": "보전깨",
+    "variants": [
+      {
+        "text": "보전깨",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "성적·신체적 위해를 암시하는 축약어 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "unknown",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "sexual",
+      "violence"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "피해 대상과 복원형은 원문 대조 전 미확정이다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "보전깨 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-stomping-woman",
+    "expression": "쿵쾅녀",
+    "variants": [
+      {
+        "text": "쿵쾅녀",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "의성어를 외모·성별 조롱에 사용하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "여성"
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "appearance"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "쿵쾅 소리 자체는 비하가 아니다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "쿵쾅녀 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-radical-feminist",
+    "expression": "꼴페미",
+    "variants": [
+      {
+        "text": "꼴페미",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "여성주의자를 낮추는 호칭 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "여성주의자"
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "논증 비판과 사람 비하를 구별해야 한다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "꼴페미 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-borani",
+    "expression": "보라니",
+    "variants": [
+      {
+        "text": "보라니",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "여성 관련 비하로 보고된 표기 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "unknown",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "동음 표현의 정확한 대상은 미확인이다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "보라니 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-feminazi",
+    "expression": "페미나치",
+    "variants": [
+      {
+        "text": "페미나치",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "여성주의를 나치에 대응시키는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "여성주의자"
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "비판적 인용 여부를 확인해야 한다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "페미나치 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-meg-pig",
+    "expression": "메퇘지",
+    "variants": [
+      {
+        "text": "메퇘지",
+        "provenance": "elicited",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "정치·성별·외모를 결합한 조롱 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "여성주의자로 지목된 사람"
+        },
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "appearance"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다.",
+        "evidence": [
+          {
+            "source": "daejeon2020",
+            "locator": "56쪽 표 3-42 또는 바로 위 기타 응답"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "멧돼지 오기·인용과 구별할 원문이 필요하다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "표기는 확인하였으나 개별 의미와 사용 문맥의 추가 검토가 필요하다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "메퇘지 혐오 표현 국내 용례",
+      "note": "56쪽 표 3-42와 기타 응답의 표기만 확인하였다. 온·오프라인 경험을 함께 질문하므로 온라인 유통과 개별 어원·뜻을 확정하지 않는다."
+    }
+  },
+  {
+    "id": "ko-plastic-face",
+    "expression": "성괴",
+    "variants": [
+      {
+        "text": "성괴",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "외모를 괴물에 비유하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "성형한 사람"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "appearance"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "실제 외모·시술 여부를 추정하지 않는다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "성괴 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-paohu",
+    "expression": "파오후",
+    "variants": [
+      {
+        "text": "파오후",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "호흡 소리를 신체 조롱에 사용하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "비만인"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "appearance"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "의성어·자칭일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "파오후 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-glasses-acne",
+    "expression": "안여돼",
+    "variants": [
+      {
+        "text": "안여돼",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "안경·피부·체형을 묶어 비하하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "외모로 분류된 사람"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "appearance"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "축약형의 실제 지칭을 원문에서 확인해야 한다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "안여돼 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-wuhan",
+    "expression": "우한폐렴",
+    "variants": [
+      {
+        "text": "우한폐렴",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "질병을 특정 지역 책임으로 돌리는 용례 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "중국인 또는 환자"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "ethnicity",
+      "illness"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "과거 보도 용어 인용일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "우한폐렴 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-mental",
+    "expression": "정병",
+    "variants": [
+      {
+        "text": "정병",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "정신질환을 욕설·감정 은유로 사용하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "정신질환자 또는 공격받는 사람"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "illness"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "질환 경험의 자칭일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "정병 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-chungcheong",
+    "expression": "멍청도",
+    "variants": [
+      {
+        "text": "멍청도",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "지명을 지능 비하와 결합한 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "충청도 주민"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "region"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "인용·오타 여부를 확인해야 한다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "멍청도 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-gyeongsang-ian",
+    "expression": "경상디언",
+    "variants": [
+      {
+        "text": "경상디언",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "지역민을 별개 종족처럼 구분하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "경상도 주민"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "region"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "중립적 언어유희인지 원문 검토가 필요하다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "경상디언 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-barley-leper",
+    "expression": "보리문디",
+    "variants": [
+      {
+        "text": "보리문디",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "지역 호칭과 질병 비하가 겹치는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "경상도 주민"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "region",
+      "illness"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "지역 내부의 친밀 호칭일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "보리문디 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-north-gyeongbuk",
+    "expression": "경북괴",
+    "variants": [
+      {
+        "text": "경북괴",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "지역을 적대 정치 집단에 빗대는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "경북 주민"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "region",
+      "political"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "실제 정치 소속을 확정하지 않는다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "경북괴 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-daegu-virus",
+    "expression": "대구코로나",
+    "variants": [
+      {
+        "text": "대구코로나",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "감염병 책임을 지역민에게 일반화하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "대구 주민·환자"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "region",
+      "illness"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "지역 감염 현황 설명일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "대구코로나 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-bochu",
+    "expression": "보추",
+    "variants": [
+      {
+        "text": "보추",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "성별 표현을 성적으로 대상화하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "unknown",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "orientation",
+      "sexual"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "서브컬처 자칭과 실제 성 정체성을 구별해야 한다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "보추 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-trans-mental",
+    "expression": "젠신병자",
+    "variants": [
+      {
+        "text": "젠신병자",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "성 정체성을 정신질환으로 비하하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "트랜스젠더"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "orientation",
+      "illness"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "비판적 인용일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "젠신병자 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-mixed-blood",
+    "expression": "잡혈",
+    "variants": [
+      {
+        "text": "잡혈",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "혈통을 열등한 것으로 서열화하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "혼혈인"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "ethnicity"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "동물 혈통·판타지 설정일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "잡혈 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-pure-blood",
+    "expression": "순혈",
+    "variants": [
+      {
+        "text": "순혈",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "혈통의 순수성을 우열로 연결하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "unknown",
+          "label": null
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "ethnicity"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "게임·소설의 종족 설정이나 동물 혈통일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "순혈 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-mixed-person",
+    "expression": "튀기",
+    "variants": [
+      {
+        "text": "튀기",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "혼혈인을 낮추어 부르는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "혼혈인"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "ethnicity"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "조리 동작의 일부일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "튀기 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-nose",
+    "expression": "코쟁이",
+    "variants": [
+      {
+        "text": "코쟁이",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "신체 특징으로 인종을 낮추는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "서양인"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "ethnicity"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "캐릭터 묘사·친밀 호칭일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "코쟁이 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-black-skin",
+    "expression": "검둥이",
+    "variants": [
+      {
+        "text": "검둥이",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "피부색으로 사람을 비하하는 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "흑인"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "ethnicity"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "동물 이름·색 묘사일 수 있다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "검둥이 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-menstruation",
+    "expression": "피싸개",
+    "variants": [
+      {
+        "text": "피싸개",
+        "provenance": "reported",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "생리 현상을 사람의 멸칭으로 전환한 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "identified",
+          "label": "여성"
+        },
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "riskTypes": [
+      "gender",
+      "sexual"
+    ],
+    "contexts": [
+      {
+        "use": "quotation",
+        "description": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다.",
+        "evidence": [
+          {
+            "source": "kisdi2021",
+            "locator": "인쇄면 35쪽 표 2-1"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "상처 묘사인지 원문 맥락이 필요하다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "provisional",
+      "reason": "키워드 표의 표기만 확인하였다. 의미 후보는 편집자의 가설이며 원문 문맥 대조 전에는 정답으로 사용하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "피싸개 혐오 표현 국내 용례",
+      "note": "35쪽 표 2-1의 검색 수록문이다. 검색용 키워드와 중립어가 섞여 있으며 OCR 이형도 있다. 개별 의미·실사용 확인 전에는 후보로만 보존한다."
+    }
+  },
+  {
+    "id": "ko-lightbulb",
+    "expression": "전구넣고깨기",
+    "variants": [
+      {
+        "text": "전구넣고깨기",
+        "provenance": "user_report",
+        "evidence": [
+          {
+            "source": "userLightbulb",
+            "locator": "승인 계획의 지정 사례"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "가학·신체 위해를 암시하는 해석 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "unknown",
+          "label": null
+        },
+        "evidence": []
+      }
+    ],
+    "riskTypes": [
+      "violence"
+    ],
+    "contexts": [
+      {
+        "use": "unknown",
+        "description": "표기와 가학·신체 위해 해석 후보만 제공되었다. 원문·대상·성적 맥락·유래는 미확인이다.",
+        "evidence": [
+          {
+            "source": "userLightbulb",
+            "locator": "승인 계획의 지정 사례"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "대상·성적 맥락·유래는 원문 확보 후 판단한다."
+    ],
+    "review": {
+      "decision": "held",
+      "status": "unverified",
+      "reason": "사용자 제보를 보존한다. 특정 피해 대상·성적 의미·유래를 확정하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "전구넣고깨기 혐오 표현 국내 용례",
+      "note": "원문 미확보. 확정 정답 근거로 사용할 수 없다."
+    }
+  },
+  {
+    "id": "ko-foreign-echo",
+    "expression": "(((국제금융)))",
+    "variants": [
+      {
+        "text": "(((국제금융)))",
+        "provenance": "synthetic",
+        "evidence": [
+          {
+            "source": "scopeDecision",
+            "locator": "승인 계획의 제외 목록"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "국내 용례 근거 없는 기존 합성 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "none",
+          "label": null
+        },
+        "evidence": []
+      }
+    ],
+    "riskTypes": [
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "unknown",
+        "description": "해외 상징 기반 합성 이름 3건과 수학 괄호 대조군을 제외한다.",
+        "evidence": [
+          {
+            "source": "scopeDecision",
+            "locator": "승인 계획의 제외 목록"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "괄호 장식일 수 있다."
+    ],
+    "review": {
+      "decision": "excluded",
+      "status": "unverified",
+      "reason": "국내 맥락 중심 조사 범위에서 제외한다. 해외 상징만으로 의미를 확정하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "(((국제금융))) 혐오 표현 국내 용례",
+      "note": "합성 후보의 범위 결정이며 국내 관측 근거가 아니다."
+    }
+  },
+  {
+    "id": "ko-foreign-1488",
+    "expression": "하얀미래1488",
+    "variants": [
+      {
+        "text": "하얀미래1488",
+        "provenance": "synthetic",
+        "evidence": [
+          {
+            "source": "scopeDecision",
+            "locator": "승인 계획의 제외 목록"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "국내 용례 근거 없는 기존 합성 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "none",
+          "label": null
+        },
+        "evidence": []
+      }
+    ],
+    "riskTypes": [
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "unknown",
+        "description": "해외 상징 기반 합성 이름 3건과 수학 괄호 대조군을 제외한다.",
+        "evidence": [
+          {
+            "source": "scopeDecision",
+            "locator": "승인 계획의 제외 목록"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "색 표현과 숫자 조합일 수 있다."
+    ],
+    "review": {
+      "decision": "excluded",
+      "status": "unverified",
+      "reason": "국내 맥락 중심 조사 범위에서 제외한다. 해외 상징만으로 의미를 확정하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "하얀미래1488 혐오 표현 국내 용례",
+      "note": "합성 후보의 범위 결정이며 국내 관측 근거가 아니다."
+    }
+  },
+  {
+    "id": "ko-foreign-sun",
+    "expression": "검은태양기사단",
+    "variants": [
+      {
+        "text": "검은태양기사단",
+        "provenance": "synthetic",
+        "evidence": [
+          {
+            "source": "scopeDecision",
+            "locator": "승인 계획의 제외 목록"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "국내 용례 근거 없는 기존 합성 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "none",
+          "label": null
+        },
+        "evidence": []
+      }
+    ],
+    "riskTypes": [
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "unknown",
+        "description": "해외 상징 기반 합성 이름 3건과 수학 괄호 대조군을 제외한다.",
+        "evidence": [
+          {
+            "source": "scopeDecision",
+            "locator": "승인 계획의 제외 목록"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "판타지 길드명일 수 있다."
+    ],
+    "review": {
+      "decision": "excluded",
+      "status": "unverified",
+      "reason": "국내 맥락 중심 조사 범위에서 제외한다. 해외 상징만으로 의미를 확정하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "검은태양기사단 혐오 표현 국내 용례",
+      "note": "합성 후보의 범위 결정이며 국내 관측 근거가 아니다."
+    }
+  },
+  {
+    "id": "ko-math-parentheses",
+    "expression": "수학(((1+2)*3)-4)",
+    "variants": [
+      {
+        "text": "수학(((1+2)*3)-4)",
+        "provenance": "synthetic",
+        "evidence": [
+          {
+            "source": "scopeDecision",
+            "locator": "승인 계획의 제외 목록"
+          }
+        ]
+      }
+    ],
+    "interpretations": [
+      {
+        "reading": "국내 용례 근거 없는 기존 합성 후보이다.",
+        "confidence": "hypothesis",
+        "target": {
+          "state": "none",
+          "label": null
+        },
+        "evidence": []
+      }
+    ],
+    "riskTypes": [
+      "community"
+    ],
+    "contexts": [
+      {
+        "use": "unknown",
+        "description": "해외 상징 기반 합성 이름 3건과 수학 괄호 대조군을 제외한다.",
+        "evidence": [
+          {
+            "source": "scopeDecision",
+            "locator": "승인 계획의 제외 목록"
+          }
+        ]
+      }
+    ],
+    "ordinaryReadings": [
+      "수학식 괄호이다."
+    ],
+    "review": {
+      "decision": "excluded",
+      "status": "unverified",
+      "reason": "국내 맥락 중심 조사 범위에서 제외한다. 해외 상징만으로 의미를 확정하지 않는다.",
+      "checkedAt": "2026-11-25"
+    },
+    "research": {
+      "query": "수학(((1+2)*3)-4) 혐오 표현 국내 용례",
+      "note": "합성 후보의 범위 결정이며 국내 관측 근거가 아니다."
+    }
+  }
+]

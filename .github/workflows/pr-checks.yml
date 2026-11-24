@@ -33,6 +33,9 @@ jobs:
       - name: Test integration runner
         run: node --test scripts/run-integration.test.mjs
 
+      - name: Validate expression DB source data
+        run: node benchmarks/term-origins/expressions/build.mjs
+
       - uses: actions/setup-go@v5
         if: steps.changes.outputs.release == 'true'
         with:
@@ -69,6 +72,10 @@ jobs:
       - name: Build shared contracts prerequisite
         if: steps.changes.outputs.contracts == 'true'
         run: npm run build --workspace=@pcu/contracts
+
+      - name: Validate expression DB and curated nickname evaluation
+        if: steps.changes.outputs.contracts == 'true'
+        run: node --test benchmarks/term-origins/expressions/validate.test.mjs
 
       - name: Test shared contracts
         if: steps.changes.outputs.contracts == 'true' && steps.changes.outputs.full != 'true'
