@@ -217,6 +217,7 @@ export const LabSearchModeSchema = z.enum(['no_search', 'backend_retrieval', 'ag
 export const LabCreateRunSchema = z
 	.strictObject({
 		datasetId: z.uuid(),
+    finalTest: z.boolean().optional(),
 		size: z.number().int().min(1).max(LAB_MAX_CASES),
 		split: LabSplitSchema.optional(),
 		caseIds: z.array(caseId).min(1).max(LAB_MAX_CASES).optional(),
@@ -260,6 +261,7 @@ export const LabDatasetSchema = z.object({
 	createdAt: z.iso.datetime(),
 });
 export const LabRunSchema = z.object({
+  finalTest: z.boolean().optional(),
 	id: z.uuid(),
 	datasetId: z.uuid(),
 	datasetHash: z.string(),

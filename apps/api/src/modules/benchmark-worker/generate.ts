@@ -79,6 +79,7 @@ export async function generateText(
 	const fence = /^```json[ \t]*\r?\n([\s\S]+?)\r?\n```$/i.exec(text.trim());
 	return {
 		content: fence ? fence[1]! : text,
+    rawContent: text,
 		usage: { inputTokens, outputTokens, seconds, jsonFenceRemoved: !!fence },
 		tool_calls: undefined,
 	};

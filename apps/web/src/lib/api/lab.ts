@@ -1,4 +1,4 @@
-import type { LabUpload, LabSplitSchema, LabBetaUserSchema, LabCase, LabCreateRun, LabDataset, LabResult, LabRun, LabStatus } from '@pcu/contracts';
+import type { LabReviewBundle, LabSaveReview, LabHumanReview, LabCreateCandidate, LabCandidate, LabCandidateDecision, LabCurationOverview, LabCurationExport, LabCurationExportRequest, LabUpload, LabSplitSchema, LabBetaUserSchema, LabCase, LabCreateRun, LabDataset, LabResult, LabRun, LabStatus } from '@pcu/contracts';
 import type { z } from 'zod';
 import { api } from './client';
 
@@ -14,7 +14,15 @@ function pageQuery(page: number, q: string, status?: string) {
   return query;
 }
 
+const runPath = (id: string) => `/api/lab/runs/${encodeURIComponent(id)}`;
 export const labApi = {
+  review: (id: string, caseId: string) => api.get<LabReviewBundle>(`${runPath(id)}/results/${encodeURIComponent(caseId)}/review`),
+  saveReview: (id: string, caseId: string, body: LabSaveReview) => api.post<LabHumanReview>(`${runPath(id)}/results/${encodeURIComponent(caseId)}/review`, body),
+  candidate: (id: string, caseId: string, body: LabCreateCandidate) => api.post<LabCandidate>(`${runPath(id)}/results/${encodeURIComponent(caseId)}/candidates`, body),
+  decideCandidate: (id: string, candidateId: string, body: LabCandidateDecision) => api.post<LabCandidate>(`${runPath(id)}/candidates/${encodeURIComponent(candidateId)}/decision`, body),
+  curation: (id: string, threshold = 50) => api.get<LabCurationOverview>(`${runPath(id)}/curation?threshold=${threshold}`),
+  createCurationExport: (id: string, body: LabCurationExportRequest) => api.post<LabCurationExport>(`${runPath(id)}/curation/exports`, body),
+  curationExport: (id: string, exportId: string) => api.get<LabCurationExport>(`${runPath(id)}/curation/exports/${encodeURIComponent(exportId)}`),
   status: () => api.get<LabStatus>('/api/lab/status'),
   datasets: (page = 1) => api.get<LabDataset[]>(`/api/lab/datasets?page=${page}`),
   upload: (input: LabUpload) => api.post<LabDataset>('/api/lab/datasets', input),

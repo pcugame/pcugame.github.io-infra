@@ -6,7 +6,7 @@ import { runIntegration } from './run-integration.mjs';
 
 // File selections and parallelism captured from the previous root commands.
 const expectedSuites = {
- 'nickname-evaluation': ['src/__tests__/nickname-evaluation.postgres.test.ts', 'src/__tests__/nickname-research.postgres.test.ts', 'src/__tests__/lab-migration.postgres.test.ts', 'src/modules/benchmark-worker/repository.postgres.test.ts'],
+ 'nickname-evaluation': ['src/__tests__/nickname-evaluation.postgres.test.ts', 'src/__tests__/nickname-research.postgres.test.ts', 'src/__tests__/lab-human.postgres.test.ts', 'src/__tests__/lab-migration.postgres.test.ts', 'src/modules/benchmark-worker/repository.postgres.test.ts'],
  'awards-gateway': ['src/__tests__/awards-gateway.garage.postgres.test.ts'],
  awards: ['src/__tests__/awards.postgres.test.ts'],
  voting: ['src/__tests__/voting.postgres.test.ts'],

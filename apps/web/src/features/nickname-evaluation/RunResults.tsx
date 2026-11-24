@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type LabRun } from '@pcu/contracts';
+import { LAB_PAGE_SIZE, type LabRun } from '@pcu/contracts';
 import { Button, ProgressBar, SelectField, TextField } from '../../components/ui';
 import { labApi, type LabFormat } from '../../lib/api/lab';
 import { useViewerKey } from '../../lib/query/visibility';
 import { LabError, Pager } from './common';
 import { active, resultLabels, runLabel, runLabels } from './labels';
 import { ResultDetail } from './ResultDetail';
+import { HumanReview } from './HumanReview';
+import { CurationPanel } from './CurationPanel';
 
 async function download(id: string, format: LabFormat) {
   const file = await labApi.export(id, format);
@@ -25,6 +27,9 @@ export function RunResults({ id }: { id: string }) {
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [index, setIndex] = useState(0);
+  const [reviewMode, setReviewMode] = useState(true);
   const run = useQuery({
     queryKey: viewerKey(['lab-run', id]), queryFn: () => labApi.run(id),
     refetchInterval: query => active(query.state.data) ? 1800 : false,
@@ -59,6 +64,7 @@ export function RunResults({ id }: { id: string }) {
         <dt>모델 / 검색 모드</dt><dd>{info.provider} · {info.model} · {info.searchMode}</dd>
         <dt>생성 설정</dt><dd>Temperature {info.temperature} · 출력 {info.maxTokens} 토큰</dd>
         <dt>스키마 / 평가 지침</dt><dd>{info.schemaVersion} / {info.evaluationProtocol}</dd>
+        <dt>평가 용도</dt><dd>{info.finalTest ? '최종 평가 · 반복 튜닝 제외' : '개발 벤치마크'}</dd>
         <dt>평가 split</dt><dd>{info.split ?? '전체'}</dd>
         <dt>데이터셋 버전</dt><dd>{info.datasetVersion}</dd>
         <dt>데이터셋 SHA-256</dt><dd>{info.datasetHash}</dd><dt>프롬프트 SHA-256</dt><dd>{info.promptHash}</dd>
@@ -73,21 +79,26 @@ export function RunResults({ id }: { id: string }) {
     </div>
     <LabError error={action.error || save.error} />
     <div className="lab-grid">
-      <TextField label="결과 검색" type="search" maxLength={160} placeholder="닉네임 또는 케이스 ID" value={q} onChange={e => { setQ(e.target.value); setPage(1); }} />
-      <SelectField label="처리 상태" value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}>
+      <TextField label="결과 검색" disabled={editing} type="search" maxLength={160} placeholder="닉네임 또는 케이스 ID" value={q} onChange={e => { setQ(e.target.value); setPage(1); setIndex(0); }} />
+      <SelectField label="처리 상태" disabled={editing} value={status} onChange={e => { setStatus(e.target.value); setPage(1); setIndex(0); }}>
         <option value="">전체</option>
         {Object.entries(resultLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
       </SelectField>
     </div>
+    <label><input type="checkbox" disabled={editing} checked={reviewMode} onChange={e => setReviewMode(e.target.checked)} />한 사례씩 검수 (정답은 공개 전 숨김)</label>
     <LabError error={rows.error} />
     {rows.isSuccess && <>
-      {rows.data.items.map(item => <details className="lab-row" key={item.caseId}>
+      {reviewMode && rows.data.items[index] && <HumanReview key={`${page}/${index}`} runId={id} item={rows.data.items[index]} onDirtyChange={setEditing}
+        previous={index > 0 ? () => setIndex(index - 1) : page > 1 ? () => { setPage(page - 1); setIndex(LAB_PAGE_SIZE - 1); } : undefined}
+        next={index + 1 < rows.data.items.length ? () => setIndex(index + 1) : page * LAB_PAGE_SIZE < rows.data.total ? () => { setPage(page + 1); setIndex(0); } : undefined} />}
+      {!reviewMode && rows.data.items.map(item => <details className="lab-row" key={item.caseId}>
         <summary><span>{item.caseId}</span> <strong>{item.testCase.nickname}</strong> <small>{resultLabels[item.status]} · {item.output?.score ?? '—'}점</small></summary>
         <ResultDetail item={item} />
       </details>)}
       {!rows.data.items.length && <p>조건에 맞는 결과가 없습니다.</p>}
-      <Pager page={page} total={rows.data.total} change={setPage} />
+      <div inert={editing}><Pager page={page} total={rows.data.total} change={value => { setPage(value); setIndex(0); }} /></div>
     </>}
+    <CurationPanel key={id} runId={id} completedAt={info.completedAt} />
   </>;
 }
 

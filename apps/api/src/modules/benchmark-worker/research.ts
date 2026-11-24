@@ -15,7 +15,7 @@ import { readGenerateHealth, type ToolSupport } from './status.js';
 const actionSchema = z.toJSONSchema(LabResearchActionSchema, { target: 'draft-7' });
 type ShownSource = { id: string; title: string; snippet: string; evidenceKind: 'search_snippet'; originalFetched: false };
 type GenerationStep = {
-	kind: 'action' | 'answer'; systemPrompt: string; prompt: string; schema: unknown;
+	kind: 'action' | 'answer'; rawResponse?: string; systemPrompt: string; prompt: string; schema: unknown;
 	maxOutputTokens: number; inputTokens: number; outputTokens: number | null;
 	reservedOutputTokens: number; durationMs: number; seconds?: number; finishReason?: string;
 	suppliedSources: ShownSource[]; action?: LabResearchAction; error?: string;
@@ -131,6 +131,8 @@ export async function evaluateResearch(
 				finish_reason: z.string(),
 			}).safeParse(raw);
 			if (!reply.success) throw new LabFailure('MODEL_INVALID_ENVELOPE');
+			// JSON string encoding preserves invalid Unicode/NUL output without breaking PostgreSQL jsonb.
+			step.rawResponse = JSON.stringify(reply.data.text);
 			step.outputTokens = reply.data.output_tokens;
 			step.seconds = reply.data.seconds;
 			step.finishReason = reply.data.finish_reason;

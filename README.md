@@ -29,7 +29,7 @@
 
 ### 닉네임 평가 실험실
 
-`/lab/nickname-evaluation`에서 베타 테스터와 관리자가 사람이 작성한 한국어 기반 닉네임·기대 근거·점수 데이터로 로컬 LLM을 평가한다. 모델에는 고정 지침·닉네임과 검색 모드에 따른 수집 자료를 전달하며, 기대 근거·점수와 split·표현군은 평가 관리에 사용한다. 연구 프로파일은 검색 없음·Worker 선검색·모델 능동 조사를 비교하고 검색어·해석 후보·출처·토큰을 기록한다. 비동기 실행, 실험 결과 비교, JSON·JSONL·CSV 내보내기를 지원한다. 기본 설정은 비활성이다. [실험실 설정 및 운영 검증](docs/operations/nickname-evaluation-lab.md) · [연구 데이터 양식](benchmarks/nickname-evaluation/templates/nickname-research.jsonl)
+`/lab/nickname-evaluation`에서 베타 테스터와 관리자가 사람이 작성한 한국어 기반 닉네임·기대 근거·점수 데이터로 로컬 LLM을 평가한다. 모델에는 고정 지침·닉네임과 검색 모드에 따른 수집 자료를 전달하며, 기대 근거·점수와 split·표현군은 평가 관리에 사용한다. 연구 프로파일은 검색 없음·Worker 선검색·모델 능동 조사를 비교하고 검색어·해석 후보·출처·토큰을 기록한다. 비동기 실행, 실험 결과 비교, JSON·JSONL·CSV 내보내기를 지원한다. 사람 검수와 교정 후보 승인, 표현군 분할, 학습·평가 JSONL 생성을 지원한다. [Human Evaluation과 학습 데이터 선별](docs/operations/nickname-human-evaluation.md). 기본 설정은 비활성이다. [실험실 설정 및 운영 검증](docs/operations/nickname-evaluation-lab.md) · [연구 데이터 양식](benchmarks/nickname-evaluation/templates/nickname-research.jsonl)
 
 ## Safari 로그인 안내
 

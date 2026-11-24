@@ -134,7 +134,7 @@ it('imports nickname references and CSV, enforces fixed instructions and split s
  const fixed = { ...settings, datasetId: dataset.id };
  await expect(labApi.create({ ...fixed, split: 'test', caseIds: ['nick-0001'] })).rejects.toMatchObject({ status: 400 });
  await expect(labApi.create({ ...fixed, size: 3 })).rejects.toMatchObject({ status: 400 });
- const { runId } = await labApi.create({ ...fixed, split: 'test', caseIds: ['nick-0002'] });
+ const { runId } = await labApi.create({ ...fixed, split: 'test', finalTest: true, caseIds: ['nick-0002'] });
  advance(2000);
  const run = LabRunSchema.parse(await labApi.run(runId));
  expect(run).toMatchObject({ success: 1, evaluationProtocol: 'nickname-risk-v1', split: 'test' });

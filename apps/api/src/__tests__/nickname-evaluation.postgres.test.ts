@@ -423,11 +423,11 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 				await api('GET', `/compare?left=${smoke}&right=${runId}`, 400);
 				previous = runId;
 			}
-			const { runId } = await api('POST', '/runs', 202, { ...settings, size: 3 });
+			const { runId } = await api('POST', '/runs', 202, { ...settings, size: 3, finalTest: true });
 			await done(runId, 3);
 			const outbound = fake.requests.slice(start).join('\n');
 			expect(outbound).toContain(data[0]!.nickname);
-			expect(outbound).not.toMatch(/SECRET_|expectedReason|expectedScore|familyId|"split"|"tags"/);
+			expect(outbound).not.toMatch(/SECRET_|expectedReason|expectedScore|familyId|finalTest|"split"|"tags"/);
 		}, 120_000);
 
 		it('persists invalid outputs as failures, retries explicitly and cancels a queued run', async () => {

@@ -1,10 +1,10 @@
-import type { LabResult } from '@pcu/contracts';
+import { labLastAttempt, type LabResult } from '@pcu/contracts';
 import { z } from 'zod';
 import { resultLabels } from './labels';
 
-export function ResultDetail({ item }: { item: LabResult }) {
+export function ResultDetail({ item, showReference = true }: { item: LabResult; showReference?: boolean }) {
   const out = item.output;
-  const sources = item.sources.filter(source => out?.sourceIds.includes(source.id));
+  const sources = item.sources;
   const research = item.history.flatMap(entry => {
     const parsed = z.object({ research: z.object({
       limitations: z.array(z.string()), inputTokens: z.number(), outputTokens: z.number(),
@@ -31,16 +31,21 @@ export function ResultDetail({ item }: { item: LabResult }) {
         <dt>위험 점수</dt><dd>{out.score === null ? '판단 보류' : `${out.score} / 100`}{out.abstained && ' · 답변 유보'}</dd>
         <dt>판단 신뢰도</dt><dd>{Math.round(out.confidence * 100)}%</dd>
       </>}
+      {showReference && <>
       <dt>사람의 기대 근거 (검토 가설)</dt><dd>{item.testCase.reference.expectedReason}</dd>
       <dt>기대 점수 / 범위</dt><dd>{item.testCase.reference.expectedScore} / {item.testCase.reference.scoreRange?.join('–') ?? '미지정'}</dd>
-      <dt>split / family</dt><dd>{item.testCase.split ?? '미지정'} / {item.testCase.familyId ?? '미지정'}</dd>
-      {out && <>
-        <dt>참조 출처</dt><dd>{sources.length === 0 ? '인용된 출처 없음' : <ul>{sources.map(source => <li key={source.id}>
-          {/^https?:\/\//i.test(source.url) && <a href={source.url} target="_blank" rel="noopener noreferrer">{source.id} · {source.title}</a>}
-          <small>{source.collectedAt} · 검색 발췌문 · 원문 미검증</small><span>{source.snippet}</span>
-        </li>)}</ul>}</dd>
+      <dt>실제 − 기대 점수</dt><dd>{out?.score == null ? '채점 불가' : `${out.score - item.testCase.reference.expectedScore}점 (절대 오차 ${Math.abs(out.score - item.testCase.reference.expectedScore)})`}</dd>
       </>}
+      <dt>split / family</dt><dd>{item.testCase.split ?? '미지정'} / {item.testCase.familyId ?? '미지정'}</dd>
+      <>
+        <dt>검색 결과·출처</dt><dd>{sources.length === 0 ? '수집한 출처 없음' : <ul>{sources.map(source => <li key={source.id}>
+          {/^https?:\/\//i.test(source.url) && <a href={source.url} target="_blank" rel="noopener noreferrer">{source.id} · {source.title}</a>}
+          <small>{out?.sourceIds.includes(source.id) ? '모델 인용 · ' : '미인용 · '}{source.collectedAt} · 검색 발췌문 · 원문 미검증</small><span>{source.snippet}</span>
+        </li>)}</ul>}</dd>
+      </>
     </dl>
+    <details><summary>원본 응답·전체 실행 이력</summary><pre>{JSON.stringify({ output: item.output, history: item.history }, null, 2)}</pre></details>
+    {labLastAttempt(item)?.searchSteps?.map((step, i) => <p key={i}>검색: {step.query} · {step.durationMs} ms{step.error && ` · ${step.error}`}</p>)}
     {research.map((trace, i) => <section key={i}>
       <h3>모델 조사 기록</h3>
       <p>입력 {trace.inputTokens} · 출력 {trace.outputTokens}토큰 · 검색 발췌문만 사용, 원문 미검증</p>

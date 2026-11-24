@@ -1,60 +1,32 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {
 	LAB_ACTIVE_RUN_LIMIT,
 	LAB_CASE_ATTEMPT_LIMIT,
 	LAB_PAGE_SIZE,
 	LabCaseSchema,
 	LabDatasetSchema,
-	LabResultSchema,
 	LabRunSchema,
 	formatLabExport,
 	parseLabUpload,
 	LAB_DATASET_IDENTITY,
 	LAB_NICKNAME_SYSTEM_PROMPT,
 	LAB_NICKNAME_PROTOCOL,
+  labFamilyKey,
 	type LAB_RESEARCH_PROFILE,
 	LAB_RESEARCH_SYSTEM_PROMPT,
 	type LabUpload,
 	type LabSplitSchema,
 	type LabCreateRun,
-	type LabResult,
-	type UserRole,
 } from '@pcu/contracts';
 import type { z } from 'zod';
 import { Prisma, type PrismaClient, type LabRun } from '../../generated/prisma/client.js';
 import { badRequest, conflict, notFound } from '../../shared/errors.js';
 
-type Actor = { id: number; role: UserRole };
+import { betaRoles, userFields, sha, offset, scope, withCase, matchesCase, resultView, readableRun, readableDataset, type Actor } from './access.js';
+import { createLabHumanRepository, freezeLabFamilies } from './human-repository.js';
+
 type Page = { page: number; q: string; split?: z.infer<typeof LabSplitSchema> };
 type Tx = Prisma.TransactionClient;
-type ResultRow = Prisma.LabResultGetPayload<{ include: { testCase: { select: { body: true } } } }>;
-const withCase = { testCase: { select: { body: true } } } as const;
-const betaRoles = ['USER', 'BETA_TESTER'] as const;
-const userFields = { id: true, email: true, name: true, role: true };
-const sha = (text: string) => createHash('sha256').update(text).digest('hex');
-const offset = (page: number) => (page - 1) * LAB_PAGE_SIZE;
-const scope = (actor: Actor) => (actor.role === 'ADMIN' ? {} : { ownerId: actor.id });
-
-function matchesCase(q: string): Prisma.LabTestCaseWhereInput {
-	const contains = { contains: q, mode: 'insensitive' as const };
-	return q ? { OR: [{ caseId: contains }, { nickname: contains }] } : {};
-}
-
-function resultView(row: ResultRow): LabResult {
-	return LabResultSchema.parse({ ...row, testCase: row.testCase.body });
-}
-
-async function readableRun(db: Tx, actor: Actor, id: string) {
-	const run = await db.labRun.findFirst({ where: { id, ...scope(actor) } });
-	if (!run) throw notFound('Run not found');
-	return run;
-}
-
-async function readableDataset(db: Tx, actor: Actor, id: string) {
-	const dataset = await db.labDataset.findFirst({ where: { id, ...scope(actor) } });
-	if (!dataset) throw notFound('Dataset not found');
-	return dataset;
-}
 
 // Aggregate within PostgreSQL. Progress polling never transfers case bodies or response text.
 async function runViews(db: Tx, runs: LabRun[]) {
@@ -93,6 +65,7 @@ async function runViews(db: Tx, runs: LabRun[]) {
 
 export function createLabRepository(db: PrismaClient) {
 	return {
+		...createLabHumanRepository(db),
 		async datasets(actor: Actor, page: number) {
 			const datasets = await db.labDataset.findMany({
 				where: scope(actor),
@@ -128,6 +101,7 @@ export function createLabRepository(db: PrismaClient) {
 				});
 				if (inserted.count)
 					await tx.labTestCase.createMany({ data: rows.map((row) => ({ ...row, datasetId: id })) });
+				await freezeLabFamilies(tx, cases);
 				return tx.labDataset.findUniqueOrThrow({ where: { ownerId_hash: { ownerId: actor.id, hash } } });
 			});
 			return LabDatasetSchema.parse({ ...dataset, createdAt: dataset.createdAt.toISOString() });
@@ -160,10 +134,13 @@ export function createLabRepository(db: PrismaClient) {
 				const cases = await tx.labTestCase.findMany({
 					where: { datasetId: dataset.id, split: request.split, caseId: { in: request.caseIds } },
 					orderBy: { ordinal: 'asc' },
-					select: { caseId: true },
+					select: { caseId: true, nickname: true, familyId: true, split: true },
 					take: request.size,
 				});
 				if (cases.length !== request.size) throw badRequest('Invalid case selection');
+        const plan = await freezeLabFamilies(tx, cases.map(c => ({ nickname: c.nickname, familyId: c.familyId ?? undefined, split: (c.split ?? undefined) as 'train' | 'validation' | 'test' | undefined })));
+        if (cases.some(c => c.split === 'test' || (c.familyId && plan[labFamilyKey(c.familyId)] === 'test')) && !request.finalTest)
+          throw badRequest('test 표현군은 튜닝에서 제외됩니다. 설정을 확정하고 최종 평가 사용을 명시하세요.');
 				const { caseIds, ...settings } = request;
 				const run = await tx.labRun.create({
 					data: {

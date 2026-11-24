@@ -51,6 +51,7 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   const [selected, setSelected] = useState<string[]>([]);
   const [sizeMode, setSizeMode] = useState('1');
   const [customSize, setCustomSize] = useState('1');
+  const [finalTest, setFinalTest] = useState(false);
   const [split, setSplit] = useState<LabSplit | ''>('');
   const [defaultSplit, setDefaultSplit] = useState<LabSplit | ''>('');
   const [searchMode, setMode] = useState<LabSearchMode>('no_search');
@@ -83,7 +84,7 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   });
   const create = useMutation({
     mutationFn: () => labApi.create({
-      datasetId: dataset!.id, size, ...(split ? { split } : {}), model: status.model, temperature: limits?.fixedTemperature ?? Number(temperature),
+      datasetId: dataset!.id, size, finalTest, ...(split ? { split } : {}), model: status.model, temperature: limits?.fixedTemperature ?? Number(temperature),
       maxTokens: Number(maxTokens), searchMode: effectiveMode, ...(selected.length ? { caseIds: selected } : {}),
     }),
     onSuccess: async ({ runId }) => {
@@ -146,6 +147,7 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
       </div>
       <LabError error={create.error} />
       {!validSize && dataset && <p>현재 split에서 실행 가능한 개수는 {count}개입니다.</p>}
+      <label><input type="checkbox" checked={finalTest} onChange={e => setFinalTest(e.target.checked)} />설정을 확정한 최종 평가이며 test 결과를 반복 튜닝에 사용하지 않습니다.</label>
       <div className="lab-actions">
         <Button type="submit" disabled={!validSize || !dataset || !status.model || upload.isPending || create.isPending || (selected.length > 0 && selected.length !== size)}>
           {create.isPending ? '요청 중…' : `${size}개 평가 실행`}

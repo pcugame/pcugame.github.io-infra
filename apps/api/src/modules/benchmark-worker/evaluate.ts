@@ -45,6 +45,10 @@ export type Attempt = {
 	error: string | null;
 	retryable: boolean;
 	research?: ResearchTrace;
+  generationContexts?: { stage: 'action' | 'answer'; messages: Message[]; suppliedSources: LabSource[]; durationMs: number; rawResponse?: string; error?: string }[];
+  searchDurationMs?: number;
+  searchSteps?: { query: string; language: string; durationMs: number; sources: LabSource[]; error?: string }[];
+  generationDurationMs?: number;
 };
 
 const searchArgs = z.strictObject({
@@ -103,26 +107,41 @@ export async function evaluateCase(
 		output: null,
 		error: null,
 		retryable: false,
+    searchDurationMs: 0, generationDurationMs: 0,
 	};
 	async function generate(messages: Message[], mode: OutputMode | 'prompt') {
 		signal.throwIfAborted();
 		const start = performance.now();
+    const context: NonNullable<Attempt['generationContexts']>[number] = { stage: mode === 'tools' ? 'action' : 'answer',
+      messages: mode === 'prompt' ? [{ role: 'user', content: messages.map(m => m.content).join('\n\n') }] : structuredClone(messages), suppliedSources: structuredClone(mode === 'prompt' ? generateEvidence(attempt.sources) : attempt.sources), durationMs: 0 };
+    (attempt.generationContexts ??= []).push(context);
 		try {
 			if (mode === 'prompt') {
 				const prompt = messages.map((message) => message.content).join('\n\n');
 				const reply = await generateText(config, prompt, item.maxTokens, signal);
 				(attempt.generationUsage ??= []).push(reply.usage);
+				context.rawResponse = JSON.stringify(reply.rawContent);
 				return reply;
 			}
-			return await chat(config, item, messages, mode, signal);
+			const reply = await chat(config, item, messages, mode, signal);
+      context.rawResponse = JSON.stringify(reply);
+      return reply;
 		} finally {
-			attempt.durationMs += Math.round(performance.now() - start);
+			context.durationMs = Math.round(performance.now() - start);
+      attempt.generationDurationMs = (attempt.generationDurationMs ?? 0) + context.durationMs;
+      attempt.durationMs += context.durationMs;
 		}
 	}
 	async function retrieve(query: string, language: string) {
 		if (attempt.searchCount >= 2) throw new LabFailure('SEARCH_LIMIT');
 		attempt.searchCount++;
-		const results = await search.search(query, language, signal);
+		const searchStart = performance.now();
+    const step: NonNullable<Attempt['searchSteps']>[number] = { query, language, durationMs: 0, sources: [] };
+    (attempt.searchSteps ??= []).push(step);
+    let results;
+    try { results = await search.search(query, language, signal); }
+    catch (error) { step.error = error instanceof LabFailure ? error.code : 'SEARCH_FAILED'; throw error; }
+    finally { step.durationMs = Math.round(performance.now() - searchStart); attempt.searchDurationMs = (attempt.searchDurationMs ?? 0) + step.durationMs; }
 		const found: LabSource[] = [];
 		for (const result of results) {
 			const existing = attempt.sources.find(({ url }) => url === result.url);
@@ -130,6 +149,7 @@ export async function evaluateCase(
 			if (!existing) attempt.sources.push(source);
 			found.push(source);
 		}
+		step.sources = found;
 		return found.map((source) => ({ ...source, snippet: source.snippet.slice(0, 180) }));
 	}
 	async function execute(call: ToolCall) {

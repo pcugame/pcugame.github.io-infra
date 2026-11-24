@@ -1,5 +1,6 @@
 import {
 	LabBetaUserSchema,
+  LabSaveReviewSchema, LabHumanReviewSchema, LabReviewBundleSchema, LabCreateCandidateSchema, LabCandidateSchema, LabCandidateDecisionSchema, LabCurationOverviewSchema, LabCurationExportRequestSchema, LabCurationExportSchema,
 	LabCaseSchema,
 	LabCasesQuerySchema,
 	LabCompareQuerySchema,
@@ -58,6 +59,14 @@ export const labRouteContracts = [
 	contract('POST', '/runs', runId, { body: LabCreateRunSchema, status: 202 }),
 	contract('GET', '/runs/:id', LabRunSchema, { params: id }),
 	contract('GET', '/runs/:id/results', page(LabResultSchema), { params: id, query: LabResultsQuerySchema }),
+  contract('GET', '/runs/:id/results/:caseId/review', LabReviewBundleSchema, { params: id.extend({ caseId: LabCaseSchema.shape.id }) }),
+  contract('POST', '/runs/:id/results/:caseId/review', LabHumanReviewSchema, { params: id.extend({ caseId: LabCaseSchema.shape.id }), body: LabSaveReviewSchema, status: 201 }),
+  contract('POST', '/runs/:id/results/:caseId/candidates', LabCandidateSchema, { params: id.extend({ caseId: LabCaseSchema.shape.id }), body: LabCreateCandidateSchema, status: 201 }),
+  contract('POST', '/runs/:id/candidates/:candidateId/decision', LabCandidateSchema, { params: id.extend({ candidateId: z.uuid() }), body: LabCandidateDecisionSchema }),
+  contract('GET', '/runs/:id/curation', LabCurationOverviewSchema, { params: id, query: z.strictObject({ threshold: z.coerce.number().int().min(0).max(100).default(50) }) }),
+  contract('POST', '/runs/:id/curation/exports', LabCurationExportSchema, { params: id, body: LabCurationExportRequestSchema, status: 201 }),
+  contract('GET', '/runs/:id/curation/exports/:exportId', LabCurationExportSchema, { params: id.extend({ exportId: z.uuid() }) }),
+
 	contract('POST', '/runs/:id/cancel', runId, { params: id }),
 	contract('POST', '/runs/:id/retry', runId, { params: id }),
 	contract(

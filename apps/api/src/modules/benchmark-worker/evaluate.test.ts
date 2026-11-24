@@ -298,7 +298,9 @@ describe('single-slot Transformers generation', () => {
 				: Response.json({ text, input_tokens: 245, output_tokens: 150, seconds: 72 }),
 		);
 		const analyze = () => evaluateCase(settings, task, signal(), 'unsupported');
-		expect(await analyze()).toMatchObject({ output, generationUsage: [{ jsonFenceRemoved: true }] });
+		const evaluated = await analyze();
+		expect(evaluated).toMatchObject({ output, generationUsage: [{ jsonFenceRemoved: true }] });
+    expect(JSON.parse(evaluated.generationContexts![0]!.rawResponse!)).toBe(fenced);
 		for (const mixed of ['Preface\n' + fenced, fenced + '\nConclusion', fenced + '\n' + fenced]) {
 			text = mixed;
 			expect(await analyze()).toMatchObject({ output: null, error: 'INVALID_MODEL_OUTPUT', jsonAttempts: 2 });

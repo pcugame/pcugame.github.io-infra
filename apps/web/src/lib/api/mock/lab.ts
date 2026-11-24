@@ -1,8 +1,9 @@
 import {
   LAB_ACTIVE_RUN_LIMIT, LAB_CASE_ATTEMPT_LIMIT, LAB_PAGE_SIZE, LabBetaUserSchema, LabCompareQuerySchema, LabCreateRunSchema, LabExportFormatSchema, LabOutputSchema, LabPageQuerySchema,
-  LabCasesQuerySchema, LabResultsQuerySchema, LabRoleChangeSchema, LabUploadSchema, formatLabExport, parseLabUpload, LAB_DATASET_IDENTITY, LAB_NICKNAME_SYSTEM_PROMPT, LAB_NICKNAME_PROTOCOL,
+  LabCasesQuerySchema, LabResultsQuerySchema, LabRoleChangeSchema, LabUploadSchema, formatLabExport, parseLabUpload, labFamilyPlan, labFamilyKey, LAB_DATASET_IDENTITY, LAB_NICKNAME_SYSTEM_PROMPT, LAB_NICKNAME_PROTOCOL,
   type LabCase, type LabDataset, type LabResult, type LabRun, type LabStatus,
 } from '@pcu/contracts';
+import { handleLabHuman, type MockHumanState } from './lab-human';
 import { canUseLab } from '../../auth/roles';
 import { allowMethod, bodyObject, conflict, forbidden, missing, parseInput } from './common';
 import { effectiveMockUser, MOCK_USERS, MockHttpError, UNHANDLED, type MockContext, type MockRequestOptions } from './context';
@@ -10,6 +11,7 @@ import { effectiveMockUser, MOCK_USERS, MockHttpError, UNHANDLED, type MockConte
 type StoredDataset = { ownerId: number; info: LabDataset; cases: LabCase[] };
 type StoredRun = { ownerId: number; info: LabRun; rows: LabResult[]; nextAt: number };
 export interface MockLabState {
+  human?: MockHumanState;
   roles: Record<number, 'USER' | 'BETA_TESTER'>;
   audits: { actorId: number; targetId: number; beforeRole: string; afterRole: string; at: string }[];
   datasets: StoredDataset[];
@@ -80,7 +82,9 @@ function advance(ctx: MockContext, job: StoredRun) {
         run.stats.meanScore = (sum + value) / run.stats.scored;
       }
     }
-    row.history.push({ attempt: row.attempts, status: row.status, at: ctx.now(), mock: true });
+    row.history.push({ event: 'finished', attempt: row.attempts, status: row.status, at: ctx.now(), mock: true,
+      searchDurationMs: 0, generationDurationMs: 80, generationContexts: [{ stage: 'answer', durationMs: 80, suppliedSources: [],
+        messages: [{ role: 'system', content: LAB_NICKNAME_SYSTEM_PROMPT }, { role: 'user', content: JSON.stringify({ nickname: row.testCase.nickname, sources: [] }) }] }] });
   }
   if (run.failed + run.success + run.cancelled === run.size) {
     run.status = 'COMPLETED';
@@ -136,6 +140,9 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
     const existing = state.datasets.find(d => d.ownerId === actor.id && d.info.hash === hash);
     if (existing) return existing.info;
     const info = { id: crypto.randomUUID(), name, hash, count: cases.length, ...identity, createdAt: ctx.now() };
+    const human = state.human ??= { reviews: [], candidates: [], exports: [], families: {} };
+    try { human.families = labFamilyPlan([...state.datasets.flatMap(d => d.cases), ...cases], human.families); }
+    catch (error) { throw new MockHttpError(400, 'VALIDATION_ERROR', error instanceof Error ? error.message : 'Split conflict'); }
     state.datasets.unshift({ ownerId: actor.id, cases, info });
     return info;
   }
@@ -158,6 +165,8 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
     const byId = new Map(d.cases.filter(c => !input.split || c.split === input.split).map(c => [c.id, c]));
     const cases = caseIds ? caseIds.map(id => byId.get(id)) : [...byId.values()].slice(0, input.size);
     if (cases.length !== input.size || cases.some(c => !c)) throw new MockHttpError(400, 'VALIDATION_ERROR', 'Invalid case selection');
+    const plan = labFamilyPlan(state.datasets.flatMap(d => d.cases), state.human?.families);
+    if (cases.some(c => c?.split === 'test' || (c?.familyId && plan[labFamilyKey(c.familyId)] === 'test')) && !input.finalTest) throw new MockHttpError(400, 'VALIDATION_ERROR', 'test 표현군은 설정 확정 후 최종 평가로만 실행합니다.');
     const id = crypto.randomUUID();
     state.runs.unshift({
       ownerId: actor.id, nextAt: Date.now() + 300, rows: cases.map(c => pending(c!)),
@@ -174,6 +183,12 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
     const sides = [run(left), run(right)].map(r => new Map(r.rows.map(row => [row.caseId, row])));
     const ids = [...new Set(sides.flatMap(map => [...map.values()].filter(r => matches(r.testCase, q)).map(r => r.caseId)))].sort();
     return { items: pageOf(ids, page).map(caseId => ({ caseId, left: sides[0].get(caseId) ?? null, right: sides[1].get(caseId) ?? null })), total: ids.length };
+  }
+  const humanPath = /^\/api\/lab\/runs\/([^/]+)\/(?:results\/[^/]+\/(?:review|candidates)|candidates\/[^/]+\/decision|curation(?:\/exports(?:\/[^/]+)?)?)$/.exec(pathname);
+  if (humanPath) {
+    const current = run(humanPath[1]);
+    return handleLabHuman(state.human ??= { reviews: [], candidates: [], exports: [], families: {} }, actor.id, current,
+      state.datasets.flatMap(d => d.cases), pathname, method, options, Number(query.threshold ?? 50));
   }
   const detail = /^\/api\/lab\/runs\/([^/]+)(?:\/(results|cancel|retry|export))?$/.exec(pathname);
   if (!detail) return UNHANDLED;

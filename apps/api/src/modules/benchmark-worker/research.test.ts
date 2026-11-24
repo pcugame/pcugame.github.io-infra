@@ -135,6 +135,17 @@ describe('bounded JSON actions through Fake Provider (not model reasoning valida
 		] }) });
 		expect((await run()).error).toBe('INVALID_MODEL_OUTPUT');
 	});
+  it('preserves malformed raw output as a JSON string safe for review persistence', async () => {
+    const malformed = '\u0000\ud800';
+    fixture({ answers: [malformed, '{'] });
+    const result = await run({ searchMode: 'no_search' });
+    expect(result.error).toBe('INVALID_MODEL_OUTPUT');
+    const first = result.research!.steps.find(step => step.kind === 'answer');
+    if (!first || first.kind !== 'answer') throw new Error('Missing answer trace');
+    expect(JSON.parse(first.rawResponse!)).toBe(malformed);
+    expect(first.rawResponse).not.toContain('\u0000');
+    expect(first.rawResponse).not.toContain('\ud800');
+  });
 	it('bounds bad JSON, repeated queries, truncated outputs and output reservations without automatic full-run retry', async () => {
 		fixture({ actions: ['{', action('반복'), action('반복')], answers: ['{', '{'] });
 		const result = await run();
