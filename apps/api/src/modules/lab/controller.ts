@@ -1,6 +1,7 @@
+import type { z } from 'zod';
 import type { FastifyPluginAsync } from 'fastify';
-import type { LabCreateRun, LabStatus } from '@pcu/contracts';
-import { LAB_JSONL_MAX_BYTES } from '@pcu/contracts';
+import type { LabCreateRun, LabStatus, LabUpload, LabSplitSchema } from '@pcu/contracts';
+import { LAB_DATASET_MAX_BYTES } from '@pcu/contracts';
 import { requireRole } from '../../shared/auth-guards.js';
 import { AppError, badRequest, notFound } from '../../shared/errors.js';
 import { sendOk } from '../../shared/http.js';
@@ -8,7 +9,7 @@ import { invalidGenerateSetting } from '../benchmark-worker/config.js';
 import type { createLabRepository } from './repository.js';
 
 type Id = { id: string };
-type Page = { page: number; q: string };
+type Page = { page: number; q: string; split?: z.infer<typeof LabSplitSchema> };
 type Repo = ReturnType<typeof createLabRepository>;
 
 export function createLabController(
@@ -39,10 +40,10 @@ export function createLabController(
 			api.get<{ Querystring: Page }>('/datasets', async (r, reply) =>
 				sendOk(reply, await store.datasets(r.currentUser!, r.query.page)),
 			);
-			api.post<{ Body: { name: string; jsonl: string } }>(
+			api.post<{ Body: LabUpload }>(
 				'/datasets',
-				{ bodyLimit: LAB_JSONL_MAX_BYTES * 2 + 2048, config: writeLimit },
-				async (r, reply) => sendOk(reply, await store.upload(r.currentUser!, r.body.name, r.body.jsonl), 201),
+				{ bodyLimit: LAB_DATASET_MAX_BYTES * 2 + 2048, config: writeLimit },
+				async (r, reply) => sendOk(reply, await store.upload(r.currentUser!, r.body), 201),
 			);
 			api.get<{ Params: Id; Querystring: Page }>('/datasets/:id/cases', async (r, reply) =>
 				sendOk(reply, await store.cases(r.currentUser!, r.params.id, r.query)),
@@ -66,8 +67,9 @@ export function createLabController(
 			api.get<{ Params: Id }>('/runs/:id', async (r, reply) =>
 				sendOk(reply, await store.run(r.currentUser!, r.params.id)),
 			);
-			api.get<{ Params: Id; Querystring: Page & { status?: string } }>('/runs/:id/results', async (r, reply) =>
-				sendOk(reply, await store.results(r.currentUser!, r.params.id, r.query)),
+			api.get<{ Params: Id; Querystring: Page & { status?: string } }>(
+				'/runs/:id/results',
+				async (r, reply) => sendOk(reply, await store.results(r.currentUser!, r.params.id, r.query)),
 			);
 			for (const action of ['cancel', 'retry'] as const) {
 				api.post<{ Params: Id }>(`/runs/:id/${action}`, { config: writeLimit }, async (r, reply) =>

@@ -34,7 +34,7 @@ jobs:
         run: node --test scripts/run-integration.test.mjs
 
       - name: Validate expression DB source data
-        run: node benchmarks/term-origins/expressions/build.mjs
+        run: node benchmarks/nickname-evaluation/expressions/build.mjs
 
       - uses: actions/setup-go@v5
         if: steps.changes.outputs.release == 'true'
@@ -75,7 +75,7 @@ jobs:
 
       - name: Validate expression DB and curated nickname evaluation
         if: steps.changes.outputs.contracts == 'true'
-        run: node --test benchmarks/term-origins/expressions/validate.test.mjs
+        run: node --test benchmarks/nickname-evaluation/expressions/validate.test.mjs
 
       - name: Test shared contracts
         if: steps.changes.outputs.contracts == 'true' && steps.changes.outputs.full != 'true'

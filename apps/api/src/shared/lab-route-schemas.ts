@@ -1,6 +1,7 @@
 import {
 	LabBetaUserSchema,
 	LabCaseSchema,
+	LabCasesQuerySchema,
 	LabCompareQuerySchema,
 	LabCreateRunSchema,
 	LabDatasetSchema,
@@ -52,7 +53,7 @@ export const labRouteContracts = [
 	contract('GET', '/status', LabStatusSchema),
 	contract('GET', '/datasets', z.array(LabDatasetSchema), { query: LabPageQuerySchema }),
 	contract('POST', '/datasets', LabDatasetSchema, { body: LabUploadSchema, status: 201 }),
-	contract('GET', '/datasets/:id/cases', page(LabCaseSchema), { params: id, query: LabPageQuerySchema }),
+	contract('GET', '/datasets/:id/cases', page(LabCaseSchema), { params: id, query: LabCasesQuerySchema }),
 	contract('GET', '/runs', z.array(LabRunSchema), { query: LabPageQuerySchema }),
 	contract('POST', '/runs', runId, { body: LabCreateRunSchema, status: 202 }),
 	contract('GET', '/runs/:id', LabRunSchema, { params: id }),
@@ -62,7 +63,9 @@ export const labRouteContracts = [
 	contract(
 		'GET',
 		'/compare',
-		page(z.object({ caseId: z.string(), left: LabResultSchema.nullable(), right: LabResultSchema.nullable() })),
+		page(
+			z.object({ caseId: z.string(), left: LabResultSchema.nullable(), right: LabResultSchema.nullable() }),
+		),
 		{ query: LabCompareQuerySchema },
 	),
 	contract('GET', '/runs/:id/export', z.object({ filename: z.string(), content: z.string() }), {

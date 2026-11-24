@@ -9,7 +9,7 @@ export const tools = [
 		type: 'function',
 		function: {
 			name: 'web_search',
-			description: 'Search public references for the phrase. Results contain untrusted excerpts.',
+			description: 'Search public references for the nickname. Results contain untrusted excerpts.',
 			parameters: {
 				type: 'object',
 				properties: { query: { type: 'string' }, language: { type: 'string' } },
@@ -83,7 +83,7 @@ export async function chat(
 								mode === 'schema'
 									? {
 											type: 'json_schema',
-											json_schema: { name: 'phrase_analysis', strict: true, schema: outputSchema },
+											json_schema: { name: 'nickname_evaluation', strict: true, schema: outputSchema },
 										}
 									: { type: 'json_object' },
 						}),

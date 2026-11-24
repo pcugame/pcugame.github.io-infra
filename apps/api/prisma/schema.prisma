@@ -1209,7 +1209,8 @@ model LabDataset {
   id        String @id @default(uuid())
   ownerId   Int
   name      String
-  version   String @default("1")
+  version   String @default("3")
+  schemaVersion String @default("3")
   hash      String
   count     Int
   createdAt DateTime @default(now())
@@ -1225,15 +1226,16 @@ model LabTestCase {
   datasetId String
   caseId    String
   ordinal   Int
-  term      String
-  context   String
-  language  String
+  nickname  String
   body      Json
+  split     String?
+  familyId  String?
   dataset   LabDataset @relation(fields: [datasetId], references: [id])
   results   LabResult[]
 
   @@id([datasetId, caseId])
   @@unique([datasetId, ordinal])
+  @@index([datasetId, split, ordinal])
 }
 
 model LabRun {
@@ -1241,6 +1243,9 @@ model LabRun {
   ownerId      Int
   datasetId    String
   datasetHash  String
+  schemaVersion String @default("3")
+  evaluationProtocol String @default("nickname-risk-v1")
+  split        String?
   systemPrompt String
   promptHash   String
   model        String
