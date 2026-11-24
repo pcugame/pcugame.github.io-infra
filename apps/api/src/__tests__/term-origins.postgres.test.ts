@@ -262,6 +262,19 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 				await stopWorker();
 			}
 		}, 30_000);
+		it('round-trips the exhibition candidate through an authenticated dataset upload', async () => {
+			const candidate = await readFile(new URL('./exhibition/candidate.jsonl', datasetPath), 'utf8');
+			const expected = parseLabJsonl(candidate);
+			const uploaded = await api('POST', '/datasets', 201, { name: 'exhibition candidate', jsonl: candidate });
+			expect(uploaded.count).toBe(expected.length);
+			const saved: LabCase[] = [];
+			for (let page = 1; saved.length < uploaded.count; page++) {
+				const { items } = await api('GET', '/datasets/' + uploaded.id + '/cases?page=' + page);
+				expect(items.length).toBeGreaterThan(0);
+				saved.push(...items);
+			}
+			expect(saved).toEqual(expected);
+		});
 
 		it('validates and persists all rows, reuses the snapshot and isolates datasets', async () => {
 			dataset = await readFile(datasetPath, 'utf8');
