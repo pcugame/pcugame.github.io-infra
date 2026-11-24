@@ -152,3 +152,4 @@ export * from "./awards.js";
 export * from './video-retry.js';
 export * from './video-playback.js';
 export * from './lab.js';
+export * from './lab-research.js';

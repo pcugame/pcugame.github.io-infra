@@ -8,6 +8,7 @@
     "sourceMap": false
   },
   "include": [
+    "scripts/nickname-research.ts",
     "scripts/backfill-canonical-assets.ts",
     "scripts/preflight-canonical-contract.ts",
     "scripts/release-migrate.ts",

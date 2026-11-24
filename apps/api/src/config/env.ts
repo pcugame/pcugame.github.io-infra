@@ -29,6 +29,7 @@ const envSchema = z
     LAB_MODEL_API_KEY: z.string().optional(),
     LAB_SEARXNG_URL: z.string().optional(),
     LAB_CONCURRENCY: z.string().optional(),
+    LAB_GENERATE_PROFILE: z.string().optional(),
     WEBGL_PLAY_ENABLED: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
     WEBGL_EXTERNAL_CONNECTIONS_ENABLED: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
     FILE_GATEWAY_SECRET: z.string().min(32).optional(),

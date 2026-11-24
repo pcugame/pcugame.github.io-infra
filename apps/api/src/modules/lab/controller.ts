@@ -6,6 +6,7 @@ import { requireRole } from '../../shared/auth-guards.js';
 import { AppError, badRequest, notFound } from '../../shared/errors.js';
 import { sendOk } from '../../shared/http.js';
 import { invalidGenerateSetting } from '../benchmark-worker/config.js';
+import type { LabConfig } from '../benchmark-worker/config.js';
 import type { createLabRepository } from './repository.js';
 
 type Id = { id: string };
@@ -20,6 +21,7 @@ export function createLabController(
 		provider: string;
 		searchUrl?: string;
 		modelUrl?: string;
+		generateProfile?: LabConfig['generateProfile'];
 	},
 	status: () => Promise<LabStatus>,
 ): FastifyPluginAsync {
@@ -55,14 +57,16 @@ export function createLabController(
 				if (!config.modelUrl || !config.model || r.body.model !== config.model)
 					throw badRequest('Select the configured model');
 				if (config.provider === 'transformers-generate') {
-					const problem = invalidGenerateSetting(r.body);
+					const problem = invalidGenerateSetting(r.body, config.generateProfile);
 					if (problem) throw badRequest(problem);
 					if ((await status()).systemPromptSupported === false)
 						throw badRequest('The 4B model server requires an update to support system_prompt');
 				}
+				if (r.body.searchMode === 'agentic_retrieval' && !config.generateProfile)
+					throw badRequest('RESEARCH_PROFILE_REQUIRED');
 				if (r.body.searchMode !== 'no_search' && !config.searchUrl)
 					throw badRequest('Search provider is not configured');
-				sendOk(reply, await store.createRun(r.currentUser!, r.body, config.provider), 202);
+				sendOk(reply, await store.createRun(r.currentUser!, r.body, config.provider, config.generateProfile), 202);
 			});
 			api.get<{ Params: Id }>('/runs/:id', async (r, reply) =>
 				sendOk(reply, await store.run(r.currentUser!, r.params.id)),

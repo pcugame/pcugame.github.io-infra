@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { LAB_DATASET_MAX_BYTES, LAB_PAGE_SIZE, LAB_MAX_CASES, LAB_NICKNAME_SYSTEM_PROMPT, LAB_NICKNAME_JSONL_TEMPLATE, LAB_NICKNAME_CSV_TEMPLATE, type LabDataset, type LabSearchMode, type LabStatus } from '@pcu/contracts';
+import { LAB_DATASET_MAX_BYTES, LAB_PAGE_SIZE, LAB_MAX_CASES, LAB_NICKNAME_SYSTEM_PROMPT, LAB_RESEARCH_SYSTEM_PROMPT, LAB_NICKNAME_JSONL_TEMPLATE, LAB_NICKNAME_CSV_TEMPLATE, type LabDataset, type LabSearchMode, type LabStatus } from '@pcu/contracts';
 import { Button, SelectField, TextareaField, TextField } from '../../components/ui';
 import { labApi, type LabSplit } from '../../lib/api/lab';
 import { useViewerKey } from '../../lib/query/visibility';
@@ -133,11 +133,12 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
       <LabError error={available.error} />
       {dataset && <DatasetCases key={`${dataset.id}-${split}`} split={split || undefined} dataset={dataset} size={size} selected={selected} change={setSelected} />}
       {limits && <p>고정 평가 지침과 닉네임, 검색 모드에 따른 수집 자료를 전달합니다. 전체 입력 한도는 {limits.maxInputTokens}토큰입니다.</p>}
-      <TextareaField label="고정 평가 지침" readOnly rows={5} value={LAB_NICKNAME_SYSTEM_PROMPT} />
+      <TextareaField label="고정 평가 지침" readOnly rows={5} value={status.agenticRetrieval ? LAB_RESEARCH_SYSTEM_PROMPT : LAB_NICKNAME_SYSTEM_PROMPT} />
       <div className="lab-grid lab-grid--settings">
         <SelectField label="검색 모드" value={effectiveMode} onChange={e => setMode(e.target.value as LabSearchMode)}>
           <option value="no_search">검색 없이 분석</option>
           <option value="backend_retrieval">Worker 선검색</option>
+          <option value="agentic_retrieval" disabled={!status.agenticRetrieval}>모델 능동 조사</option>
           <option value="model_tool_call" disabled={status.toolSupport === 'unsupported'}>모델 도구 호출</option>
         </SelectField>
         <TextField type="number" label="Temperature" min={0} max={2} step="any" required disabled={!!limits} value={limits?.fixedTemperature ?? temperature} onChange={e => setTemperature(e.target.value)} />

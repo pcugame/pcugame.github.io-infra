@@ -1,4 +1,5 @@
 import {
+	LAB_NICKNAME_PROTOCOL,
 	LabOutputSchema,
 	LAB_NICKNAME_SYSTEM_PROMPT,
 	labNicknameInput,
@@ -21,8 +22,9 @@ import {
 } from './model.js';
 import { createSearchProvider, type SearchProvider } from './search.js';
 import type { ToolSupport } from './status.js';
+import { evaluateResearch, type ResearchTrace } from './research.js';
 
-export type WorkItem = ChatParameters & { provider: string; searchMode: string; input: LabNicknameInput };
+export type WorkItem = ChatParameters & { provider: string; searchMode: string; input: LabNicknameInput; evaluationProtocol?: string };
 export type Attempt = {
 	sources: LabSource[];
 	searchCount: number;
@@ -42,6 +44,7 @@ export type Attempt = {
 	output: LabOutput | null;
 	error: string | null;
 	retryable: boolean;
+	research?: ResearchTrace;
 };
 
 const searchArgs = z.strictObject({
@@ -73,6 +76,17 @@ export async function evaluateCase(
 	toolSupport: ToolSupport,
 	search: SearchProvider = createSearchProvider(config.searchUrl),
 ): Promise<Attempt> {
+	if (item.evaluationProtocol && item.evaluationProtocol !== (config.generateProfile ?? LAB_NICKNAME_PROTOCOL)) {
+		return { sources: [], searchCount: 0, toolSucceeded: false, toolSupport, toolCalls: 0,
+			jsonAttempts: 0, outputFormat: 'none', durationMs: 0, output: null,
+			error: 'RUN_PROFILE_CONFIGURATION_CHANGED', retryable: false };
+	}
+	if (config.generateProfile) return evaluateResearch(config, item, signal, toolSupport, search);
+	if (item.searchMode === 'agentic_retrieval') {
+		return { sources: [], searchCount: 0, toolSucceeded: false, toolSupport, toolCalls: 0,
+			jsonAttempts: 0, outputFormat: 'none', durationMs: 0, output: null,
+			error: 'RESEARCH_PROFILE_REQUIRED', retryable: false };
+	}
 	// Project at the provider boundary even when the caller holds a richer persisted case.
 	const modelCase = labNicknameInput(item.input.nickname);
 	const nickname = modelCase.nickname;

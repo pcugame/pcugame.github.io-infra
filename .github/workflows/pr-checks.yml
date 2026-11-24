@@ -46,6 +46,10 @@ jobs:
         if: steps.changes.outputs.release == 'true'
         run: bash server/quadlet/build-compat-generator.sh "${RUNNER_TEMP}/quadlet-5.4.2"
 
+      - name: Test local LLM profiles
+        if: steps.changes.outputs.release == 'true'
+        run: python3 -m unittest discover -s server/local-llm -p 'test_*.py'
+
       - name: Test release controls and deployment fixtures
         if: steps.changes.outputs.release == 'true'
         env:

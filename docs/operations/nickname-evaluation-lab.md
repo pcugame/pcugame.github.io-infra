@@ -13,6 +13,7 @@ API와 Benchmark Worker에는 같은 개발용 PostgreSQL, 설치된 모델 이�
 | `LAB_MODEL` | 추론 서버에 이미 로드할 수 있는 모델의 정확한 ID |
 | `LAB_MODEL_URL` | Ollama 또는 `/generate` 서비스의 루트 또는 OpenAI 호환 서버의 API base URL(통상 `/v1` 포함) |
 | `LAB_MODEL_API_KEY` | 추론 서버가 인증을 요구할 때 설정하는 비밀 값 |
+| `LAB_GENERATE_PROFILE` | 연구용 `/generate`에서 `nickname-research-v1`. API·Worker에 동일하게 설정하며 미지정 시 기존 1,024/256토큰 경로 유지 |
 | `LAB_SEARXNG_URL` | JSON 검색을 허용한 SearXNG의 서비스 루트 |
 | `LAB_CONCURRENCY` | 기본 1. `transformers-generate`는 1, 나머지 provider는 1~4. 같은 DB를 처리하는 모든 Worker에 같은 값을 적용 |
 | `DATABASE_URL` | 해당 환경의 실험 테이블에 접근 가능한 PostgreSQL 연결 |
@@ -21,7 +22,7 @@ API와 Benchmark Worker에는 같은 개발용 PostgreSQL, 설치된 모델 이�
 
 ## 데이터셋과 실행 계약
 
-Lab은 닉네임 평가 시스템 하나로 운영한다. 데이터 스키마는 `3`, 응답 스키마는 `2`, 고정 평가 지침은 `nickname-risk-v1`이다. 스키마 번호는 Phase 1 기록의 의미를 유지하며, 지원하지 않는 이전 데이터 형식을 실행하거나 변환하는 경로는 제공하지 않는다.
+Lab은 닉네임 평가 시스템 하나로 운영한다. 데이터 스키마는 `3`, 응답 스키마는 `2`, 기존 고정 평가 지침은 `nickname-risk-v1`, 연구 프로파일은 `nickname-research-v1`이다. Run에는 실제 지침과 hash를 저장하며 Worker 설정과 저장된 프로파일이 다르면 실행을 거부한다. 스키마 번호는 Phase 1 기록의 의미를 유지하며, 지원하지 않는 이전 데이터 형식을 실행하거나 변환하는 경로는 제공하지 않는다.
 
 1. [JSONL 기본 양식](../../benchmarks/nickname-evaluation/templates/nickname-research.jsonl) 또는 [CSV 기본 양식](../../benchmarks/nickname-evaluation/templates/nickname-research.csv)에 사람이 작성한 데이터를 등록한다. 1~10,000행, 최대 4 MiB를 지원하며 고정 언어·범주 분포를 요구하지 않는다.
 2. 데이터셋 미리보기에서 닉네임·ID를 검색하고 기대 근거·점수·범위·split·family를 확인한다. 실행 크기는 1개·10개·50개·현재 split 전체·사용자 지정이다. 직접 선택한 ID는 요청한 개수와 일치해야 하며, 선택하지 않으면 해당 split의 파일 순서대로 실행한다.
@@ -69,33 +70,76 @@ CSV의 필수 열은 `nickname,expectedReason,expectedScore`이며 선택 열은
 
 적용 후 구형 binary를 자동 복원하지 않는다. 실패 원인을 확인하여 forward fix 또는 검증된 백업 복원 절차를 선택한다. 삭제한 구형 실험이 필요한 경우 백업에서 별도 복구하며 현재 Lab에 재등록하는 변환기는 제공하지 않는다. 운영 적용은 [배포 및 복구 절차](deployment.md)와 [migration 정책](../database-migration-policy.md)을 따른다.
 
-## 상시 4B 서버 연결
+## 연구용 4B 프로파일
 
-전시용 추론 서비스에는 `LAB_MODEL_PROVIDER=transformers-generate`, `LAB_MODEL=Qwen3-4B-Instruct-2507-Q4_K_M`, `LAB_CONCURRENCY=1`을 사용한다. API와 Worker에서 같은 사설 서비스 루트에 접근할 수 있어야 한다. 개발 환경에서는 SSH 로컬 포워딩으로 원격 루프백 포트에 연결하고, `LAB_MODEL_URL`을 터널의 로컬 주소로 지정할 수 있다. API와 Worker가 컨테이너 안에 있으면 각각의 네트워크에서 주소가 도달 가능한지 확인한다.
+연구 서버는 `LOCAL_LLM_PROFILE=nickname-research-v1`로 실행한다. 호환 `/generate` 경로를 유지하며 프로세스·Unix 소켓·8089 포트를 기존 코딩 서비스와 분리한다. API와 Worker에는 `LAB_GENERATE_PROFILE=nickname-research-v1`, `LAB_MODEL_PROVIDER=transformers-generate`, `LAB_MODEL=Qwen3-4B-Instruct-2507-Q4_K_M`, `LAB_CONCURRENCY=1`을 동일하게 설정한다. [서버 구성·측정 명령](../../server/local-llm/README.md)
 
-모델 서버의 `qwen-coder.service`는 llama.cpp CUDA로 Q4_K_M 가중치를 실행한다. 호환 HTTP 서비스는 루프백의 8088번 포트를 사용하고 llama.cpp에는 전용 Unix 소켓으로 연결한다. `transformers-generate`는 이 HTTP 요청 형식을 지정한다. 신규 실행에는 `/health`에서 읽은 모델 ID를 사용한다. 이전 실험의 모델 ID는 당시 실행 기록에 보존된다.
+2026-11-25 사용자 요청으로 `gameserver`의 기존 `qwen-coder.service`를 중지하고 자동 시작을 해제하였다. 기존 서비스 파일·가중치는 보존하였다. 연구 검증은 임시 프로세스에서 수행하며 운영 API·Worker의 연구 프로파일 전환은 별도 릴리스 대상이다. 기존 SearXNG는 `gh-deploy`의 `gp-lab-search` 컨테이너 내부 `127.0.0.1:18888`에서 재사용하였다.
 
-Worker는 `GET /health`에서 모델 ID와 토큰 한도, 사용 중 여부를 확인한 다음 `POST /generate`로 고정 평가 지침·닉네임·출처와 출력 토큰 한도를 보낸다. 서비스의 시스템 지시는 고정되어 있으며 Worker가 구성한 평가 입력은 사용자 메시지 안에 전달된다. 생성은 greedy 방식이고 서버 한도는 입력 1,024토큰, 출력 256토큰, 생성 시간 90초이다. 전체 입력에는 서버 지시, 케이스, 출력 형식, 검색 발췌문도 포함된다. 입력이 한도를 초과하면 케이스 실패로 기록한다.
+프로파일 미지정 경로는 기존 코딩 기본 지침, 선택적 `system_prompt`, 1,024/256토큰, 1,536토큰 컨텍스트와 8088 포트를 유지한다. Worker의 기존 JSON 텍스트 생성과 `model_tool_call`의 지원 조건도 유지한다. 신규 능동 조사는 연구 프로파일에서만 활성화한다.
 
-이 서버에서 선택 가능한 검색 모드는 `no_search`와 `backend_retrieval`이다. Worker는 선검색 자료 중 입력 예산에 맞는 발췌문을 최대 두 건까지 전달한다. 응답은 닉네임 평가 필드와 짧은 한국어 근거를 요청하며 서버 출력 한도를 적용한다. 모델은 텍스트로 JSON을 생성하며 Worker가 스키마, 원래 닉네임, 전달한 출처 ID를 검사한다. 결과 이력의 `suppliedSourceIds`는 모델에 전달한 출처를, `generationUsage`는 각 생성의 실제 입력·출력 토큰 수와 서버 소요 시간(초)을 기록한다. 텍스트 전체가 단일 Markdown JSON 코드 블록이면 경계만 제거하고 같은 검사를 수행하며, 해당 생성의 `jsonFenceRemoved`를 `true`로 기록한다.
+### Chat template와 구조화 출력
 
-### 추론 호스트의 서비스 구성
+llama.cpp b12559와 실제 Qwen GGUF template에서 단순 JSON probe와 전체 action·판단 schema를 확인한다. 이 조합의 `/v1/chat/completions`는 긴 응답 뒤에 `peg-native` 출력 파서 오류를 반환한 사례가 있으므로 연구 서버는 `/apply-template` → `/tokenize` → `/completion`을 사용한다. `/completion`에 정확한 template token ID와 `json_schema`를 전달하며 네이티브 Tool Calling은 사용하지 않는다. 기존 호환 프로파일의 chat 경로는 유지한다. [llama.cpp b12559 서버 API](https://github.com/ggml-org/llama.cpp/blob/b12559/tools/server/README.md)
 
-기존 시스템 unit의 사용자 및 `ai.slice` 자원 한도를 상속한다. [서비스 프로그램](../../server/local-llm/server.py)은 `/opt/nickname-llm/server.py`, [systemd drop-in](../../server/local-llm/40-local-4b.conf)은 `/etc/systemd/system/qwen-coder.service.d/40-local-4b.conf`에 설치한다. 같은 `/opt/nickname-llm` 디렉터리의 `bin/`과 `runtime/`에는 llama.cpp b12559의 Ubuntu x64 CUDA 12.8 실행 파일과 라이브러리를 둔다. `weights.gguf`는 Unsloth Qwen3-4B-Instruct-2507 Q4_K_M 파일이며 SHA-256은 `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597`이다.
+문자열의 PostgreSQL Unicode 검증 정규식을 GBNF에 그대로 적용하면 따옴표·줄바꿈까지 허용하는 문법이 생성될 수 있다. 생성용 schema에는 길이 제한이 있는 JSON 문자열을 사용하고, Unicode scalar 검증은 Worker의 후속 검사로 유지한다. 서버는 JSON을 금지하는 반대 지침에도 고정 JSON을 생성하는 준비 검사를 통과한 뒤 준비 완료를 알린다. `/health`에는 모델 ID, GGUF SHA-256, 실제 template와 hash, 엔진 버전, KV cache 형식, 컨텍스트, seed와 구조화 출력 경로를 제공한다. Worker는 요청마다 가중치·template hash를 전달하며 서버는 불일치를 거부한다. 생성 응답의 토큰 수는 실제 렌더링·토큰화 결과와 다시 대조한다. 잘린 응답, 잘못된 schema와 인용은 성공 결과로 저장하지 않는다.
 
-설치 경로를 갱신할 때는 가중치·`bin/`·`runtime/`을 새 경로에 먼저 배치하고 서비스 사용자에게 읽기·실행 권한이 있는지 확인한다.
+### 세 가지 비교 모드
 
-`systemctl enable qwen-coder.service`로 부팅 시 기동을 설정한다. 서비스는 GPU에서 준비용 추론을 마친 후 systemd에 준비 완료를 알린다. 엔진이 종료되면 systemd가 서비스를 다시 시작한다. `systemctl is-enabled qwen-coder`, `systemctl is-active qwen-coder`, `curl -fsS http://127.0.0.1:8088/health`로 상태를 확인한다. 응답의 `rss_mib`는 추론 프로세스의 RSS이며, 이전 PyTorch 전용 지표인 `gpu_peak_allocated_mib` 값은 이 엔진에서 `null`이다.
+| 모드 | 자료 수집 |
+| --- | --- |
+| `no_search` | 검색 없이 모델 자체 지식으로 최종 판단 |
+| `backend_retrieval` | 기존처럼 Worker가 원본 닉네임으로 1회 선검색 |
+| `agentic_retrieval` | 모델이 해석 가설과 `search`·`finish` JSON action을 생성하고 Worker가 최대 2회 검색 |
 
-## 해석과 실행 한도
+세 모드에는 동일한 연구 지침·가중치·최종 생성 한도를 적용한다. action은 검색어와 최대 두 개의 짧은 해석 가설만 포함한다. NFKC 표기는 보조 가설이며 원본 닉네임은 보존한다. 모델은 혼합 문자와 자모의 시각적·음성적 독법을 검토하되 유사성만으로 의미를 확정하지 않는다. 원형 사전, 비속어 목록, 데이터셋의 기대 근거·점수·family를 사용하는 복원기는 없다.
 
-`no_search`는 모델 자체 지식, `backend_retrieval`은 Worker의 사전 검색, `model_tool_call`은 모델이 요청한 도구를 사용한다. 세 번째 모드는 자료 수집과 최종 JSON 생성을 분리한다. `web_open(sourceId)`에서 읽는 자료는 SearXNG가 반환한 발췌문이다. 서버가 원문 페이지에 직접 접속하는 단계는 없다. 선검색에는 닉네임과 고정 언어 `ko`, 도구 검색에는 모델이 만든 질의와 언어만 전달되므로 검색 엔진의 데이터 처리 조건을 확인한다. [SearXNG 검색 API](https://docs.searxng.org/dev/search_api.html)
+최종 생성은 `evidenceChecks`를 먼저 작성하고 판단을 생성한다. 인용문·주장·관련성(`supports_concern`, `ordinary_usage`, `unrelated`)을 기록한다. Worker는 현재 제공한 ID와 정확한 발췌문 인용을 확인하고 `unrelated` 인용을 거부한다. URL은 Worker의 수집 기록에서 결합한다. 이 검사는 인용의 문자적 일치와 대응을 보장하며 의미 해석의 정확성을 자동 확정하지 않는다. 단어의 등장이나 커뮤니티 사용 사실만으로 위험성·사용자 소속을 단정하지 않도록 지시한다.
 
-모델이 도구를 지원한다고 광고한 상태와 해당 케이스의 실제 도구 성공 여부를 각각 기록한다. 스키마 기반 출력을 거부하는 서버에는 제한적으로 JSON 모드를 시도하며, 응답은 양쪽 모두 같은 스키마·닉네임·인용 ID 검사를 거친다. 스키마를 만족한 결과의 판단 근거와 인용의 정확성은 별도 검수 대상이다. `null` 점수는 평균의 분모에서 제외한다. 사람의 기대 근거와 점수는 각 케이스의 `reference`에 보존한다. 평균 점수는 모델이 산정한 추가 검토 필요성의 분포로 해석한다. [Ollama 구조화 출력](https://docs.ollama.com/capabilities/structured-outputs) · [Ollama 도구 호출](https://docs.ollama.com/capabilities/tool-calling) · [llama.cpp 서버](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)
+`interpretationStatus`는 문자 그대로의 독법, 자체 지식의 알려진 표현, 미검증 복원 가설, 인용으로 뒷받침한 복원 가설을 구분한다. 미검증 복원 가설은 `abstained=true`, `score=null`이어야 하며 인용으로 뒷받침하였다는 응답에는 출처가 필요하다. Worker가 이 조건을 확인하고 분류를 이력에 보존한다. 분류 자체도 모델 응답이므로 복원 정확도와 의미적 근거 적합성에는 사람의 검토가 필요하다.
 
-사용자당 대기·진행 중인 Run을 3개까지 허용한다. 한 케이스에는 총 5분, 검색 2회, 도구 호출 4회 상한이 있다. Worker는 30초 lease와 1초 heartbeat를 사용한다. 자동 시도는 한 차례의 작업당 3회, 명시적 재실행을 포함한 케이스별 누적 시도는 12회로 제한한다. 실행권을 잃은 Worker의 뒤늦은 쓰기를 거부한다. 모델이 요청을 받은 직후 Worker가 종료되면 복구 중 같은 추론 계산이 다시 발생할 수 있다. 취소는 DB에서 남은 케이스를 즉시 종료하고, 진행 중 HTTP 요청을 중단한다. 실제 엔진에서 GPU 연산을 해제하는 시점은 해당 엔진의 연결 종료 처리에 따른다.
+### 발췌문 범위와 웹 문서 격리
+
+현재 구현에는 원문 fetch가 없다. `web_open`도 기존 검색 발췌문 조회이다. 연구 이력에는 `evidenceKind=search_snippet`, `originalFetched=false`와 원문 미검증 한계를 기록하며 화면에도 표시한다. [SearXNG API](https://docs.searxng.org/dev/search_api.html)
+
+네트워크 요청은 설정된 모델·SearXNG로 제한하고 redirect를 거부한다. 검색 응답은 384,000바이트·10초·최대 4개 결과로 제한하며 공개 URL 정책을 적용한다. 검색 결과 URL에는 직접 접속하지 않는다. 웹 문서는 JSON 문자열로 격리하며 `<`·`>`를 escape하여 template 제어 토큰으로 처리되지 않게 한다. 임의 도구·fetch action은 거부한다. 검색 실패와 무관한 결과는 기록하며 0점으로 자동 변환하지 않는다. 이러한 제약은 도구 실행 범위를 제한하지만 모델의 모든 prompt injection 오판을 배제하는 증거는 아니다.
+
+### 자원 한도와 이력
+
+| 항목 | 연구 프로파일 상한 |
+| --- | --- |
+| 입력 / 최종 출력 | 생성당 실제 입력 2,048 / 출력 768토큰 |
+| action 출력 | 320토큰, Run 출력 설정이 더 작으면 해당 값 |
+| 엔진 컨텍스트 | 3,072토큰, 단일 동시 추론, f16 KV cache |
+| 검색 / 생성 | 검색 2회 / 생성 5회. JSON 재생성도 같은 상한에 포함 |
+| 누적 입력 / 출력 | 8,192 / 2,304토큰 |
+| 전체 / 단일 생성 | 240초 / 90초 |
+
+실제 token count가 넘으면 두 검색 단계의 발췌문을 300→180→100자로 압축하고, 여전히 초과하면 일부 자료를 제외한다. 정확히 제공한 자료와 프롬프트를 기록한다. 다음 생성의 출력 예산을 먼저 예약하므로 응답 유실 시에도 한도를 초과하여 재시도하지 않는다. 누적 예산이 부족하면 최종 재생성을 생략할 수 있다. 연구 오류에는 전체 조사 자동 재시도를 적용하지 않는다. 기존 Worker의 lease 복구·명시적 재실행 횟수 제한은 유지한다.
+
+`history[].research`에 가중치·template·엔진, 시스템 지침과 단계별 프롬프트·schema, 해석 후보, 모델 검색어, 실제 검색 결과, 제공 자료, 인용 검증, 생성 설정, 입력·출력 토큰과 소요 시간을 보존한다. 전체 시간에는 검색·토큰화도 포함된다. 응답 유실 시 실제 출력 토큰은 `null`이고 예약량을 별도로 기록한다. 숨겨진 사고 과정의 출력을 요구하지 않는다. 자료와 이력은 JSON·JSONL·CSV export에도 포함하므로 대규모 실행은 DB·export 메모리 용량을 함께 검토한다.
+
+### 단일 평가와 비교 실행
+
+API 화면에서 같은 데이터셋·케이스를 세 모드로 실행하거나 CLI를 사용한다. CLI는 DB 없이 같은 Worker evaluator를 호출하며 한 번에 최대 50개 닉네임을 허용한다. 기대 근거와 점수는 CLI의 비교 지표 계산에만 사용하며 모델용 DTO는 닉네임 하나로 구성한다.
+
+```sh
+npm run build -w @pcu/contracts
+export LAB_ENABLED=true LAB_MODEL_PROVIDER=transformers-generate
+export LAB_GENERATE_PROFILE=nickname-research-v1
+export LAB_MODEL=Qwen3-4B-Instruct-2507-Q4_K_M LAB_CONCURRENCY=1
+export LAB_MODEL_URL=http://127.0.0.1:8089
+# Worker에서 접근할 수 있는 기존 SearXNG의 실제 주소
+export LAB_SEARXNG_URL=http://127.0.0.1:18888
+npm run lab:research -w apps/api -- --nickname '달빛산책' --mode all --output /tmp/nickname-comparison.json
+npm run lab:research -w apps/api -- --dataset /path/to/research.jsonl --limit 10 --mode all --output /tmp/nickname-dataset-comparison.json
+```
+
+비교 JSON에는 동일 데이터셋 hash·선택 ID, 모드별 JSON 성공 수·유보 수·채점 수·MAE·기대 범위 충족률·시간·토큰을 기록한다. MAE와 범위 충족률은 유효 점수가 있는 사례만 분모로 사용한다. 채점·유보·실패 수를 함께 비교하며, 평균 점수나 일부 성공 사례를 정확도 향상으로 해석하지 않는다. 검색 시점의 결과는 달라질 수 있으므로 수집 결과 전체를 함께 보존한다.
 
 ## 통합 검증
+
+실제 Qwen3 4B·기존 SearXNG의 두 사례, 세 모드 비교와 GPU 측정은 [2026-11-25 검증 기록](../../benchmarks/nickname-evaluation/validation/2026-11-25/README.md)에 보존하였다. Fake Provider 결과와 실제 모델 결과, 복원 실패와 발췌문 한계를 구분하였다.
 
 격리된 PostgreSQL과 Fake HTTP Provider로 실제 세션·API·독립 Worker를 확인하는 suite 이름은 `nickname-evaluation`이다. 저장소 통합 환경에서는 `npm run test:integration:suite -- nickname-evaluation`로 실행한다. [데이터셋 검증과 출처](../../benchmarks/nickname-evaluation/README.md)에는 데이터 양식과 조사 자료 검증 명령이 있다. Web 단독 화면 검증은 `npm run dev:mock -w apps/web`로 실행하며 화면과 내보내기 결과에 모의 실행임을 표시한다.
 
@@ -110,4 +154,4 @@ Worker는 `GET /health`에서 모델 ID와 토큰 한도, 사용 중 여부를 �
 
 ## 다음 연구 단계
 
-Phase 1은 데이터 등록과 평가 실행 기반이다. 능동적 인터넷 검색 확대, 난독화 해석 개선, Human Evaluation, LoRA·QLoRA는 후속 개발 범위이다. 사람이 작성한 데이터와 family·split의 검토를 완료한 뒤 실제 소형 모델·검색 서비스로 지연, 토큰 한도, 출처 인용, 정상·모호 사례의 판단 유보를 측정한다. 기대 점수와의 차이, 허용 범위, 근거의 검증 가능성, 판단 유보율을 함께 고려한 평가 지표와 검수 기준을 확정한다. 모델 파인튜닝·학습용 export·학습 실행은 이번 구현 범위에 포함하지 않는다.
+능동 조사는 구현 및 단일 사례 검증 단계이다. 난독화 복원 정확도와 인용의 의미적 타당성은 별도 Human Evaluation으로 검토한다. 사람이 작성한 데이터와 family·split의 검토를 완료한 뒤 실제 소형 모델·검색 서비스로 지연, 토큰 한도, 출처 인용, 정상·모호 사례의 판단 유보를 측정한다. 기대 점수와의 차이, 허용 범위, 근거의 검증 가능성, 판단 유보율을 함께 고려한 평가 지표와 검수 기준을 확정한다. 모델 파인튜닝·학습용 export·학습 실행은 이번 구현 범위에 포함하지 않는다.

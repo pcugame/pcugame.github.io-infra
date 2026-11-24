@@ -213,7 +213,7 @@ export const LabOutputSchema = z.strictObject({
 	sourceIds: z.array(sourceId).max(16),
 	abstained: z.boolean(),
 });
-export const LabSearchModeSchema = z.enum(['no_search', 'backend_retrieval', 'model_tool_call']);
+export const LabSearchModeSchema = z.enum(['no_search', 'backend_retrieval', 'agentic_retrieval', 'model_tool_call']);
 export const LabCreateRunSchema = z
 	.strictObject({
 		datasetId: z.uuid(),
@@ -240,6 +240,7 @@ export const LabStatusSchema = z.object({
 	modelStatus: health,
 	searchStatus: health,
 	toolSupport: LabToolSupportSchema,
+	agenticRetrieval: z.boolean().optional(),
 	generationLimits: z
 		.object({
 			fixedTemperature: z.number(),

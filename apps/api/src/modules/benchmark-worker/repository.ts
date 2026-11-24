@@ -1,4 +1,4 @@
-import { LAB_CASE_ATTEMPT_LIMIT, LAB_NICKNAME_PROTOCOL, labNicknameInput } from '@pcu/contracts';
+import { LAB_CASE_ATTEMPT_LIMIT, LAB_NICKNAME_PROTOCOL, LAB_RESEARCH_PROFILE, labNicknameInput } from '@pcu/contracts';
 import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import type { Attempt, WorkItem } from './evaluate.js';
@@ -84,8 +84,8 @@ export async function claimCase(db: PrismaClient, concurrency: number): Promise<
 				maxTokens: run.maxTokens,
 				searchMode: run.searchMode,
 			};
-			const item: WorkItem = { ...settings, input: labNicknameInput(nickname) };
-			if (run.evaluationProtocol !== LAB_NICKNAME_PROTOCOL)
+			const item: WorkItem = { ...settings, evaluationProtocol: run.evaluationProtocol, input: labNicknameInput(nickname) };
+			if (![LAB_NICKNAME_PROTOCOL, LAB_RESEARCH_PROFILE].includes(run.evaluationProtocol))
 				throw new Error('Unsupported nickname evaluation protocol');
 			return { runId: run.id, caseId: id, token, item };
 		},
@@ -120,6 +120,7 @@ export async function finishCase(db: PrismaClient, claim: Claim, attempt: Attemp
 				outputFormat: attempt.outputFormat,
 				generationUsage: attempt.generationUsage,
 				suppliedSourceIds: attempt.suppliedSourceIds,
+				research: attempt.research,
 				error: attempt.error,
 			});
 			const changed = await tx.$executeRaw`UPDATE "LabResult" SET

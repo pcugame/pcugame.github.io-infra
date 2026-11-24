@@ -92,6 +92,51 @@ class HTTPTest(unittest.TestCase):
             self.assertEqual(self.call("POST", "/generate", {"prompt": "go"})[0], 503)
         self.process.kill.assert_called_once_with()
 
+    def test_legacy_profile_preserves_coding_default_and_system_override(self):
+        self.assertIn("coding assistant for a graduation exhibition", server.SYSTEM_PROMPT)
+        with patch.object(server, "generate", return_value={"text": "OK"}) as generate:
+            self.assertEqual(self.call("POST", "/generate", {"prompt": "go", "system_prompt": "custom"})[0], 200)
+            generate.assert_called_once_with("go", 192, "custom")
+            self.assertEqual(self.call("POST", "/generate", {"prompt": "go", "json_schema": {}})[0], 400)
+
+    def test_research_requires_profile_schema_identity_and_exact_request_budget(self):
+        identity = {"weights_sha256": "a" * 64, "chat_template_sha256": "b" * 64}
+        with patch.multiple(server, RESEARCH=True, PROFILE="nickname-research-v1", MAX_INPUT=2048,
+                            MAX_OUTPUT=768, MAX_BODY=65536, CONTEXT=3072, IDENTITY=identity):
+            body = {"profile": "nickname-research-v1", "prompt": "case", "system_prompt": "research policy",
+                    "max_new_tokens": 768, "json_schema": {"type": "object"}, **identity}
+            with patch.object(server, "generate", return_value={"text": "{}"}) as generate:
+                self.assertEqual(self.call("POST", "/generate", body)[0], 200)
+                generate.assert_called_once_with("case", 768, "research policy", {"type": "object"}, 2048, 90000)
+                for change in [{"profile": "legacy"}, {"json_schema": None}, {"max_new_tokens": 769},
+                               {"max_input_tokens": 2049}, {"timeout_ms": 90001}, {"weights_sha256": "wrong"}]:
+                    self.assertEqual(self.call("POST", "/generate", {**body, **change})[0], 400)
+            with patch.object(server, "count_input", return_value=([], 2050)):
+                self.assertEqual(self.call("POST", "/tokenize", body), (200, {"input_tokens": 2050}))
+            self.assertTrue(self.call("GET", "/health")[1]["supports_json_schema"])
+
+
+class ResearchGenerationTest(unittest.TestCase):
+    def test_actual_template_count_schema_and_output_reservation(self):
+        calls = []
+        def request(path, body, timeout=3):
+            calls.append((path, body))
+            if path == "/apply-template": return {"prompt": "rendered"}
+            if path == "/tokenize": return {"tokens": [0] * 1800}
+            return {"model": server.MODEL, "tokens_evaluated": 1800,
+                    "timings": {"prompt_ms": 200, "predicted_ms": 1000, "predicted_n": 200},
+                    "stop_type": "eos", "content": '{"ok":true}', "truncated": False}
+        schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+        with patch.multiple(server, RESEARCH=True, MAX_INPUT=2048, CONTEXT=3072), patch.object(server, "engine_request", request):
+            result = server.generate("case", 768, "research policy", schema, 2048, 1000)
+            self.assertEqual(result["input_tokens"], 1800)
+            self.assertEqual(calls[2][0], "/completion")
+            self.assertEqual(calls[2][1]["prompt"], [0] * 1800)
+            self.assertEqual(calls[2][1]["json_schema"], schema)
+            self.assertEqual(calls[2][1]["t_max_predict_ms"], 1000)
+            with self.assertRaises(server.InputError):
+                server.generate("case", 768, "research policy", schema, 1799)
+
 
 if __name__ == "__main__":
     unittest.main()
