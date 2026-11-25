@@ -24,6 +24,8 @@ python3 server/local-llm/server.py
 
 연구 요청은 `profile`, `weights_sha256`, `chat_template_sha256`, `prompt`, `system_prompt`, `max_new_tokens`, `max_input_tokens`, `timeout_ms`, `json_schema`를 사용한다. `/tokenize`는 같은 지침·template를 포함한 실제 입력 토큰 수를 반환한다. `/health`의 가중치·template hash와 준비용 schema 성공을 확인하며, Worker는 매 요청에서 hash를 고정한다. 생성 시 서버가 토큰 한도와 실제 사용량을 다시 검증한다. timeout으로 GPU 작업이 남으면 해당 연구 엔진만 종료한다.
 
+Lab Worker는 실행에 저장한 공통·단계 지침을 `system_prompt`로 전달한다. 서버는 전달한 값을 다른 판단 지침과 합성하지 않는다. 필드를 생략한 직접 요청만 서버 기본값을 사용하며, 빈 문자열이면 시스템 메시지를 생략한다. 공백·줄바꿈은 보존한다. 두 프로파일 모두 동일한 규칙을 적용하며, 모델의 chat template와 JSON schema·토큰 제한은 계속 적용한다.
+
 GPU 호스트에서 길이별 측정을 수행한다. 기존 프로세스를 시작·종료하거나 설정을 변경하는 명령은 아니다.
 
 ```sh

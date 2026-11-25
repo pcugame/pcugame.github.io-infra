@@ -214,8 +214,16 @@ export const LabOutputSchema = z.strictObject({
 	abstained: z.boolean(),
 });
 export const LabSearchModeSchema = z.enum(['no_search', 'backend_retrieval', 'agentic_retrieval', 'model_tool_call']);
+// Omission selects the profile default; an empty string deliberately removes that instruction.
+export const LAB_PROMPT_MAX_LENGTH = 8000;
+export const LabPromptOverridesSchema = z.strictObject({
+	systemPrompt: pgText(LAB_PROMPT_MAX_LENGTH).optional(),
+	actionPrompt: pgText(LAB_PROMPT_MAX_LENGTH).optional(),
+	answerPrompt: pgText(LAB_PROMPT_MAX_LENGTH).optional(),
+});
 export const LabCreateRunSchema = z
 	.strictObject({
+		...LabPromptOverridesSchema.shape,
 		datasetId: z.uuid(),
     finalTest: z.boolean().optional(),
 		size: z.number().int().min(1).max(LAB_MAX_CASES),
@@ -270,6 +278,8 @@ export const LabRunSchema = z.object({
 	evaluationProtocol: z.string(),
 	split: LabSplitSchema.nullable().optional(),
 	systemPrompt: z.string(),
+	actionPrompt: z.string().nullable().optional(),
+	answerPrompt: z.string().nullable().optional(),
 	promptHash: z.string(),
 	model: z.string(),
 	provider: z.string(),
@@ -349,6 +359,10 @@ export function formatLabExport(
 							datasetVersion: run.datasetVersion,
 							evaluationProtocol: run.evaluationProtocol,
 							selectedSplit: run.split,
+							systemPrompt: run.systemPrompt,
+							actionPrompt: run.actionPrompt,
+							answerPrompt: run.answerPrompt,
+							promptHash: run.promptHash,
 							...result,
 						}),
 					)
@@ -370,6 +384,7 @@ export function formatLabExport(
 		'datasetVersion',
 		'evaluationProtocol',
 		'selectedSplit',
+		'systemPrompt', 'actionPrompt', 'answerPrompt', 'promptHash',
 	];
 	function cell(value: string | number | null | undefined) {
 		const str = String(value ?? '');
@@ -393,6 +408,7 @@ export function formatLabExport(
 			run.datasetVersion,
 			run.evaluationProtocol,
 			run.split,
+			run.systemPrompt, run.actionPrompt, run.answerPrompt, run.promptHash,
 		]
 			.map(cell)
 			.join(',');

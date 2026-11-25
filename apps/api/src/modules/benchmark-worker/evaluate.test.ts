@@ -239,15 +239,16 @@ describe('single-slot Transformers generation', () => {
 		).toThrow();
 	});
 
-	it('sends fixed nickname instructions and quoted evidence, rejects unseen citations and records generation usage', async () => {
+	it('sends nickname instructions as system and quoted evidence as user, rejects unseen citations and records generation usage', async () => {
 		let generations = 0;
 		const fetcher = vi.fn((url: string, init: RequestInit) => {
 			if (url.endsWith('/health')) return Response.json(health);
 			expect(url).toBe(settings.modelUrl + '/generate');
 			const body = JSON.parse(String(init.body));
-			expect(Object.keys(body).sort()).toEqual(['max_new_tokens', 'prompt']);
+			expect(Object.keys(body).sort()).toEqual(['max_new_tokens', 'prompt', 'system_prompt']);
 			expect(body.max_new_tokens).toBe(256);
-			expect(body.prompt.startsWith(LAB_NICKNAME_SYSTEM_PROMPT)).toBe(true);
+			expect(body.system_prompt.startsWith(LAB_NICKNAME_SYSTEM_PROMPT)).toBe(true);
+			expect(body.prompt).not.toContain(LAB_NICKNAME_SYSTEM_PROMPT);
 			expect(body.prompt).not.toMatch(/HIDDEN_CONTEXT|HIDDEN_HINT/);
 			expect(body.prompt).toContain('S2');
 			expect(body.prompt).not.toContain('S3');

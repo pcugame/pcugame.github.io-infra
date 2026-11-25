@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-	LAB_NICKNAME_SYSTEM_PROMPT,
 	LabNicknameInputSchema,
 	labNicknameInput,
 	type LabNicknameInput,
@@ -44,7 +43,7 @@ for (const provider of ['openai-compatible', 'ollama', 'transformers-generate'] 
 		for (const mode of provider === 'transformers-generate'
 			? ['no_search', 'backend_retrieval']
 			: ['no_search', 'backend_retrieval', 'model_tool_call']) {
-			it(`never sends management metadata or custom answers through ${mode}, including repair and schema fallback`, async () => {
+			it(`sends explicit instructions but never management metadata through ${mode}, including repair and schema fallback`, async () => {
 				const config = readLabConfig({
 					LAB_ENABLED: 'true',
 					LAB_MODEL_PROVIDER: provider,
@@ -61,7 +60,7 @@ for (const provider of ['openai-compatible', 'ollama', 'transformers-generate'] 
 					temperature: 0,
 					searchMode: mode,
 				};
-				Object.assign(item, { systemPrompt: 'SECRET_PROMPT_ANSWER' });
+				Object.assign(item, { systemPrompt: '  사용자 비교 지침\n원문 보존  ', actionPrompt: '사용자 검색 지침', answerPrompt: '사용자 답변 지침' });
 				let finalCalls = 0;
 				let fallback = false;
 				let searches = 0;
@@ -85,8 +84,11 @@ for (const provider of ['openai-compatible', 'ollama', 'transformers-generate'] 
 						});
 					}
 					const body = JSON.parse(String(init?.body));
-					const text = provider === 'transformers-generate' ? body.prompt : body.messages[0].content;
-					expect(text).toContain(LAB_NICKNAME_SYSTEM_PROMPT);
+					const text = provider === 'transformers-generate' ? body.system_prompt : body.messages[0].content;
+					expect(text).toContain(item.systemPrompt);
+					expect(text).toContain(body.tools ? item.actionPrompt : item.answerPrompt);
+					expect(text).not.toContain('Evaluate potential social concerns');
+					if (provider === 'transformers-generate') expect(body.prompt).not.toContain(item.systemPrompt);
 					if (body.tools) {
 						toolCalls++;
 						const message = body.messages.some((m: { role: string }) => m.role === 'tool')

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { LAB_DATASET_MAX_BYTES, LAB_PAGE_SIZE, LAB_MAX_CASES, LAB_NICKNAME_SYSTEM_PROMPT, LAB_RESEARCH_SYSTEM_PROMPT, LAB_NICKNAME_JSONL_TEMPLATE, LAB_NICKNAME_CSV_TEMPLATE, type LabDataset, type LabSearchMode, type LabStatus } from '@pcu/contracts';
+import { LAB_DATASET_MAX_BYTES, LAB_PAGE_SIZE, LAB_MAX_CASES, LAB_PROMPT_MAX_LENGTH, labPromptSettings, LAB_NICKNAME_JSONL_TEMPLATE, LAB_NICKNAME_CSV_TEMPLATE, type LabPromptSettings, type LabDataset, type LabSearchMode, type LabStatus } from '@pcu/contracts';
 import { Button, CheckboxField, SelectField, TextareaField, TextField } from '../../components/ui';
 import { labApi, type LabSplit } from '../../lib/api/lab';
 import { useViewerKey } from '../../lib/query/visibility';
@@ -67,6 +67,8 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   const [split, setSplit] = useState<LabSplit | ''>('');
   const [defaultSplit, setDefaultSplit] = useState<LabSplit | ''>('');
   const [searchMode, setMode] = useState<LabSearchMode>('no_search');
+  const [promptOverrides, setPromptOverrides] = useState<Partial<LabPromptSettings>>({});
+  const prompts = labPromptSettings(promptOverrides, !!status.agenticRetrieval, status.provider === 'transformers-generate');
   const [temperature, setTemperature] = useState('0.2');
   const [maxTokens, setMaxTokens] = useState(String(Math.min(1024, status.generationLimits?.maxOutputTokens ?? 4096)));
   const limits = status.generationLimits;
@@ -97,6 +99,7 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   });
   const create = useMutation({
     mutationFn: () => labApi.create({
+      ...prompts,
       datasetId: dataset!.id, size, finalTest, ...(split ? { split } : {}), model: status.model, temperature: limits?.fixedTemperature ?? Number(temperature),
       maxTokens: Number(maxTokens), searchMode: effectiveMode, ...(selected.length ? { caseIds: selected } : {}),
     }),
@@ -149,7 +152,18 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
       {dataset && <p>자료 형식 v{dataset.schemaVersion} · 자료 식별값 {dataset.hash.slice(0, 12)} · 선택한 용도 {count}개</p>}
       <LabError error={available.error} />
       {dataset && <DatasetCases key={`${dataset.id}-${split}`} split={split || undefined} dataset={dataset} size={size} selected={selected} change={setSelected} />}
-      <TextareaField label="고정 평가 지침" help="모델이 닉네임을 판단할 때 따르는 공통 기준입니다. 같은 조건에서 결과를 비교하도록 이 화면에서는 수정할 수 없습니다." readOnly rows={5} value={status.agenticRetrieval ? LAB_RESEARCH_SYSTEM_PROMPT : LAB_NICKNAME_SYSTEM_PROMPT} />
+      <TextareaField label="공통 시스템 지침" help="판단 기준과 명령 표현을 바꾸어 결과를 비교할 수 있습니다. 입력한 원문은 실행별로 저장되며, 비우면 이 지침을 추가하지 않습니다." rows={6} maxLength={LAB_PROMPT_MAX_LENGTH} value={prompts.systemPrompt} onChange={e => setPromptOverrides(value => ({ ...value, systemPrompt: e.target.value }))} />
+      <details className="lab-preview"><summary>검색·답변 단계 지침 편집</summary>
+        <p>각 단계의 시스템 메시지는 공통 지침과 해당 단계 지침을 순서대로 연결합니다. 기본 문구는 자유롭게 수정하거나 비울 수 있습니다.</p>
+        <TextareaField label="검색 단계 지침" help="모델이 검색하며 분석하거나 도구를 호출할 때만 사용합니다. 검색 없이 분석·먼저 검색한 뒤 분석에는 사용하지 않습니다." rows={6} maxLength={LAB_PROMPT_MAX_LENGTH} value={prompts.actionPrompt} onChange={e => setPromptOverrides(value => ({ ...value, actionPrompt: e.target.value }))} />
+        <TextareaField label="답변 단계 지침" help="최종 판단을 생성할 때 공통 시스템 지침 뒤에 붙습니다." rows={8} maxLength={LAB_PROMPT_MAX_LENGTH} value={prompts.answerPrompt} onChange={e => setPromptOverrides(value => ({ ...value, answerPrompt: e.target.value }))} />
+        <Button type="button" variant="secondary" size="small" onClick={() => setPromptOverrides({})}>기본 지침으로 되돌리기</Button>
+      </details>
+      <details className="lab-preview"><summary>지침과 별도로 적용되는 출력·실행 조건</summary>
+        <p>닉네임과 검색 자료는 사용자 메시지로 전달합니다. 기대 근거·점수는 모델에 전달하지 않습니다. JSON 출력 형식, 닉네임 일치, 점수 범위, 제공한 출처만 인용하는 조건과 답변 유보 시 점수를 비우는 조건은 계속 검증합니다. 형식 오류 시 보정 요청을 한 번 추가할 수 있으며 실제 메시지는 결과의 전체 실행 이력에서 확인합니다.</p>
+        {status.agenticRetrieval && <p>연구 모드는 최대 2회 검색과 입력·출력 토큰 예산을 적용합니다. 인용문은 제공 발췌문과 대조하며, 확인되지 않은 복원 가설에 점수를 부여하거나 근거 없이 검증된 가설로 분류한 응답은 검증에 실패합니다.</p>}
+        <p>긴 지침은 입력 한도를 초과할 수 있습니다. 지침을 자동으로 줄이지 않으며, 한도를 넘으면 실행 오류로 기록합니다.</p>
+      </details>
       <div className="lab-grid lab-grid--settings">
         <SelectField label="검색 모드" help={searchHelp[effectiveMode]} value={effectiveMode} onChange={e => setMode(e.target.value as LabSearchMode)}>
           <option value="no_search">검색 없이 분석</option>

@@ -17,7 +17,7 @@ const result = {
 } as LabResult;
 
 describe('nickname evaluation contracts', () => {
-	it('rejects retired upload shapes, dataset types and custom system prompts', () => {
+	it('rejects retired upload shapes and preserves optional prompt overrides verbatim', () => {
 		expect(LabUploadSchema.safeParse({ name: 'old', jsonl: '{}' }).success).toBe(false);
 		expect(
 			LabUploadSchema.safeParse({ name: 'old', datasetType: 'context_terms', format: 'jsonl', content: '{}' })
@@ -32,7 +32,12 @@ describe('nickname evaluation contracts', () => {
 			model: 'local',
 		};
 		expect(LabCreateRunSchema.safeParse(request).success).toBe(true);
-		expect(LabCreateRunSchema.safeParse({ ...request, systemPrompt: 'hidden answer' }).success).toBe(false);
+		for (const field of ['systemPrompt', 'actionPrompt', 'answerPrompt']) {
+			for (const value of ['', '  한국어 지침\n두 번째 줄  '])
+				expect(LabCreateRunSchema.parse({ ...request, [field]: value })).toHaveProperty(field, value);
+			for (const value of [null, 'x\u0000', '\uD800', 'x'.repeat(8001)])
+				expect(LabCreateRunSchema.safeParse({ ...request, [field]: value }).success).toBe(false);
+		}
 		for (const model of ['x\u0000', '\uD800', '\uDFFF'])
 			expect(LabCreateRunSchema.safeParse({ ...request, model }).success).toBe(false);
 	});

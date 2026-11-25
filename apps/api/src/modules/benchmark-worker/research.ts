@@ -1,6 +1,6 @@
 import {
-	LAB_RESEARCH_ACTION_PROMPT, LAB_RESEARCH_ANSWER_PROMPT, LAB_RESEARCH_LIMITS as limits,
-	LAB_RESEARCH_PROFILE, LAB_RESEARCH_SYSTEM_PROMPT, LabOutputSchema,
+	LAB_RESEARCH_LIMITS as limits, labPromptSettings, labPromptSnapshot, labSystemMessage,
+	LAB_RESEARCH_PROFILE, LabOutputSchema,
 	LabResearchActionSchema, LabResearchAnswerSchema, LabEvidenceCheckSchema, labNicknameInput,
 	type LabResearchAction, type LabSource,
 } from '@pcu/contracts';
@@ -29,6 +29,7 @@ type SearchStep = {
 };
 export type ResearchTrace = {
 	protocol: typeof LAB_RESEARCH_PROFILE; systemPrompt: string; systemPromptHash: string;
+	actionPrompt: string; answerPrompt: string; promptHash: string;
 	model: string; searchMode: string; limits: typeof limits; identity?: unknown;
 	settings: { temperature: number; maxTokens: number; seed: 42 };
 	steps: (GenerationStep | SearchStep)[]; limitations: string[];
@@ -63,10 +64,12 @@ export async function evaluateResearch(
 	const start = performance.now();
 	const deadline = AbortSignal.timeout(limits.timeoutMs);
 	const signal = AbortSignal.any([parentSignal, deadline]);
+	const prompts = labPromptSettings(item, true);
 	const trace: ResearchTrace = {
 		protocol: LAB_RESEARCH_PROFILE, model: item.model, searchMode: item.searchMode,
-		systemPrompt: LAB_RESEARCH_SYSTEM_PROMPT,
-		systemPromptHash: createHash('sha256').update(LAB_RESEARCH_SYSTEM_PROMPT).digest('hex'),
+		...prompts,
+		systemPromptHash: createHash('sha256').update(prompts.systemPrompt).digest('hex'),
+		promptHash: createHash('sha256').update(labPromptSnapshot(prompts)).digest('hex'),
 		limits, settings: { temperature: item.temperature, maxTokens: item.maxTokens, seed: 42 },
 		steps: [], limitations: ['SEARCH_SNIPPETS_ONLY_ORIGINAL_PAGES_NOT_FETCHED'],
 		inputTokens: 0, outputTokens: 0, reservedOutputTokens: 0,
@@ -98,8 +101,7 @@ export async function evaluateResearch(
 		if (generations >= limits.maxGenerations) throw new LabFailure('GENERATION_LIMIT');
 		const maxTokens = kind === 'action' ? Math.min(limits.actionTokens, item.maxTokens) : item.maxTokens;
 		if (trace.reservedOutputTokens + maxTokens > limits.totalOutputTokens) throw new LabFailure('TOTAL_OUTPUT_TOKEN_LIMIT');
-		const systemPrompt = LAB_RESEARCH_SYSTEM_PROMPT + '\n' +
-			(kind === 'action' ? LAB_RESEARCH_ACTION_PROMPT : LAB_RESEARCH_ANSWER_PROMPT) +
+		const systemPrompt = labSystemMessage(prompts, kind) +
 			(repair ? '\nPrevious JSON was invalid. Regenerate a complete object, exact nickname, valid citations and quotes.' : '');
 		// Retain both rounds: a broad second query must not silently erase the useful first-round definition.
 		// Exact counted prompts, not character estimates, determine admission.

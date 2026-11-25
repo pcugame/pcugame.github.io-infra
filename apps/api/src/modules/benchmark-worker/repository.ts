@@ -35,10 +35,13 @@ export async function claimCase(db: PrismaClient, concurrency: number): Promise<
 					temperature: number;
 					maxTokens: number;
 					searchMode: string;
+					systemPrompt: string;
+					actionPrompt: string | null;
+					answerPrompt: string | null;
 					evaluationProtocol: string;
 				}[]
 			>`SELECT id, model, provider, temperature,
-			"maxTokens", "searchMode", "evaluationProtocol" FROM "LabRun" r
+			"maxTokens", "searchMode", "evaluationProtocol", "systemPrompt", "actionPrompt", "answerPrompt" FROM "LabRun" r
 			WHERE status IN ('QUEUED','RUNNING') AND EXISTS
 			(SELECT 1 FROM "LabResult" e WHERE e."runId"=r.id AND (e.status='PENDING'
 				OR (e.status='RUNNING' AND e."leaseUntil" <= clock_timestamp() AT TIME ZONE 'UTC')))
@@ -83,6 +86,9 @@ export async function claimCase(db: PrismaClient, concurrency: number): Promise<
 				temperature: run.temperature,
 				maxTokens: run.maxTokens,
 				searchMode: run.searchMode,
+				systemPrompt: run.systemPrompt,
+				actionPrompt: run.actionPrompt,
+				answerPrompt: run.answerPrompt,
 			};
 			const item: WorkItem = { ...settings, evaluationProtocol: run.evaluationProtocol, input: labNicknameInput(nickname) };
 			if (![LAB_NICKNAME_PROTOCOL, LAB_RESEARCH_PROFILE].includes(run.evaluationProtocol))

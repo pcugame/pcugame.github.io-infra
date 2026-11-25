@@ -1,15 +1,18 @@
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
-import { LAB_RESEARCH_PROFILE, labNicknameInput, parseLabDataset, type LabCase } from '@pcu/contracts';
+import { LAB_RESEARCH_PROFILE, LabPromptOverridesSchema, labPromptSettings, labPromptSnapshot, labNicknameInput, parseLabDataset, type LabCase } from '@pcu/contracts';
 import { readLabConfig } from '../src/modules/benchmark-worker/config.js';
 import { evaluateCase, type Attempt } from '../src/modules/benchmark-worker/evaluate.js';
 
 const { values } = parseArgs({ options: {
 	nickname: { type: 'string' }, dataset: { type: 'string' }, output: { type: 'string' },
 	mode: { type: 'string', default: 'all' }, limit: { type: 'string', default: '1' },
+	'prompts-file': { type: 'string' },
 } });
 if (!!values.nickname === !!values.dataset) throw new Error('Provide exactly one --nickname or --dataset (JSONL)');
+const prompts = labPromptSettings(values['prompts-file']
+	? LabPromptOverridesSchema.parse(JSON.parse(await readFile(values['prompts-file'], 'utf8'))) : {}, true);
 const config = readLabConfig();
 if (!config.enabled || config.generateProfile !== LAB_RESEARCH_PROFILE)
 	throw new Error('Enable LAB_GENERATE_PROFILE=nickname-research-v1 with the configured 4B /generate endpoint');
@@ -29,6 +32,7 @@ for (const row of rows) {
 	for (const searchMode of modes) {
 		abort.signal.throwIfAborted();
 		const result = await evaluateCase(config, {
+			...prompts,
 			provider: config.provider, model: config.model, temperature: 0, maxTokens: 768,
 			searchMode, input: labNicknameInput(row.nickname),
 		}, abort.signal, 'unsupported');
@@ -58,6 +62,7 @@ async function save() {
 		};
 	});
 	const report = { verification: 'live-provider', createdAt: new Date().toISOString(),
+		...prompts, promptHash: createHash('sha256').update(labPromptSnapshot(prompts)).digest('hex'),
 		datasetHash: createHash('sha256').update(JSON.stringify(dataset ?? rows)).digest('hex'),
 		selectedCaseIds: rows.map(r => r.id), model: config.model, profile: config.generateProfile, metrics, results };
 	const text = JSON.stringify(report, null, 2) + '\n';

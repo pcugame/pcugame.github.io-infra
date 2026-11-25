@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { LAB_RESEARCH_PROFILE, LAB_RESEARCH_SYSTEM_PROMPT, LabResultSchema } from '@pcu/contracts';
+import { LAB_RESEARCH_PROFILE, LAB_RESEARCH_SYSTEM_PROMPT, LabResultSchema, labPromptSettings, labPromptSnapshot } from '@pcu/contracts';
+import { createHash } from 'node:crypto';
 import { buildApp } from '../app.js';
 import { createProductionBackendContext } from '../backend-context.js';
 import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
@@ -19,6 +20,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('research profil
 	let workerClosed: Promise<unknown>;
 	let cookie: string;
 	let datasetId: string;
+	const requests: { system_prompt: string; prompt: string }[] = [];
 	const identity = { weights_sha256: 'a'.repeat(64), chat_template_sha256: 'b'.repeat(64),
 		chat_template: 'fake-template', engine_version: 'fake-provider', context_tokens: 3072, kv_cache: 'f16', gpu_layers: 99, seed: 42,
 		structured_output_transport: 'rendered-completion-json-schema' };
@@ -36,6 +38,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('research profil
 				const wire = Buffer.concat(parts).toString();
 				expect(wire).not.toContain('SECRET_REFERENCE');
 				const body = JSON.parse(wire);
+				requests.push(body);
 				expect(body.weights_sha256).toBe(identity.weights_sha256);
 				if (url.pathname === '/tokenize') result = { input_tokens: 500 };
 				else {
@@ -75,6 +78,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('research profil
 		expect(login.statusCode).toBe(200);
 		cookie = login.cookies[0]!.name + '=' + login.cookies[0]!.value;
 		expect(await api('GET', '/datasets')).toEqual([]);
+		expect(await api('GET', '/runs')).toEqual([]);
 		datasetId = (await api('POST', '/datasets', { name: 'research fixture', format: 'jsonl', content: JSON.stringify({
 			nickname: '가상산책', reference: { expectedReason: 'SECRET_REFERENCE', expectedScore: 50 },
 		}) }, 201)).id;
@@ -93,8 +97,12 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('research profil
 		expect(await api('GET', '/status')).toMatchObject({ modelStatus: 'available', agenticRetrieval: true,
 			toolSupport: 'unsupported', generationLimits: { maxInputTokens: 2048, maxOutputTokens: 768 } });
 		for (const searchMode of ['no_search', 'backend_retrieval', 'agentic_retrieval']) {
+			const prompts = labPromptSettings(searchMode === 'no_search' ? {} : {
+				systemPrompt: '  비교 실험용 시스템 지침\n  ', actionPrompt: '', answerPrompt: '최종 판단 기준 변형',
+			}, true);
+			const start = requests.length;
 			const { runId } = await api('POST', '/runs', { datasetId, size: 1, model: 'fixture-4b', searchMode,
-				temperature: 0, maxTokens: 768 }, 202);
+				...(searchMode === 'no_search' ? {} : prompts), temperature: 0, maxTokens: 768 }, 202);
 			let run;
 			for (let tries = 0; tries < 60; tries++) {
 				run = await api('GET', '/runs/' + runId);
@@ -102,7 +110,12 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('research profil
 				await delay(250);
 			}
 			expect(run).toMatchObject({ status: 'COMPLETED', success: 1, evaluationProtocol: LAB_RESEARCH_PROFILE,
-				systemPrompt: LAB_RESEARCH_SYSTEM_PROMPT, searchMode });
+				...prompts, searchMode, promptHash: createHash('sha256').update(labPromptSnapshot(prompts)).digest('hex') });
+			expect((await api('GET', '/runs')).find((r: { id: string }) => r.id === runId)).toMatchObject(prompts);
+			for (const body of requests.slice(start)) {
+				expect(body.system_prompt).toContain(prompts.systemPrompt);
+				if (searchMode !== 'no_search') expect(body.system_prompt).not.toContain(LAB_RESEARCH_SYSTEM_PROMPT);
+			}
 			const { items } = await api('GET', `/runs/${runId}/results`);
 			const result = LabResultSchema.parse(items[0]);
 			expect(result.output).toMatchObject({ nickname: '가상산책', score: null, abstained: true });
@@ -112,6 +125,8 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('research profil
 			for (const format of ['json', 'jsonl', 'csv']) {
 				const exported = await api('GET', `/runs/${runId}/export?format=${format}`);
 				expect(exported.content).toContain('weights_sha256');
+				expect(exported.content).toContain('promptHash');
+				expect(exported.content).toContain('answerPrompt');
 				if (searchMode !== 'no_search') expect(exported.content).toContain('https://example.org/research');
 			}
 			expect((await api('GET', `/runs/${runId}/results?q=missing`)).items).toEqual([]);

@@ -9,6 +9,13 @@ import server
 
 
 class GenerateTest(unittest.TestCase):
+    def test_empty_instruction_omits_system_role_without_using_server_default(self):
+        with patch.object(server, "engine_request", side_effect=[{"prompt": "template"}, {"tokens": [1, 2]}]) as request:
+            messages, tokens = server.render_input("nickname data", "")
+        self.assertEqual(messages, [{"role": "user", "content": "nickname data"}])
+        self.assertEqual(tokens, [1, 2])
+        self.assertEqual(request.call_args_list[0].args[1]["messages"], messages)
+
     def test_template_token_budget_precedes_inference(self):
         cases = [(1024, 200), (1025, 400)]
         for token_count, expected in cases:
@@ -73,6 +80,8 @@ class HTTPTest(unittest.TestCase):
             generate.assert_called_once_with(" next ", 192, server.SYSTEM_PROMPT)
             self.call("POST", "/generate", {"prompt": "word", "system_prompt": " custom "})
             generate.assert_called_with("word", 192, " custom ")
+            self.assertEqual(self.call("POST", "/generate", {"prompt": "word", "system_prompt": ""})[0], 200)
+            generate.assert_called_with("word", 192, "")
         self.assertTrue(self.call("GET", "/health")[1]["supports_system_prompt"])
         self.assertFalse(self.call("GET", "/health")[1]["busy"])
         self.process.poll.return_value = 1
@@ -80,7 +89,7 @@ class HTTPTest(unittest.TestCase):
 
     def test_invalid_requests_do_not_reach_model(self):
         with patch.object(server, "generate") as generate:
-            for body in [[], {}, {"prompt": "x", "system_prompt": " "}, {"prompt": "x", "system_prompt": None}, {"prompt": " "}, {"prompt": "x", "max_new_tokens": True},
+            for body in [[], {}, {"prompt": "x", "system_prompt": None}, {"prompt": " "}, {"prompt": "x", "max_new_tokens": True},
                          {"prompt": "x", "max_new_tokens": 257}, {"prompt": "x" * 33000}]:
                 with self.subTest(body_type=type(body)):
                     self.assertEqual(self.call("POST", "/generate", body)[0], 400)

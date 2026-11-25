@@ -145,10 +145,15 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('nickname-only L
 			await db.$executeRawUnsafe(await readFile(new URL(
 				'../../prisma/migrations/20261125120000_lab_human_evaluation/migration.sql', import.meta.url,
 			), 'utf8'));
+			await db.$executeRawUnsafe(await readFile(new URL(
+				'../../prisma/migrations/20261125130000_lab_editable_prompts/migration.sql', import.meta.url,
+			), 'utf8'));
 			const repo = createLabRepository(db);
 			const actor = { id: f.owner.id, role: 'BETA_TESTER' as const };
 			for (const run of await repo.runs(actor, 1)) {
 				LabRunSchema.parse(run);
+				expect(run).toMatchObject({ systemPrompt: LAB_NICKNAME_SYSTEM_PROMPT,
+					promptHash: 'preserved-prompt-hash', actionPrompt: null, answerPrompt: null });
 				const rows = await repo.results(actor, run.id, { page: 1, q: '' });
 				LabResultSchema.array().parse(rows.items);
 				expect(JSON.parse((await repo.exportRun(actor, run.id, 'json')).content).results).toHaveLength(1);

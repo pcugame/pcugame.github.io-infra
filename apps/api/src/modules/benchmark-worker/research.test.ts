@@ -21,7 +21,7 @@ const final = { schemaVersion: '2', nickname: item.input.nickname, interpretedTe
 const action = (query: string | null) => ({ action: query ? 'search' : 'finish', query,
 	hypotheses: [{ term: '달빛 산책', basis: '山은 산으로 읽을 수 있으나 원형은 가설이다' }] });
 type FixtureOptions = { actions?: unknown[]; answers?: unknown[]; snippet?: string; failSearch?: boolean;
-	inputTokens?: number; outputTokens?: number; finishReason?: string };
+	inputTokens?: number; outputTokens?: number; finishReason?: string; expectedSystemPrompt?: string };
 function fixture(options: FixtureOptions = {}) {
 	let actions = 0, answers = 0;
 	const fetcher = vi.fn((url: string | URL, init?: RequestInit): Response | Promise<Response> => {
@@ -39,7 +39,7 @@ function fixture(options: FixtureOptions = {}) {
 		expect(target.startsWith(config.modelUrl!)).toBe(true); // No document fetch, redirect, exfiltration or arbitrary tools.
 		const body = JSON.parse(String(init?.body));
 		expect(body.weights_sha256).toBe(health.identity.weights_sha256);
-		expect(body.system_prompt).toContain(LAB_RESEARCH_SYSTEM_PROMPT);
+		expect(body.system_prompt).toContain(options.expectedSystemPrompt ?? LAB_RESEARCH_SYSTEM_PROMPT);
 		expect(JSON.stringify(body)).not.toMatch(/SECRET_|expectedScore|expectedReason|familyId/);
 		if (target.endsWith('/tokenize')) return Response.json({ input_tokens: options.inputTokens ?? 600 });
 		expect(target).toBe(config.modelUrl + '/generate');
@@ -61,6 +61,27 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 const run = (override: Partial<WorkItem> = {}) => evaluateCase(config, { ...item, ...override }, new AbortController().signal, 'unsupported');
 
 describe('bounded JSON actions through Fake Provider (not model reasoning validation)', () => {
+	it('uses the selected stage instructions for token counting, generation and repair without reinserting defaults', async () => {
+		const custom = { systemPrompt: '  사용자 공통 지침\n  ', actionPrompt: '다른 검색 전략', answerPrompt: '다른 답변 기준' };
+		const fetcher = fixture({ expectedSystemPrompt: custom.systemPrompt, answers: ['{}', final] });
+		const result = await run(custom);
+		expect(result.error).toBeNull();
+		expect(result.research).toMatchObject(custom);
+		const bodies = fetcher.mock.calls.filter(([url]) => /\/(tokenize|generate)$/.test(String(url)))
+			.map(([, init]) => JSON.parse(String(init?.body)));
+		for (let index = 0; index < bodies.length; index += 2) {
+			expect(bodies[index].system_prompt).toBe(bodies[index + 1].system_prompt);
+			expect(bodies[index].system_prompt).not.toContain(LAB_RESEARCH_SYSTEM_PROMPT);
+		}
+		const steps = result.research!.steps.filter(s => s.kind !== 'search');
+		expect(steps[0]!.systemPrompt).toBe(custom.systemPrompt + '\n' + custom.actionPrompt);
+		expect(steps.at(-1)!.systemPrompt).toContain(custom.systemPrompt + '\n' + custom.answerPrompt);
+		expect(steps.at(-1)!.systemPrompt).toContain('Previous JSON was invalid');
+		fixture({ expectedSystemPrompt: '' });
+		const empty = await run({ systemPrompt: '', actionPrompt: '', answerPrompt: '', searchMode: 'no_search' });
+		expect(empty.error).toBeNull();
+		expect(empty.research!.steps[0]).toMatchObject({ systemPrompt: '' });
+	});
 	it('supports all three modes with identical weights, system policy and final generation settings', async () => {
 		for (const mode of ['no_search', 'backend_retrieval', 'agentic_retrieval']) {
 			const fetcher = fixture();

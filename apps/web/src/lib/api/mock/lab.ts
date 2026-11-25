@@ -1,6 +1,6 @@
 import {
   LAB_ACTIVE_RUN_LIMIT, LAB_CASE_ATTEMPT_LIMIT, LAB_PAGE_SIZE, LabBetaUserSchema, LabCompareQuerySchema, LabCreateRunSchema, LabExportFormatSchema, LabOutputSchema, LabPageQuerySchema,
-  LabCasesQuerySchema, LabResultsQuerySchema, LabRoleChangeSchema, LabUploadSchema, formatLabExport, parseLabUpload, labFamilyPlan, labFamilyKey, LAB_DATASET_IDENTITY, LAB_NICKNAME_SYSTEM_PROMPT, LAB_NICKNAME_PROTOCOL,
+  LabCasesQuerySchema, LabResultsQuerySchema, LabRoleChangeSchema, LabUploadSchema, formatLabExport, parseLabUpload, labFamilyPlan, labFamilyKey, LAB_DATASET_IDENTITY, labPromptSettings, labPromptSnapshot, labSystemMessage, LAB_NICKNAME_PROTOCOL,
   type LabCase, type LabDataset, type LabResult, type LabRun, type LabStatus,
 } from '@pcu/contracts';
 import { handleLabHuman, type MockHumanState } from './lab-human';
@@ -84,7 +84,7 @@ function advance(ctx: MockContext, job: StoredRun) {
     }
     row.history.push({ event: 'finished', attempt: row.attempts, status: row.status, at: ctx.now(), mock: true,
       searchDurationMs: 0, generationDurationMs: 80, generationContexts: [{ stage: 'answer', durationMs: 80, suppliedSources: [],
-        messages: [{ role: 'system', content: LAB_NICKNAME_SYSTEM_PROMPT }, { role: 'user', content: JSON.stringify({ nickname: row.testCase.nickname, sources: [] }) }] }] });
+        messages: [{ role: 'system', content: labSystemMessage(labPromptSettings(run), 'answer') }, { role: 'user', content: JSON.stringify({ nickname: row.testCase.nickname, sources: [] }) }] }] });
   }
   if (run.failed + run.success + run.cancelled === run.size) {
     run.status = 'COMPLETED';
@@ -168,9 +168,10 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
     const plan = labFamilyPlan(state.datasets.flatMap(d => d.cases), state.human?.families);
     if (cases.some(c => c?.split === 'test' || (c?.familyId && plan[labFamilyKey(c.familyId)] === 'test')) && !input.finalTest) throw new MockHttpError(400, 'VALIDATION_ERROR', 'test 표현군은 설정 확정 후 최종 평가로만 실행합니다.');
     const id = crypto.randomUUID();
+    const prompts = labPromptSettings(input);
     state.runs.unshift({
       ownerId: actor.id, nextAt: Date.now() + 300, rows: cases.map(c => pending(c!)),
-      info: { ...settings, id, schemaVersion: d.info.schemaVersion, evaluationProtocol: LAB_NICKNAME_PROTOCOL, datasetVersion: d.info.version, datasetHash: d.info.hash, systemPrompt: LAB_NICKNAME_SYSTEM_PROMPT, promptHash: await sha256(LAB_NICKNAME_SYSTEM_PROMPT), provider: STATUS.provider,
+      info: { ...settings, ...prompts, id, schemaVersion: d.info.schemaVersion, evaluationProtocol: LAB_NICKNAME_PROTOCOL, datasetVersion: d.info.version, datasetHash: d.info.hash, promptHash: await sha256(labPromptSnapshot(prompts)), provider: STATUS.provider,
         status: 'QUEUED', createdAt: ctx.now(), startedAt: null, completedAt: null, success: 0, failed: 0, cancelled: 0,
         stats: { meanScore: null, scored: 0, abstained: 0 } },
     });

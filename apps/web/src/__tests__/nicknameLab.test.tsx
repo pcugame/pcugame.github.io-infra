@@ -27,7 +27,11 @@ it('retains retrieval on search failure until the user explicitly chooses a mode
   expect(button.disabled).toBe(true);
   expect(create).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('검색 모드'), { target: { value: 'no_search' } });
+  fireEvent.change(screen.getByLabelText('공통 시스템 지침'), { target: { value: '  지침 실험\n  ' } });
+  fireEvent.change(screen.getByLabelText('검색 단계 지침'), { target: { value: '' } });
+  fireEvent.change(screen.getByLabelText('답변 단계 지침'), { target: { value: '다른 평가 기준' } });
   fireEvent.click(button);
   await waitFor(() => expect(onCreated).toHaveBeenCalledWith('run'));
-  expect(create).toHaveBeenCalledWith(expect.objectContaining({ datasetId: 'dataset', searchMode: 'no_search' }));
+  expect(create).toHaveBeenCalledWith(expect.objectContaining({ datasetId: 'dataset', searchMode: 'no_search',
+    systemPrompt: '  지침 실험\n  ', actionPrompt: '', answerPrompt: '다른 평가 기준' }));
 });

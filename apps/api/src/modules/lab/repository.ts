@@ -9,11 +9,11 @@ import {
 	formatLabExport,
 	parseLabUpload,
 	LAB_DATASET_IDENTITY,
-	LAB_NICKNAME_SYSTEM_PROMPT,
+	labPromptSettings,
+	labPromptSnapshot,
 	LAB_NICKNAME_PROTOCOL,
   labFamilyKey,
 	type LAB_RESEARCH_PROFILE,
-	LAB_RESEARCH_SYSTEM_PROMPT,
 	type LabUpload,
 	type LabSplitSchema,
 	type LabCreateRun,
@@ -122,7 +122,7 @@ export function createLabRepository(db: PrismaClient) {
 			return { items: rows.map((r) => LabCaseSchema.parse(r.body)), total };
 		},
 		async createRun(actor: Actor, request: LabCreateRun, provider: string, profile?: typeof LAB_RESEARCH_PROFILE) {
-			const systemPrompt = profile ? LAB_RESEARCH_SYSTEM_PROMPT : LAB_NICKNAME_SYSTEM_PROMPT;
+			const prompts = labPromptSettings(request, !!profile, provider === 'transformers-generate');
 			return db.$transaction(async (tx) => {
 				// Serialize the per-owner capacity check with other creates and retries.
 				await tx.$queryRaw`SELECT id FROM users WHERE id=${actor.id} FOR UPDATE`;
@@ -147,8 +147,8 @@ export function createLabRepository(db: PrismaClient) {
 						...settings,
 						ownerId: actor.id,
 						provider,
-						systemPrompt,
-						promptHash: sha(systemPrompt),
+						...prompts,
+						promptHash: sha(labPromptSnapshot(prompts)),
 						datasetHash: dataset.hash,
 						schemaVersion: dataset.schemaVersion,
 						evaluationProtocol: profile ?? LAB_NICKNAME_PROTOCOL,

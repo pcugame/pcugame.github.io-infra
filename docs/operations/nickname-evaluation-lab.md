@@ -22,14 +22,28 @@ API와 Benchmark Worker에는 같은 개발용 PostgreSQL, 설치된 모델 이�
 
 ## 데이터셋과 실행 계약
 
-Lab은 닉네임 평가 시스템 하나로 운영한다. 데이터 스키마는 `3`, 응답 스키마는 `2`, 기존 고정 평가 지침은 `nickname-risk-v1`, 연구 프로파일은 `nickname-research-v1`이다. Run에는 실제 지침과 hash를 저장하며 Worker 설정과 저장된 프로파일이 다르면 실행을 거부한다. 스키마 번호는 Phase 1 기록의 의미를 유지하며, 지원하지 않는 이전 데이터 형식을 실행하거나 변환하는 경로는 제공하지 않는다.
+Lab은 닉네임 평가 시스템 하나로 운영한다. 데이터 스키마는 `3`, 응답 스키마는 `2`, 기본 평가 프로토콜은 `nickname-risk-v1`, 연구 프로파일은 `nickname-research-v1`이다. Run에는 실제 지침과 hash를 저장하며 Worker 설정과 저장된 프로파일이 다르면 실행을 거부한다. 스키마 번호는 Phase 1 기록의 의미를 유지하며, 지원하지 않는 이전 데이터 형식을 실행하거나 변환하는 경로는 제공하지 않는다.
 
 1. [JSONL 기본 양식](../../benchmarks/nickname-evaluation/templates/nickname-research.jsonl) 또는 [CSV 기본 양식](../../benchmarks/nickname-evaluation/templates/nickname-research.csv)에 사람이 작성한 데이터를 등록한다. 1~10,000행, 최대 4 MiB를 지원하며 고정 언어·범주 분포를 요구하지 않는다.
 2. 데이터셋 미리보기에서 닉네임·ID를 검색하고 기대 근거·점수·범위·split·family를 확인한다. 실행 크기는 1개·10개·50개·현재 split 전체·사용자 지정이다. 직접 선택한 ID는 요청한 개수와 일치해야 하며, 선택하지 않으면 해당 split의 파일 순서대로 실행한다.
-3. 검색 모드와 생성 설정을 선택한다. 평가 지침은 서버에서 고정한다. 실행 요청에 사용자 프롬프트를 지정하면 거부한다.
+3. 검색 모드·생성 설정과 공통·검색·답변 지침을 선택한다. 기본 지침을 수정하여 명령 표현이나 판단 기준에 따른 결과를 비교한다. 실행 생성 후에는 저장한 지침을 유지한다.
 4. 진행률 조회, 취소, 실패 재실행, 비교와 JSON·JSONL·CSV 내보내기를 수행한다. 비교 대상은 같은 데이터셋 hash·스키마로 제한한다.
 
 API 기준 경로는 `/api/lab`이다. 데이터 등록은 `POST /datasets`에 `{name, format, content, defaultSplit?}`를 전달한다. `format`은 `jsonl` 또는 `csv`이다. `POST /runs`는 데이터셋·크기·선택 ID·split·모델·검색 모드·생성 설정을 받는다. 공유 계약은 `packages/contracts/src/lab.ts`에 정의한다.
+
+### 실행별 지침과 비교 조건
+
+`POST /runs`의 선택적 `systemPrompt`는 공통 판단 지침, `actionPrompt`는 모델 검색 결정·도구 호출 지침, `answerPrompt`는 최종 판단 지침이다. 각 항목은 최대 8,000자이며 원문의 공백·줄바꿈을 보존한다. 항목을 생략하면 해당 프로파일의 기본값을 저장하고, 빈 문자열은 해당 지침의 명시적 생략으로 처리한다. 기본값은 `packages/contracts/src/lab-prompts.ts`와 `lab-research.ts`에서 관리한다.
+
+각 생성 요청의 시스템 메시지는 공통 지침과 해당 단계 지침을 줄바꿈으로 연결한다. 닉네임·검색 발췌문은 사용자 메시지로 전달한다. `/generate`에도 `system_prompt`를 명시하므로 모델 서버의 별도 코딩용 기본 지침을 사용하지 않는다. 서버는 빈 시스템 지침을 받으면 시스템 메시지를 생략하며, 모델 자체의 chat template는 계속 적용한다. 검색 없는 평가와 서버 선검색에서는 `actionPrompt`를 사용하지 않는다.
+
+API는 세 지침의 원문과 고정 키 순서 JSON의 SHA-256을 저장한다. Worker는 저장한 값을 읽어 재시도에도 동일하게 적용한다. 실행 상세와 JSON·JSONL·CSV 내보내기에 세 지침과 `promptHash`를 포함하며, 실제 생성 메시지·보정 요청은 결과 이력에 보존한다. 비교 시 데이터셋·선택 사례·모델·검색 모드·생성 설정을 통일하고 지침을 변경한다. 검색 결과는 시점에 따라 달라지므로 지침 차이만으로 결과 변화를 단정하지 않는다.
+
+JSON schema, 닉네임 일치, 점수 범위, 인용 ID·발췌문 검증, 유보 시 `score=null`, 연구 모드의 미검증 복원 가설 유보 조건은 Worker 검증 조건이다. 지침 편집으로 이 조건을 해제하지 않는다. 형식·인용 오류에는 한 차례 보정 요청을 추가할 수 있으며 실패 응답도 이력에 보존한다. 토큰·시간·검색 횟수 제한을 유지하고 지침 원문은 자동으로 축약하지 않는다. 따라서 지침 비교 결과에는 성공 판단뿐 아니라 형식 오류·입력 한도 초과도 포함한다.
+
+`e13fdeae`의 닉네임 평가 통합에서 사용자 지침 입력과 Worker 전달이 제거되었으며, 이후 도움말에는 동일 조건 비교를 위한 고정으로 설명되었다. 현재는 지침을 실험 변수로 저장한다. 기존 실행의 `systemPrompt`·hash·이력은 변경하지 않는다. 기본 `/generate` 경로는 이번 변경부터 평가 지침을 사용자 메시지 대신 시스템 메시지로 전달하므로 과거 실행과 비교할 때 실제 메시지 이력을 확인한다. 이전 hash는 공통 지침만 식별하므로 새 hash와 직접 비교하지 않으며, 단계 지침이 `null`인 이전 실행은 실제 이력으로 확인한다.
+
+`20261125130000_lab_editable_prompts`는 nullable text 열 두 개를 추가하는 단일 SQL 문으로 원자적으로 적용한다. 기존 행을 갱신하지 않으며 구형 writer는 새 열을 생략할 수 있다. 실제 사용자 지침 적용에는 새 API·Worker·Web과 빈 시스템 지침을 지원하는 모델 서버를 함께 사용해야 한다. 배포 시 Lab 쓰기·Worker를 중단하고 migration과 각 구성 요소 갱신 후 재개한다. 적용 이후 복구는 기존 배포 runbook의 forward recovery 절차를 따른다.
 
 ### 사람의 입력과 연구 메타데이터
 
@@ -48,7 +62,7 @@ CSV의 필수 열은 `nickname,expectedReason,expectedScore`이며 선택 열은
 ```text
 사람의 JSONL/CSV → API 검증 → 불변 Dataset + 관리용 Case
                            → Run 선택(split/ID) → lease·재시도 Worker
-                           → { nickname } + 고정 지침 → 모델·검색
+                           → { nickname } + 실행별 지침 → 모델·검색
                            → 응답 검증 + 수집 출처 → Result → 비교·내보내기
 ```
 
@@ -66,7 +80,7 @@ CSV의 필수 열은 `nickname,expectedReason,expectedScore`이며 선택 열은
 
 향후 릴리스에서는 백업을 확보하고 Lab API 쓰기와 Benchmark Worker를 중단한 뒤 활성 lease가 만료될 때까지 대기한다. 구형 writer와 새 schema의 혼합 운영은 지원하지 않는다. 정리 migration은 Lab 네 테이블을 잠그고 하나의 transaction에서 실행한다. 알 수 없는 유형, Dataset·Run 메타데이터 불일치, 활성 lease, 손상된 Phase 1 본문·응답이 있으면 실패한다. 검증 실패 시 앞서 수행한 삭제와 DDL도 전체 롤백한다. 자동 변환이나 손상된 신규 데이터 삭제로 실패를 우회하지 않는다.
 
-성공 후 새 API·Worker·Web을 함께 기동한다. 보존한 대기 작업과 만료 lease는 기존 재시도 절차로 재개한다. 고정 프롬프트·출처·비교·내보내기와 졸업전시 조회를 확인한다. 실험 자료는 DB 내부 JSON과 출처 URL이며 이 migration에서 S3 파일·삭제 outbox 등 외부 자원 참조를 제거하지 않는다.
+성공 후 새 API·Worker·Web을 함께 기동한다. 보존한 대기 작업과 만료 lease는 기존 재시도 절차로 재개한다. 저장된 프롬프트·출처·비교·내보내기와 졸업전시 조회를 확인한다. 실험 자료는 DB 내부 JSON과 출처 URL이며 이 migration에서 S3 파일·삭제 outbox 등 외부 자원 참조를 제거하지 않는다.
 
 적용 후 구형 binary를 자동 복원하지 않는다. 실패 원인을 확인하여 forward fix 또는 검증된 백업 복원 절차를 선택한다. 삭제한 구형 실험이 필요한 경우 백업에서 별도 복구하며 현재 Lab에 재등록하는 변환기는 제공하지 않는다. 운영 적용은 [배포 및 복구 절차](deployment.md)와 [migration 정책](../database-migration-policy.md)을 따른다.
 
@@ -92,7 +106,7 @@ llama.cpp b12559와 실제 Qwen GGUF template에서 단순 JSON probe와 전체 
 | `backend_retrieval` | 기존처럼 Worker가 원본 닉네임으로 1회 선검색 |
 | `agentic_retrieval` | 모델이 해석 가설과 `search`·`finish` JSON action을 생성하고 Worker가 최대 2회 검색 |
 
-세 모드에는 동일한 연구 지침·가중치·최종 생성 한도를 적용한다. action은 검색어와 최대 두 개의 짧은 해석 가설만 포함한다. NFKC 표기는 보조 가설이며 원본 닉네임은 보존한다. 모델은 혼합 문자와 자모의 시각적·음성적 독법을 검토하되 유사성만으로 의미를 확정하지 않는다. 원형 사전, 비속어 목록, 데이터셋의 기대 근거·점수·family를 사용하는 복원기는 없다.
+세 모드의 기본 연구 지침·가중치·최종 생성 한도는 동일하며 지침은 실행별로 변경할 수 있다. action은 검색어와 최대 두 개의 짧은 해석 가설만 포함한다. NFKC 표기는 보조 가설이며 원본 닉네임은 보존한다. 기본 지침은 혼합 문자와 자모의 시각적·음성적 독법을 검토하되 유사성만으로 의미를 확정하지 않도록 한다. 원형 사전, 비속어 목록, 데이터셋의 기대 근거·점수·family를 사용하는 복원기는 없다.
 
 최종 생성은 `evidenceChecks`를 먼저 작성하고 판단을 생성한다. 인용문·주장·관련성(`supports_concern`, `ordinary_usage`, `unrelated`)을 기록한다. Worker는 현재 제공한 ID와 정확한 발췌문 인용을 확인하고 `unrelated` 인용을 거부한다. URL은 Worker의 수집 기록에서 결합한다. 이 검사는 인용의 문자적 일치와 대응을 보장하며 의미 해석의 정확성을 자동 확정하지 않는다. 단어의 등장이나 커뮤니티 사용 사실만으로 위험성·사용자 소속을 단정하지 않도록 지시한다.
 
@@ -133,6 +147,8 @@ export LAB_MODEL_URL=http://127.0.0.1:8089
 export LAB_SEARXNG_URL=http://127.0.0.1:18888
 npm run lab:research -w apps/api -- --nickname '달빛산책' --mode all --output /tmp/nickname-comparison.json
 npm run lab:research -w apps/api -- --dataset /path/to/research.jsonl --limit 10 --mode all --output /tmp/nickname-dataset-comparison.json
+# 선택적 JSON 파일: {"systemPrompt":"공통 지침", "actionPrompt":"검색 지침", "answerPrompt":"답변 지침"}
+npm run lab:research -w apps/api -- --nickname '달빛산책' --mode all --prompts-file /path/to/prompts.json --output /tmp/nickname-prompt-comparison.json
 ```
 
 비교 JSON에는 동일 데이터셋 hash·선택 ID, 모드별 JSON 성공 수·유보 수·채점 수·MAE·기대 범위 충족률·시간·토큰을 기록한다. MAE와 범위 충족률은 유효 점수가 있는 사례만 분모로 사용한다. 채점·유보·실패 수를 함께 비교하며, 평균 점수나 일부 성공 사례를 정확도 향상으로 해석하지 않는다. 검색 시점의 결과는 달라질 수 있으므로 수집 결과 전체를 함께 보존한다.

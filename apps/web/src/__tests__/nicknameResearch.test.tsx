@@ -21,7 +21,8 @@ describe('nickname research presentation', () => {
     expect((option as HTMLOptionElement).disabled).toBe(false);
     fireEvent.change(screen.getByLabelText('검색 모드'), { target: { value: 'agentic_retrieval' } });
     expect((screen.getByLabelText('검색 모드') as HTMLSelectElement).value).toBe('agentic_retrieval');
-    expect((screen.getByLabelText('고정 평가 지침') as HTMLTextAreaElement).value).toBe(LAB_RESEARCH_SYSTEM_PROMPT);
+    expect((screen.getByLabelText('공통 시스템 지침') as HTMLTextAreaElement).value).toBe(LAB_RESEARCH_SYSTEM_PROMPT);
+    expect((screen.getByLabelText('공통 시스템 지침') as HTMLTextAreaElement).readOnly).toBe(false);
     client.clear();
   });
   it('shows hypotheses, model queries, tokens and snippet-only evidence without rendering web instructions as HTML', () => {

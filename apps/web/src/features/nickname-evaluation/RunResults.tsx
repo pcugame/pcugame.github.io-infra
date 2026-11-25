@@ -60,7 +60,9 @@ export function RunResults({ id }: { id: string }) {
       </div>
     </div>
     <details className="lab-metadata"><summary>프롬프트와 실행 설정</summary>
-      <p>{info.systemPrompt}</p><dl>
+      <h3>공통 시스템 지침</h3><pre>{info.systemPrompt || '(비어 있음)'}</pre>
+      <h3>검색 단계 지침</h3><pre>{info.actionPrompt === '' ? '(비어 있음)' : info.actionPrompt ?? '이전 실행: 단계 지침 원문을 별도로 저장하지 않았습니다. 전체 실행 이력을 확인하세요.'}</pre>
+      <h3>답변 단계 지침</h3><pre>{info.answerPrompt === '' ? '(비어 있음)' : info.answerPrompt ?? '이전 실행: 단계 지침 원문을 별도로 저장하지 않았습니다. 전체 실행 이력을 확인하세요.'}</pre><dl>
         <dt>모델 / 검색 모드</dt><dd>{info.provider} · {info.model} · {info.searchMode}</dd>
         <dt>생성 설정</dt><dd>Temperature {info.temperature} · 출력 {info.maxTokens} 토큰</dd>
         <dt>스키마 / 평가 지침</dt><dd>{info.schemaVersion} / {info.evaluationProtocol}</dd>
@@ -121,6 +123,7 @@ export function RunCompare({ left, runs }: { left: LabRun; runs: LabRun[] }) {
       <option value="">실험 선택</option>{candidates.map(run => <option key={run.id} value={run.id}>{runLabel(run)}</option>)}
     </SelectField>
     {right && <>
+      <p>지침 식별값 · 기준 {left.promptHash.slice(0, 12)} / 비교 {right.promptHash.slice(0, 12)} · {left.actionPrompt == null || left.answerPrompt == null || right.actionPrompt == null || right.answerPrompt == null ? '이전 실행 포함: 단계 지침 비교 불가' : left.promptHash === right.promptHash ? '같은 지침' : '다른 지침'}</p>
       <p>평균 점수 · 기준 {left.stats.meanScore?.toFixed(1) ?? '—'} / 비교 {right.stats.meanScore?.toFixed(1) ?? '—'}</p>
       <TextField type="search" maxLength={160} label="비교 결과 검색" value={q} onChange={e => { setPage(1); setQ(e.target.value); }} />
       <LabError error={compare.error} />

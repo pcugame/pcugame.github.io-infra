@@ -1251,6 +1251,8 @@ model LabRun {
   finalTest Boolean @default(false)
   split        String?
   systemPrompt String
+  actionPrompt String?
+  answerPrompt String?
   promptHash   String
   model        String
   provider     String
