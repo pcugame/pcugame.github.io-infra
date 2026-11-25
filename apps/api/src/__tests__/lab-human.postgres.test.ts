@@ -38,62 +38,80 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('Human Evaluatio
       const failed = c.id === 'failure';
       await db.labResult.update({ where: { runId_caseId: { runId, caseId: c.id } }, data: { status: failed ? 'FAILED' : 'SUCCEEDED', output: failed ? undefined : output,
         error: failed ? 'PROVIDER_UNREACHABLE' : null, attempts: 1, jsonValid: !failed, durationMs: 10,
-        history: [{ event: 'finished', generationContexts: [{ stage: 'answer', messages: [{ role: 'system', content: 'fixture policy' }, { role: 'user', content: JSON.stringify({ nickname: c.nickname, sources: [] }) }], suppliedSources: [], durationMs: 10 }], searchDurationMs: 0, generationDurationMs: 10, output }] } });
+        history: [{ event: 'finished', generationContexts: [{ stage: 'answer', messages: [{ role: 'system', content: 'fixture policy' }, { role: 'user', content: JSON.stringify({ nickname: c.nickname, sources: [] }) }], suppliedSources: [], durationMs: 10, rawResponse: JSON.stringify(JSON.stringify(output)), rawResponseEncoding: 'json-string', finishReason: 'stop', validation: { valid: true, error: null } }], searchDurationMs: 0, generationDurationMs: 10, output }] } });
     }
     await db.labRun.update({ where: { id: runId }, data: { status: 'COMPLETED', completedAt: new Date() } });
   }, 60_000);
   afterAll(async () => { await app?.close(); await database?.close(); });
-  it('preserves original responses, versions reviews and requires grounded approval before actual JSONL export', async () => {
+  it('saves independent axes, atomically approves selected feedback and exports original unpaired completions', async () => {
     const base = `/runs/${runId}`;
-    expect(LabCurationOverviewSchema.parse(await api('GET', base + '/curation'))).toMatchObject({ candidates: [], exports: [], metrics: { total: 5, reviewed: 0, failed: 1 } });
+    const empty = LabCurationOverviewSchema.parse(await api('GET', base + '/curation'));
+    expect(empty).toMatchObject({ feedback: [], candidates: [], exports: [], metrics: { total: 5, reviewed: 0, failed: 1 } });
+    const scope = empty.scope!;
     const results = (await api('GET', base + '/results')).items.map((r: unknown) => LabResultSchema.parse(r));
-    const ids: string[] = [];
+    const reviewIds: string[] = [];
+    let heldout = '';
     for (const caseId of ['normal', 'error', 'heldout', 'validation', 'failure']) {
       const path = `${base}/results/${caseId}`;
       const bundle = LabReviewBundleSchema.parse(await api('GET', path + '/review'));
-      expect(bundle.reviews).toEqual([]);
       const item = results.find((r: { caseId: string }) => r.caseId === caseId)!;
-      const body = { ...labDefaultReview(item), verdict: caseId === 'failure' ? 'deferred' : caseId === 'error' ? 'incorrect' : 'correct', errors: caseId === 'error' ? ['score'] : [],
-        cause: caseId === 'error' ? 'model' : 'none', cohort: caseId === 'error' ? 'problematic' : 'normal', rationaleFit: caseId !== 'error', interpretationSuccess: true,
-        correction: caseId === 'error' ? { reason: '사람이 교정한 근거', score: 80 } : {} };
+      const body = { ...labDefaultReview(item), verdict: caseId === 'failure' ? 'incorrect' : caseId === 'error' ? 'partial' : 'correct',
+        behavior: caseId === 'failure' ? 'exclude' : caseId === 'error' ? 'negative' : 'positive',
+        behaviorReasons: caseId === 'error' ? ['fabricated_fact'] : [] };
       const review = await api('POST', path + '/review', { previousReviewId: null, resultHash: bundle.resultHash, body }, 201);
+      expect(review.body.verdict).toBe(body.verdict); expect(review.body.behavior).toBe(body.behavior);
       await api('POST', path + '/review', { previousReviewId: null, resultHash: bundle.resultHash, body }, 409);
-      const eligible = ['normal', 'error'].includes(caseId);
-      const raw = await api('POST', path + '/candidates', { reviewId: review.id, objective: 'C' }, eligible ? 201 : 400);
-      if (!eligible) continue;
-      const candidate = LabCandidateSchema.parse(raw);
-      ids.push(candidate.id);
-      expect(candidate).toMatchObject({ status: 'draft', stale: false, decisions: [] });
-      expect(candidate.body.messages[1]!.content).not.toContain('원본 기대 근거');
-      await api('POST', `${base}/candidates/${candidate.id}/decision`, { decision: 'approved', contentHash: candidate.contentHash, grounded: false, familyVerified: true }, 400);
-      await api('POST', base + '/curation/exports', { kind: 'train', candidateIds: ids, policy: {}, approved: true }, 400);
-      const approved = LabCandidateSchema.parse(await api('POST', `${base}/candidates/${candidate.id}/decision`, { decision: 'approved', contentHash: candidate.contentHash, grounded: true, familyVerified: true }));
-      expect(approved.decisions).toHaveLength(1);
-      expect((await db.labResult.findUniqueOrThrow({ where: { runId_caseId: { runId, caseId } } })).output).toMatchObject({ reason: '모델 원본 판단', score: 0 });
+      if (caseId === 'heldout') heldout = review.id;
+      if (['normal', 'error'].includes(caseId)) reviewIds.push(review.id);
     }
-    await api('POST', base + '/curation/exports', { kind: 'train', candidateIds: ids, policy: {}, approved: false }, 400);
-    const exported = LabCurationExportSchema.parse(await api('POST', base + '/curation/exports', { kind: 'train', candidateIds: ids, policy: LabCurationPolicySchema.parse({ minAmbiguousShare: 0 }), approved: true }, 201));
+    await api('POST', base + '/feedback/approve', { reviewIds: [...reviewIds, heldout], scope }, 400);
+    expect(await db.labTrainingCandidate.count()).toBe(0); // Whole batch is atomic.
+    await api('POST', base + '/feedback/approve', { reviewIds, scope: { ...scope, feedbackPolicy: 'another policy' } }, 400);
+    const approved = (await api('POST', base + '/feedback/approve', { reviewIds, scope })).map((v: unknown) => LabCandidateSchema.parse(v));
+    const ids = approved.map((c: { id: string }) => c.id);
+    expect(approved).toHaveLength(2);
+    expect(approved[0]).toMatchObject({ status: 'approved', stale: false, body: { version: 'preference-v1', label: true } });
+    expect((await api('POST', base + '/feedback/approve', { reviewIds, scope })).map((c: { id: string }) => c.id)).toEqual(ids);
+    expect(await db.labTrainingCandidate.count()).toBe(2);
+    const request = { kind: 'train', candidateIds: ids, scope, policy: LabCurationPolicySchema.parse({}), approved: true };
+    await api('POST', base + '/curation/exports', { ...request, approved: false }, 400);
+    await api('POST', base + '/curation/exports', { ...request, scope: { ...scope, promptHash: 'b'.repeat(64) } }, 400);
+    const exported = LabCurationExportSchema.parse(await api('POST', base + '/curation/exports', request, 201));
     const lines = exported.files[0]!.content.trim().split('\n').map(line => JSON.parse(line));
     expect(lines).toHaveLength(2);
-    expect(Object.keys(lines[0])).toEqual(['messages']);
-    expect(lines[1].messages.at(-1).content).toContain('사람이 교정한 근거');
-    expect(exported.files[1]!.content).toContain('모델 원본 판단');
-    expect(exported.files[1]!.content).toContain('contentHash');
+    expect(lines.map(v => Object.keys(v))).toEqual([['prompt', 'completion', 'label'], ['prompt', 'completion', 'label']]);
+    expect(lines.map(v => v.label)).toEqual([true, false]);
+    expect(lines[1].completion[0].content).toContain('모델 원본 판단');
+    expect(exported.files[0]!.content).not.toMatch(/원본 기대 근거|expectedScore|actorId|fabricated_fact/);
+    expect(exported.manifest.selection).toMatchObject({ positive: 1, negative: 1 });
     expect((await api('GET', `${base}/curation/exports/${exported.id}`)).files).toEqual(exported.files);
     for (const kind of ['validation', 'test']) {
-      const file = LabCurationExportSchema.parse(await api('POST', base + '/curation/exports', { kind, policy: {}, approved: true }, 201));
-      expect(file.files[0]!.content).toContain('evaluation_only');
-      expect(file.files[0]!.content).toContain('원본 기대 근거');
-      expect(JSON.parse(file.files[0]!.content).messages).toBeUndefined();
+      const file = LabCurationExportSchema.parse(await api('POST', base + '/curation/exports', { ...request, kind, candidateIds: [] }, 201));
+      expect(file.files[0]!.content).toContain('evaluation_only'); expect(file.files[0]!.content).toContain('원본 기대 근거');
+      expect(JSON.parse(file.files[0]!.content).prompt).toBeUndefined();
     }
     const old = LabReviewBundleSchema.parse(await api('GET', base + '/results/normal/review'));
     await api('POST', base + '/results/normal/review', { previousReviewId: old.reviews[0]!.id, resultHash: old.resultHash, body: { ...old.reviews[0]!.body, notes: '재검수' } }, 201);
     expect((await api('GET', base + '/results/normal/review')).candidates[0].stale).toBe(true);
-    await api('POST', base + '/curation/exports', { kind: 'train', candidateIds: ids, policy: {}, approved: true }, 400);
-    // Old release files remain immutable and downloadable with their original approvals.
+    await api('POST', base + '/curation/exports', request, 400);
+    await api('POST', base + '/feedback/approve', { reviewIds, scope }, 409);
     expect((await api('GET', `${base}/curation/exports/${exported.id}`)).files).toEqual(exported.files);
     await db.labResult.update({ where: { runId_caseId: { runId, caseId: 'error' } }, data: { attempts: 2 } });
     expect((await api('GET', base + '/curation')).metrics.staleReviews).toBe(1);
+  });
+  it('clones exact dataset/cases/settings and records prompt-only experiments without editing source history', async () => {
+    const original = await api('GET', `/runs/${runId}`);
+    const ids = ['normal', 'error', 'heldout', 'validation', 'failure'];
+    const input = { replayOf: runId, datasetId: original.datasetId, size: 5, caseIds: ids, finalTest: true,
+      model: original.model, searchMode: original.searchMode, temperature: original.temperature, maxTokens: original.maxTokens,
+      systemPrompt: '새 프롬프트', actionPrompt: original.actionPrompt, answerPrompt: original.answerPrompt };
+    await api('POST', '/runs', { ...input, caseIds: [...ids].reverse() }, 400);
+    await api('POST', '/runs', { ...input, temperature: 0.5 }, 400);
+    const replay = await api('POST', '/runs', input, 202);
+    const saved = await api('GET', `/runs/${replay.runId}`);
+    expect(saved).toMatchObject({ replayOf: runId, systemPrompt: '새 프롬프트', datasetHash: original.datasetHash });
+    expect((await api('GET', `/runs/${runId}`)).systemPrompt).toBe(original.systemPrompt);
+    await api('POST', `/runs/${replay.runId}/cancel`);
   });
   it('protects ownership and rejects cross-dataset family or nickname leakage', async () => {
     const login = await app.inject({ method: 'POST', url: '/api/dev/auth/login', headers: { origin: 'http://localhost:5173' }, payload: { role: 'USER' } });
@@ -120,7 +138,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('Human Evaluatio
     const review = LabReviewBundleSchema.parse(await api('GET', path + '/review'));
     expect(review.splitError).toBeNull();
     expect(review.effectiveSplit).toBe('train');
-    await api('POST', path + '/candidates', { reviewId: review.reviews[0]!.id, objective: 'C' }, 201);
+    await api('POST', `/runs/${runId}/feedback/approve`, { reviewIds: [review.reviews[0]!.id], scope: (await api('GET', `/runs/${runId}/curation`)).scope });
   });
 
   it('preserves unclassified cohorts as null through authenticated review serialization', async () => {
@@ -129,7 +147,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('Human Evaluatio
     const saved = await api('POST', path, { previousReviewId: bundle.reviews[0]!.id, resultHash: bundle.resultHash,
       body: { ...bundle.reviews[0]!.body, cohort: null } }, 201);
     expect(saved.body.cohort).toBeNull();
-    expect((await api('GET', `/runs/${runId}/curation`)).metrics.unknownCohort).toBe(2);
+    expect((await api('GET', `/runs/${runId}/curation`)).metrics.unknownCohort).toBe(5);
   });
 
 });

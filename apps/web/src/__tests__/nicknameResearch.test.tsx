@@ -21,11 +21,12 @@ describe('nickname research presentation', () => {
     expect((option as HTMLOptionElement).disabled).toBe(false);
     fireEvent.change(screen.getByLabelText('검색 모드'), { target: { value: 'agentic_retrieval' } });
     expect((screen.getByLabelText('검색 모드') as HTMLSelectElement).value).toBe('agentic_retrieval');
-    expect((screen.getByLabelText('고정 평가 지침') as HTMLTextAreaElement).value).toBe(LAB_RESEARCH_SYSTEM_PROMPT);
+    expect((screen.getByLabelText('공통 시스템 지침') as HTMLTextAreaElement).value).toBe(LAB_RESEARCH_SYSTEM_PROMPT);
+    expect((screen.getByLabelText('공통 시스템 지침') as HTMLTextAreaElement).readOnly).toBe(false);
     client.clear();
   });
   it('shows hypotheses, model queries, tokens and snippet-only evidence without rendering web instructions as HTML', () => {
-    const item = LabResultSchema.parse({ caseId: 'single', testCase: { id: 'single', nickname: '가상',
+    const item = LabResultSchema.parse({ bertScore: null, caseId: 'single', testCase: { id: 'single', nickname: '가상',
       reference: { expectedReason: '검토 가설', expectedScore: 50 } }, status: 'SUCCEEDED',
       output: { schemaVersion: '2', nickname: '가상', interpretedTerm: null, reason: '자료 부족', score: null, confidence: 0.1, sourceIds: ['S1'], abstained: true },
       sources: [{ id: 'S1', title: '수집 자료', snippet: '<script>alert(1)</script>', url: 'https://example.org/evidence', collectedAt: '2026-11-25T00:00:00Z' }],

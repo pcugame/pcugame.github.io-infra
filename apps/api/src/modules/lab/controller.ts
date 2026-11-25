@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import type { FastifyPluginAsync } from 'fastify';
-import type { LabCreateRun, LabStatus, LabUpload, LabSplitSchema, LabSaveReview, LabCreateCandidate, LabCandidateDecision, LabCurationExportRequest } from '@pcu/contracts';
+import type { LabCreateRun, LabStatus, LabUpload, LabSplitSchema, LabSaveReview, LabApproveFeedback,  LabCurationExportRequest } from '@pcu/contracts';
 import { LAB_DATASET_MAX_BYTES } from '@pcu/contracts';
 import { requireRole } from '../../shared/auth-guards.js';
 import { AppError, badRequest, notFound } from '../../shared/errors.js';
@@ -77,16 +77,17 @@ export function createLabController(
         sendOk(reply, await store.humanReview(r.currentUser!, r.params.id, r.params.caseId)));
       api.post<{ Params: Id & { caseId: string }; Body: LabSaveReview }>('/runs/:id/results/:caseId/review', { config: { rateLimit: { max: 120, timeWindow: 60000 } } }, async (r, reply) =>
         sendOk(reply, await store.saveHumanReview(r.currentUser!, r.params.id, r.params.caseId, r.body), 201));
-      api.post<{ Params: Id & { caseId: string }; Body: LabCreateCandidate }>('/runs/:id/results/:caseId/candidates', { config: writeLimit }, async (r, reply) =>
-        sendOk(reply, await store.createCandidate(r.currentUser!, r.params.id, r.params.caseId, r.body), 201));
-      api.post<{ Params: Id & { candidateId: string }; Body: LabCandidateDecision }>('/runs/:id/candidates/:candidateId/decision', { config: writeLimit }, async (r, reply) =>
-        sendOk(reply, await store.decideCandidate(r.currentUser!, r.params.id, r.params.candidateId, r.body)));
+      api.post<{ Params: Id; Body: LabApproveFeedback }>('/runs/:id/feedback/approve', { config: writeLimit }, async (r, reply) =>
+        sendOk(reply, await store.approveFeedback(r.currentUser!, r.params.id, r.body)));
       api.get<{ Params: Id; Querystring: { threshold: number } }>('/runs/:id/curation', async (r, reply) =>
         sendOk(reply, await store.curationOverview(r.currentUser!, r.params.id, r.query.threshold)));
       api.post<{ Params: Id; Body: LabCurationExportRequest }>('/runs/:id/curation/exports', { config: { rateLimit: { max: 5, timeWindow: 60000 } } }, async (r, reply) =>
         sendOk(reply, await store.createCurationExport(r.currentUser!, r.params.id, r.body), 201));
       api.get<{ Params: Id & { exportId: string } }>('/runs/:id/curation/exports/:exportId', async (r, reply) =>
         sendOk(reply, await store.curationExport(r.currentUser!, r.params.id, r.params.exportId)));
+
+      api.post<{ Params: Id }>('/runs/:id/bertscore/retry', { config: writeLimit }, async (r, reply) =>
+        sendOk(reply, await store.retryBertScore(r.currentUser!, r.params.id)));
 
 			for (const action of ['cancel', 'retry'] as const) {
 				api.post<{ Params: Id }>(`/runs/:id/${action}`, { config: writeLimit }, async (r, reply) =>
@@ -98,7 +99,7 @@ export function createLabController(
 			);
 			// One large export at a time per API process, including socket backpressure.
 			let exporting = false;
-			api.get<{ Params: Id; Querystring: { format: 'json' | 'jsonl' | 'csv' } }>(
+			api.get<{ Params: Id; Querystring: { format: 'json' | 'jsonl' | 'csv'; threshold: number } }>(
 				'/runs/:id/export',
 				{ config: { rateLimit: { max: 10, timeWindow: 60000 } } },
 				async (r, reply) => {
@@ -112,7 +113,7 @@ export function createLabController(
 					};
 					reply.raw.once('finish', release);
 					reply.raw.once('close', release);
-					sendOk(reply, await store.exportRun(r.currentUser!, r.params.id, r.query.format));
+					sendOk(reply, await store.exportRun(r.currentUser!, r.params.id, r.query.format, r.query.threshold));
 				},
 			);
 			const admin = { onRequest: requireRole('ADMIN'), config: writeLimit };

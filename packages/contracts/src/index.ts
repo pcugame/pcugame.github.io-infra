@@ -153,5 +153,10 @@ export * from './video-retry.js';
 export * from './video-playback.js';
 export * from './lab.js';
 export * from './lab-research.js';
+export * from './lab-prompts.js';
 export * from './lab-human.js';
 export * from './lab-curation.js';
+export * from './lab-bertscore.js';
+export * from './lab-export.js';
+
+export * from './lab-preference.js';

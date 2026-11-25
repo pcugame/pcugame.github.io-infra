@@ -40,6 +40,17 @@ const signal = () => new AbortController().signal;
 afterEach(() => vi.unstubAllGlobals());
 
 describe('bounded evidence collection and structured analysis', () => {
+  it('records raw chat text and provider finish reason before rejecting a truncated response', async () => {
+    const raw = JSON.stringify(output) + '  \n';
+    for (const finishReason of ['stop', 'length']) {
+      vi.stubGlobal('fetch', vi.fn(() => Response.json({ choices: [{ message: { content: raw }, finish_reason: finishReason }] })));
+      const result = await evaluateCase(config, item, signal(), 'unknown');
+      expect(result.generationContexts![0]).toMatchObject({ rawResponse: JSON.stringify(raw), finishReason });
+      expect(result.error).toBe(finishReason === 'stop' ? null : 'MODEL_OUTPUT_TRUNCATED');
+      expect(result.generationContexts![0]!.validation?.valid).toBe(finishReason === 'stop');
+    }
+  });
+
 	it('collects and opens cached evidence IDs, isolates untrusted text and never fetches result URLs', async () => {
 		const external = 'https://example.org/archive';
 		const untrusted = 'A passage of historical text. '.repeat(20);
@@ -202,6 +213,21 @@ describe('single-slot Transformers generation', () => {
 	const task = { ...item, provider, temperature: 0, maxTokens: 256 };
 	const health = { ok: true, busy: false, model: task.model, max_input_tokens: 1024, max_output_tokens: 256 };
 
+  it('records an explicitly empty system instruction exactly as sent to generate', async () => {
+    let sent: { system_prompt: string; prompt: string } | undefined;
+    vi.stubGlobal('fetch', vi.fn((url: string, init: RequestInit) => {
+      if (url.endsWith('/health')) return Response.json(health);
+      sent = JSON.parse(String(init.body));
+      return Response.json({ text: JSON.stringify(output), input_tokens: 100, output_tokens: 50, seconds: 0.1, finish_reason: 'stop' });
+    }));
+    const result = await evaluateCase(settings, { ...task, systemPrompt: '', answerPrompt: '' }, signal(), 'unsupported');
+    expect(result.error).toBeNull();
+    expect(sent!.system_prompt).toBe('');
+    expect(result.generationContexts![0]!.messages).toEqual([
+      { role: 'system', content: sent!.system_prompt }, { role: 'user', content: sent!.prompt },
+    ]);
+  });
+
 	it('advertises the wire limits and never generates on a mismatched or busy endpoint', async () => {
 		const fetcher = vi.fn(() => Response.json(health));
 		vi.stubGlobal('fetch', fetcher);
@@ -239,15 +265,16 @@ describe('single-slot Transformers generation', () => {
 		).toThrow();
 	});
 
-	it('sends fixed nickname instructions and quoted evidence, rejects unseen citations and records generation usage', async () => {
+	it('sends nickname instructions as system and quoted evidence as user, rejects unseen citations and records generation usage', async () => {
 		let generations = 0;
 		const fetcher = vi.fn((url: string, init: RequestInit) => {
 			if (url.endsWith('/health')) return Response.json(health);
 			expect(url).toBe(settings.modelUrl + '/generate');
 			const body = JSON.parse(String(init.body));
-			expect(Object.keys(body).sort()).toEqual(['max_new_tokens', 'prompt']);
+			expect(Object.keys(body).sort()).toEqual(['max_new_tokens', 'prompt', 'system_prompt']);
 			expect(body.max_new_tokens).toBe(256);
-			expect(body.prompt.startsWith(LAB_NICKNAME_SYSTEM_PROMPT)).toBe(true);
+			expect(body.system_prompt.startsWith(LAB_NICKNAME_SYSTEM_PROMPT)).toBe(true);
+			expect(body.prompt).not.toContain(LAB_NICKNAME_SYSTEM_PROMPT);
 			expect(body.prompt).not.toMatch(/HIDDEN_CONTEXT|HIDDEN_HINT/);
 			expect(body.prompt).toContain('S2');
 			expect(body.prompt).not.toContain('S3');

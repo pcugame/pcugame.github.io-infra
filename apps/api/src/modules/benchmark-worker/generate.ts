@@ -1,5 +1,4 @@
 import {
-	LAB_NICKNAME_SYSTEM_PROMPT,
 	labNicknameInput,
 	type LabNicknameInput,
 	type LabSource,
@@ -30,15 +29,12 @@ export function generateEvidence(sources: LabSource[]) {
 }
 
 export function generateNicknamePrompt(input: LabNicknameInput, sources: LabSource[]) {
-	return [
-		LAB_NICKNAME_SYSTEM_PROMPT,
-		'Return one complete compact JSON object: schemaVersion "2", nickname (exact input), interpretedTerm (string/null), reason (brief Korean text), score (integer 0–100/null), confidence (0–1), sourceIds (array of supplied IDs), abstained (boolean).',
-		JSON.stringify({ case: labNicknameInput(input.nickname), sources }),
-	].join('\n\n');
+	return JSON.stringify({ case: labNicknameInput(input.nickname), sources });
 }
 
 export async function generateText(
 	config: LabConfig,
+	systemPrompt: string,
 	prompt: string,
 	maxTokens: number,
 	signal: AbortSignal,
@@ -52,7 +48,7 @@ export async function generateText(
 		if (poll === 3) throw new LabFailure('MODEL_BUSY', true);
 		await scheduler.wait(10_000, { signal });
 	}
-	const body = JSON.stringify({ prompt, max_new_tokens: maxTokens });
+	const body = JSON.stringify({ prompt, system_prompt: systemPrompt, max_new_tokens: maxTokens });
 	if (Buffer.byteLength(body) > 32768) throw new LabFailure('MODEL_INPUT_TOO_LARGE');
 	const raw = await requestJson(
 		config.modelUrl + '/generate',
@@ -67,6 +63,7 @@ export async function generateText(
 	const parsed = z
 		.object({
 			text: z.string().max(48000),
+      finish_reason: z.string().optional(),
 			input_tokens: z.number().int().positive(),
 			output_tokens: z.number().int().nonnegative(),
 			seconds: z.number().nonnegative(),
@@ -80,6 +77,7 @@ export async function generateText(
 	return {
 		content: fence ? fence[1]! : text,
     rawContent: text,
+    finishReason: parsed.data.finish_reason ?? (outputTokens >= maxTokens ? 'length' : 'unknown'),
 		usage: { inputTokens, outputTokens, seconds, jsonFenceRemoved: !!fence },
 		tool_calls: undefined,
 	};

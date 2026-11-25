@@ -1593,19 +1593,7 @@
     },
     {
       "method": "POST",
-      "path": "/api/lab/runs/:id/results/:caseId/candidates",
-      "priority": "P1",
-      "domain": "lab-human.ts",
-      "testFiles": [
-        "mockLabHuman.test.ts"
-      ],
-      "uiSources": [
-        "lib/api/lab.ts"
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/lab/runs/:id/candidates/:candidateId/decision",
+      "path": "/api/lab/runs/:id/feedback/approve",
       "priority": "P1",
       "domain": "lab-human.ts",
       "testFiles": [

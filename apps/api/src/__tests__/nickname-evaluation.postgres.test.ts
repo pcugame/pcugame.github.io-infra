@@ -313,7 +313,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 			const jsonl = await api('GET', `/runs/${full}/export?format=jsonl`);
 			expect(jsonl.content.trim().split('\n')).toHaveLength(57);
 			const csv = await api('GET', `/runs/${smoke}/export?format=csv`);
-			expect(csv.content).toContain('runId,caseId');
+			expect(csv.content).toContain('ordinal,caseId,nickname');
 		}, 120_000);
 
 		it('imports human research CSV/JSONL, protects references, selects splits and exports resolved evidence', async () => {
@@ -381,7 +381,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 				maxTokens: 256,
 				searchMode: 'no_search',
 			};
-			await api('POST', '/runs', 400, { ...settings, systemPrompt: 'SECRET_PROMPT_ANSWER' });
+			await api('POST', '/runs', 400, { ...settings, systemPrompt: '\u0000' });
 			await api('POST', '/runs', 400, { ...settings, split: 'validation' });
 			await api('POST', '/runs', 400, { ...settings, split: 'test', caseIds: ['SECRET_ID_1'] });
 			await api('POST', '/runs', 400, { ...settings, size: 4 });
@@ -390,11 +390,13 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 			for (const searchMode of ['no_search', 'backend_retrieval', 'model_tool_call']) {
 				const { runId } = await api('POST', '/runs', 202, {
 					...settings,
+					systemPrompt: '  비교용 공통 지침\n  ', actionPrompt: '검색 기준 변형', answerPrompt: '답변 기준 변형',
 					searchMode,
 					size: 2,
 					split: 'train',
 				});
 				const run = await done(runId, 2);
+				expect(run).toMatchObject({ systemPrompt: '  비교용 공통 지침\n  ', actionPrompt: '검색 기준 변형', answerPrompt: '답변 기준 변형' });
 				expect(run).toMatchObject({
 					schemaVersion: '3',
 					evaluationProtocol: 'nickname-risk-v1',
@@ -426,6 +428,9 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 			const { runId } = await api('POST', '/runs', 202, { ...settings, size: 3, finalTest: true });
 			await done(runId, 3);
 			const outbound = fake.requests.slice(start).join('\n');
+			expect(outbound).toContain('비교용 공통 지침');
+			expect(outbound).toContain('검색 기준 변형');
+			expect(outbound).toContain('답변 기준 변형');
 			expect(outbound).toContain(data[0]!.nickname);
 			expect(outbound).not.toMatch(/SECRET_|expectedReason|expectedScore|familyId|finalTest|"split"|"tags"/);
 		}, 120_000);

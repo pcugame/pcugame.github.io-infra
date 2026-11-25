@@ -78,7 +78,7 @@ describe('nickname evaluation lab mock HTTP boundary', () => {
     expect(compare.items[0]).toMatchObject({ caseId: 'case-0', left: { caseId: 'case-0' }, right: { caseId: 'case-0' } });
     expect(JSON.parse((await labApi.export(last.id, 'json')).content).results).toHaveLength(57);
     expect((await labApi.export(runs[1].id, 'jsonl')).content.trimEnd().split('\n')).toHaveLength(10);
-    expect((await labApi.export(last.id, 'csv')).content).toContain('score,confidence,durationMs');
+    expect((await labApi.export(last.id, 'csv')).content).toContain('score,scoreError,absoluteError');
     await selectMockUser('ADMIN');
     expect(await labApi.run(last.id)).toMatchObject({ id: last.id });
     await labApi.changeBeta(3, 'BETA_TESTER'); await selectMockUser('owner');
@@ -123,15 +123,16 @@ describe('nickname evaluation lab mock HTTP boundary', () => {
 });
 
 
-it('imports nickname references and CSV, enforces fixed instructions and split selection across reload', async () => {
+it('imports nickname references and CSV, preserves custom instructions and split selection across reload', async () => {
  await selectMockUser('BETA_TESTER');
  const content = 'nickname,expectedReason,expectedScore,split\r\n가상하나,검증할 가설,70,train\r\n가상둘,일반적인 해석,0,test\r\n';
  const dataset = await labApi.upload({ name: 'human.csv', format: 'csv', content });
  expect(dataset).toMatchObject({ schemaVersion: '3', count: 2 });
  expect((await labApi.cases(dataset.id, 1, '', 'test')).items).toMatchObject([{ nickname: '가상둘', reference: { expectedScore: 0 } }]);
  expect((await labApi.cases(dataset.id, 1, '', 'validation')).total).toBe(0);
- await expect(api.post('/api/lab/runs', { ...settings, datasetId: dataset.id, systemPrompt: 'hidden answer' })).rejects.toMatchObject({ status: 400 });
- const fixed = { ...settings, datasetId: dataset.id };
+ await expect(api.post('/api/lab/runs', { ...settings, datasetId: dataset.id, systemPrompt: null })).rejects.toMatchObject({ status: 400 });
+ const prompts = { systemPrompt: ' 사용자 지침\n ', actionPrompt: '', answerPrompt: '답변 기준' };
+ const fixed = { ...settings, ...prompts, datasetId: dataset.id };
  await expect(labApi.create({ ...fixed, split: 'test', caseIds: ['nick-0001'] })).rejects.toMatchObject({ status: 400 });
  await expect(labApi.create({ ...fixed, size: 3 })).rejects.toMatchObject({ status: 400 });
  const { runId } = await labApi.create({ ...fixed, split: 'test', finalTest: true, caseIds: ['nick-0002'] });
@@ -139,9 +140,10 @@ it('imports nickname references and CSV, enforces fixed instructions and split s
  const run = LabRunSchema.parse(await labApi.run(runId));
  expect(run).toMatchObject({ success: 1, evaluationProtocol: 'nickname-risk-v1', split: 'test' });
  await forgetMockCacheForTests();
+ expect(await labApi.run(runId)).toMatchObject(prompts);
  const result = LabResultSchema.parse((await labApi.results(runId, 1, '', '')).items[0]);
  expect(result).toMatchObject({ caseId: 'nick-0002', testCase: { reference: { expectedScore: 0 } }, output: { schemaVersion: '2', nickname: '가상둘' } });
- expect(JSON.parse((await labApi.export(runId, 'jsonl')).content)).toMatchObject({ schemaVersion: '3', evaluationProtocol: 'nickname-risk-v1', sources: [] });
+ expect(JSON.parse((await labApi.export(runId, 'jsonl')).content)).toMatchObject({ run: { schemaVersion: '3', evaluationProtocol: 'nickname-risk-v1' }, sources: [] });
  const otherDataset = await upload('other snapshot', jsonl);
  const other = await labApi.create({ ...settings, datasetId: otherDataset.id });
  await expect(labApi.compare(runId, other.runId, 1, '')).rejects.toMatchObject({ status: 400 });

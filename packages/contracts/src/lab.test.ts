@@ -3,21 +3,22 @@ import {
 	LabCreateRunSchema,
 	LabOutputSchema,
 	LabUploadSchema,
-	formatLabExport,
 	type LabRun,
 	type LabResult,
 } from './lab.js';
+import { formatLabExport } from './lab-export.js';
 
 const run = { id: '51512681-b19c-4da7-8e98-955e17dd938c' } as LabRun;
 const result = {
 	caseId: 'nick-0001',
-	testCase: { nickname: '=unsafe "cell", example' },
+	testCase: { nickname: '=unsafe "cell", example', tags: [], reference: { expectedReason: '기대', expectedScore: 30, sources: [] } },
+  history: [], sources: [], bertScore: null,
 	output: null,
 	status: 'FAILED',
 } as LabResult;
 
 describe('nickname evaluation contracts', () => {
-	it('rejects retired upload shapes, dataset types and custom system prompts', () => {
+	it('rejects retired upload shapes and preserves optional prompt overrides verbatim', () => {
 		expect(LabUploadSchema.safeParse({ name: 'old', jsonl: '{}' }).success).toBe(false);
 		expect(
 			LabUploadSchema.safeParse({ name: 'old', datasetType: 'context_terms', format: 'jsonl', content: '{}' })
@@ -32,7 +33,12 @@ describe('nickname evaluation contracts', () => {
 			model: 'local',
 		};
 		expect(LabCreateRunSchema.safeParse(request).success).toBe(true);
-		expect(LabCreateRunSchema.safeParse({ ...request, systemPrompt: 'hidden answer' }).success).toBe(false);
+		for (const field of ['systemPrompt', 'actionPrompt', 'answerPrompt']) {
+			for (const value of ['', '  한국어 지침\n두 번째 줄  '])
+				expect(LabCreateRunSchema.parse({ ...request, [field]: value })).toHaveProperty(field, value);
+			for (const value of [null, 'x\u0000', '\uD800', 'x'.repeat(8001)])
+				expect(LabCreateRunSchema.safeParse({ ...request, [field]: value }).success).toBe(false);
+		}
 		for (const model of ['x\u0000', '\uD800', '\uDFFF'])
 			expect(LabCreateRunSchema.safeParse({ ...request, model }).success).toBe(false);
 	});
@@ -62,9 +68,9 @@ describe('nickname evaluation contracts', () => {
 		const csv = formatLabExport(run, [result], 'csv');
 		expect(csv.filename).toMatch(/^nickname-evaluation-/);
 		expect(csv.content).toContain(`"'=unsafe ""cell"", example"`);
-		expect(csv.content.split('\r\n')[0]).toContain('runId,caseId,nickname,status');
+		expect(csv.content.split('\r\n')[0]).toContain('ordinal,caseId,nickname');
 		expect(csv.content.split('\r\n')[0]).not.toMatch(/term|context|language|datasetType/);
-		expect(JSON.parse(formatLabExport(run, [result], 'json').content).results).toEqual([result]);
+		expect(JSON.parse(formatLabExport(run, [result], 'json').content).results).toMatchObject([result]);
 		expect(JSON.parse(formatLabExport(run, [result], 'jsonl').content).testCase.nickname).toBe(
 			result.testCase.nickname,
 		);

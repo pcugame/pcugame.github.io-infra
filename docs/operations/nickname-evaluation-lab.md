@@ -22,14 +22,28 @@ API와 Benchmark Worker에는 같은 개발용 PostgreSQL, 설치된 모델 이�
 
 ## 데이터셋과 실행 계약
 
-Lab은 닉네임 평가 시스템 하나로 운영한다. 데이터 스키마는 `3`, 응답 스키마는 `2`, 기존 고정 평가 지침은 `nickname-risk-v1`, 연구 프로파일은 `nickname-research-v1`이다. Run에는 실제 지침과 hash를 저장하며 Worker 설정과 저장된 프로파일이 다르면 실행을 거부한다. 스키마 번호는 Phase 1 기록의 의미를 유지하며, 지원하지 않는 이전 데이터 형식을 실행하거나 변환하는 경로는 제공하지 않는다.
+Lab은 닉네임 평가 시스템 하나로 운영한다. 데이터 스키마는 `3`, 응답 스키마는 `2`, 기본 평가 프로토콜은 `nickname-risk-v1`, 연구 프로파일은 `nickname-research-v1`이다. Run에는 실제 지침과 hash를 저장하며 Worker 설정과 저장된 프로파일이 다르면 실행을 거부한다. 스키마 번호는 Phase 1 기록의 의미를 유지하며, 지원하지 않는 이전 데이터 형식을 실행하거나 변환하는 경로는 제공하지 않는다.
 
 1. [JSONL 기본 양식](../../benchmarks/nickname-evaluation/templates/nickname-research.jsonl) 또는 [CSV 기본 양식](../../benchmarks/nickname-evaluation/templates/nickname-research.csv)에 사람이 작성한 데이터를 등록한다. 1~10,000행, 최대 4 MiB를 지원하며 고정 언어·범주 분포를 요구하지 않는다.
 2. 데이터셋 미리보기에서 닉네임·ID를 검색하고 기대 근거·점수·범위·split·family를 확인한다. 실행 크기는 1개·10개·50개·현재 split 전체·사용자 지정이다. 직접 선택한 ID는 요청한 개수와 일치해야 하며, 선택하지 않으면 해당 split의 파일 순서대로 실행한다.
-3. 검색 모드와 생성 설정을 선택한다. 평가 지침은 서버에서 고정한다. 실행 요청에 사용자 프롬프트를 지정하면 거부한다.
+3. 검색 모드·생성 설정과 공통·검색·답변 지침을 선택한다. 기본 지침을 수정하여 명령 표현이나 판단 기준에 따른 결과를 비교한다. 실행 생성 후에는 저장한 지침을 유지한다.
 4. 진행률 조회, 취소, 실패 재실행, 비교와 JSON·JSONL·CSV 내보내기를 수행한다. 비교 대상은 같은 데이터셋 hash·스키마로 제한한다.
 
 API 기준 경로는 `/api/lab`이다. 데이터 등록은 `POST /datasets`에 `{name, format, content, defaultSplit?}`를 전달한다. `format`은 `jsonl` 또는 `csv`이다. `POST /runs`는 데이터셋·크기·선택 ID·split·모델·검색 모드·생성 설정을 받는다. 공유 계약은 `packages/contracts/src/lab.ts`에 정의한다.
+
+### 실행별 지침과 비교 조건
+
+`POST /runs`의 선택적 `systemPrompt`는 공통 판단 지침, `actionPrompt`는 모델 검색 결정·도구 호출 지침, `answerPrompt`는 최종 판단 지침이다. 각 항목은 최대 8,000자이며 원문의 공백·줄바꿈을 보존한다. 항목을 생략하면 해당 프로파일의 기본값을 저장하고, 빈 문자열은 해당 지침의 명시적 생략으로 처리한다. 기본값은 `packages/contracts/src/lab-prompts.ts`와 `lab-research.ts`에서 관리한다.
+
+각 생성 요청의 시스템 메시지는 공통 지침과 해당 단계 지침을 줄바꿈으로 연결한다. 닉네임·검색 발췌문은 사용자 메시지로 전달한다. `/generate`에도 `system_prompt`를 명시하므로 모델 서버의 별도 코딩용 기본 지침을 사용하지 않는다. 서버는 빈 시스템 지침을 받으면 시스템 메시지를 생략하며, 모델 자체의 chat template는 계속 적용한다. 검색 없는 평가와 서버 선검색에서는 `actionPrompt`를 사용하지 않는다.
+
+API는 세 지침의 원문과 고정 키 순서 JSON의 SHA-256을 저장한다. Worker는 저장한 값을 읽어 재시도에도 동일하게 적용한다. 실행 상세와 JSON·JSONL·CSV 내보내기에 세 지침과 `promptHash`를 포함하며, 실제 생성 메시지·보정 요청은 결과 이력에 보존한다. 비교 시 데이터셋·선택 사례·모델·검색 모드·생성 설정을 통일하고 지침을 변경한다. 검색 결과는 시점에 따라 달라지므로 지침 차이만으로 결과 변화를 단정하지 않는다.
+
+JSON schema, 닉네임 일치, 점수 범위, 인용 ID·발췌문 검증, 유보 시 `score=null`, 연구 모드의 미검증 복원 가설 유보 조건은 Worker 검증 조건이다. 지침 편집으로 이 조건을 해제하지 않는다. 형식·인용 오류에는 한 차례 보정 요청을 추가할 수 있으며 실패 응답도 이력에 보존한다. 토큰·시간·검색 횟수 제한을 유지하고 지침 원문은 자동으로 축약하지 않는다. 따라서 지침 비교 결과에는 성공 판단뿐 아니라 형식 오류·입력 한도 초과도 포함한다.
+
+`e13fdeae`의 닉네임 평가 통합에서 사용자 지침 입력과 Worker 전달이 제거되었으며, 이후 도움말에는 동일 조건 비교를 위한 고정으로 설명되었다. 현재는 지침을 실험 변수로 저장한다. 기존 실행의 `systemPrompt`·hash·이력은 변경하지 않는다. 기본 `/generate` 경로는 이번 변경부터 평가 지침을 사용자 메시지 대신 시스템 메시지로 전달하므로 과거 실행과 비교할 때 실제 메시지 이력을 확인한다. 이전 hash는 공통 지침만 식별하므로 새 hash와 직접 비교하지 않으며, 단계 지침이 `null`인 이전 실행은 실제 이력으로 확인한다.
+
+`20261125130000_lab_editable_prompts`는 nullable text 열 두 개를 추가하는 단일 SQL 문으로 원자적으로 적용한다. 기존 행을 갱신하지 않으며 구형 writer는 새 열을 생략할 수 있다. 실제 사용자 지침 적용에는 새 API·Worker·Web과 빈 시스템 지침을 지원하는 모델 서버를 함께 사용해야 한다. 배포 시 Lab 쓰기·Worker를 중단하고 migration과 각 구성 요소 갱신 후 재개한다. 적용 이후 복구는 기존 배포 runbook의 forward recovery 절차를 따른다.
 
 ### 사람의 입력과 연구 메타데이터
 
@@ -48,7 +62,7 @@ CSV의 필수 열은 `nickname,expectedReason,expectedScore`이며 선택 열은
 ```text
 사람의 JSONL/CSV → API 검증 → 불변 Dataset + 관리용 Case
                            → Run 선택(split/ID) → lease·재시도 Worker
-                           → { nickname } + 고정 지침 → 모델·검색
+                           → { nickname } + 실행별 지침 → 모델·검색
                            → 응답 검증 + 수집 출처 → Result → 비교·내보내기
 ```
 
@@ -66,7 +80,7 @@ CSV의 필수 열은 `nickname,expectedReason,expectedScore`이며 선택 열은
 
 향후 릴리스에서는 백업을 확보하고 Lab API 쓰기와 Benchmark Worker를 중단한 뒤 활성 lease가 만료될 때까지 대기한다. 구형 writer와 새 schema의 혼합 운영은 지원하지 않는다. 정리 migration은 Lab 네 테이블을 잠그고 하나의 transaction에서 실행한다. 알 수 없는 유형, Dataset·Run 메타데이터 불일치, 활성 lease, 손상된 Phase 1 본문·응답이 있으면 실패한다. 검증 실패 시 앞서 수행한 삭제와 DDL도 전체 롤백한다. 자동 변환이나 손상된 신규 데이터 삭제로 실패를 우회하지 않는다.
 
-성공 후 새 API·Worker·Web을 함께 기동한다. 보존한 대기 작업과 만료 lease는 기존 재시도 절차로 재개한다. 고정 프롬프트·출처·비교·내보내기와 졸업전시 조회를 확인한다. 실험 자료는 DB 내부 JSON과 출처 URL이며 이 migration에서 S3 파일·삭제 outbox 등 외부 자원 참조를 제거하지 않는다.
+성공 후 새 API·Worker·Web을 함께 기동한다. 보존한 대기 작업과 만료 lease는 기존 재시도 절차로 재개한다. 저장된 프롬프트·출처·비교·내보내기와 졸업전시 조회를 확인한다. 실험 자료는 DB 내부 JSON과 출처 URL이며 이 migration에서 S3 파일·삭제 outbox 등 외부 자원 참조를 제거하지 않는다.
 
 적용 후 구형 binary를 자동 복원하지 않는다. 실패 원인을 확인하여 forward fix 또는 검증된 백업 복원 절차를 선택한다. 삭제한 구형 실험이 필요한 경우 백업에서 별도 복구하며 현재 Lab에 재등록하는 변환기는 제공하지 않는다. 운영 적용은 [배포 및 복구 절차](deployment.md)와 [migration 정책](../database-migration-policy.md)을 따른다.
 
@@ -92,7 +106,7 @@ llama.cpp b12559와 실제 Qwen GGUF template에서 단순 JSON probe와 전체 
 | `backend_retrieval` | 기존처럼 Worker가 원본 닉네임으로 1회 선검색 |
 | `agentic_retrieval` | 모델이 해석 가설과 `search`·`finish` JSON action을 생성하고 Worker가 최대 2회 검색 |
 
-세 모드에는 동일한 연구 지침·가중치·최종 생성 한도를 적용한다. action은 검색어와 최대 두 개의 짧은 해석 가설만 포함한다. NFKC 표기는 보조 가설이며 원본 닉네임은 보존한다. 모델은 혼합 문자와 자모의 시각적·음성적 독법을 검토하되 유사성만으로 의미를 확정하지 않는다. 원형 사전, 비속어 목록, 데이터셋의 기대 근거·점수·family를 사용하는 복원기는 없다.
+세 모드의 기본 연구 지침·가중치·최종 생성 한도는 동일하며 지침은 실행별로 변경할 수 있다. action은 검색어와 최대 두 개의 짧은 해석 가설만 포함한다. NFKC 표기는 보조 가설이며 원본 닉네임은 보존한다. 기본 지침은 혼합 문자와 자모의 시각적·음성적 독법을 검토하되 유사성만으로 의미를 확정하지 않도록 한다. 원형 사전, 비속어 목록, 데이터셋의 기대 근거·점수·family를 사용하는 복원기는 없다.
 
 최종 생성은 `evidenceChecks`를 먼저 작성하고 판단을 생성한다. 인용문·주장·관련성(`supports_concern`, `ordinary_usage`, `unrelated`)을 기록한다. Worker는 현재 제공한 ID와 정확한 발췌문 인용을 확인하고 `unrelated` 인용을 거부한다. URL은 Worker의 수집 기록에서 결합한다. 이 검사는 인용의 문자적 일치와 대응을 보장하며 의미 해석의 정확성을 자동 확정하지 않는다. 단어의 등장이나 커뮤니티 사용 사실만으로 위험성·사용자 소속을 단정하지 않도록 지시한다.
 
@@ -115,9 +129,9 @@ llama.cpp b12559와 실제 Qwen GGUF template에서 단순 JSON probe와 전체 
 | 누적 입력 / 출력 | 8,192 / 2,304토큰 |
 | 전체 / 단일 생성 | 240초 / 90초 |
 
-실제 token count가 넘으면 두 검색 단계의 발췌문을 300→180→100자로 압축하고, 여전히 초과하면 일부 자료를 제외한다. 정확히 제공한 자료와 프롬프트를 기록한다. 다음 생성의 출력 예산을 먼저 예약하므로 응답 유실 시에도 한도를 초과하여 재시도하지 않는다. 누적 예산이 부족하면 최종 재생성을 생략할 수 있다. 연구 오류에는 전체 조사 자동 재시도를 적용하지 않는다. 기존 Worker의 lease 복구·명시적 재실행 횟수 제한은 유지한다.
+실제 token count가 한도를 초과하면 두 검색 단계의 발췌문을 300→180→100자로 압축하고, 여전히 초과하면 일부 자료를 제외한다. 정확히 제공한 자료와 프롬프트를 기록한다. 다음 생성의 출력 예산을 먼저 예약하므로 응답 유실 시에도 한도를 초과하여 재시도하지 않는다. 누적 예산이 부족하면 최종 재생성을 생략할 수 있다. 연구 오류에는 전체 조사 자동 재시도를 적용하지 않는다. 기존 Worker의 lease 복구·명시적 재실행 횟수 제한은 유지한다.
 
-`history[].research`에 가중치·template·엔진, 시스템 지침과 단계별 프롬프트·schema, 해석 후보, 모델 검색어, 실제 검색 결과, 제공 자료, 인용 검증, 생성 설정, 입력·출력 토큰과 소요 시간을 보존한다. 전체 시간에는 검색·토큰화도 포함된다. 응답 유실 시 실제 출력 토큰은 `null`이고 예약량을 별도로 기록한다. 숨겨진 사고 과정의 출력을 요구하지 않는다. 자료와 이력은 JSON·JSONL·CSV export에도 포함하므로 대규모 실행은 DB·export 메모리 용량을 함께 검토한다.
+`history[].research`에 가중치·template·엔진, 시스템 지침과 단계별 프롬프트·schema, 해석 후보, 모델 검색어, 실제 검색 결과, 제공 자료, 인용 검증, 생성 설정, 입력·출력 토큰과 소요 시간을 보존한다. 전체 시간에는 검색·토큰화도 포함된다. 응답 유실 시 실제 출력 토큰은 `null`이고 예약량을 별도로 기록한다. 숨겨진 사고 과정의 출력을 요구하지 않는다. 자료와 전체 이력은 JSON·JSONL export에 포함하고 CSV는 분석용 독립 열로 제공하므로 대규모 실행은 DB·export 메모리 용량을 함께 검토한다.
 
 ### 단일 평가와 비교 실행
 
@@ -133,6 +147,8 @@ export LAB_MODEL_URL=http://127.0.0.1:8089
 export LAB_SEARXNG_URL=http://127.0.0.1:18888
 npm run lab:research -w apps/api -- --nickname '달빛산책' --mode all --output /tmp/nickname-comparison.json
 npm run lab:research -w apps/api -- --dataset /path/to/research.jsonl --limit 10 --mode all --output /tmp/nickname-dataset-comparison.json
+# 선택적 JSON 파일: {"systemPrompt":"공통 지침", "actionPrompt":"검색 지침", "answerPrompt":"답변 지침"}
+npm run lab:research -w apps/api -- --nickname '달빛산책' --mode all --prompts-file /path/to/prompts.json --output /tmp/nickname-prompt-comparison.json
 ```
 
 비교 JSON에는 동일 데이터셋 hash·선택 ID, 모드별 JSON 성공 수·유보 수·채점 수·MAE·기대 범위 충족률·시간·토큰을 기록한다. MAE와 범위 충족률은 유효 점수가 있는 사례만 분모로 사용한다. 채점·유보·실패 수를 함께 비교하며, 평균 점수나 일부 성공 사례를 정확도 향상으로 해석하지 않는다. 검색 시점의 결과는 달라질 수 있으므로 수집 결과 전체를 함께 보존한다.
@@ -154,4 +170,57 @@ npm run lab:research -w apps/api -- --dataset /path/to/research.jsonl --limit 10
 
 ## Human Evaluation과 다음 연구 단계
 
-[Human Evaluation 운영 절차](nickname-human-evaluation.md)에 검수 UI, 오류 분류, A/B/C 교정 후보, 명시적 승인, 표현군 단위 분할과 학습·평가 JSONL 내보내기를 명시한다. 실제 제공 자료를 기준으로 교정 후보를 생성하고 원본·검수·승인·생성 이력을 별도로 보존한다. 판단 지표는 전체 사례 수와 각 분모·미측정 수를 함께 제공한다. 다음 단계는 검수 자료의 대표성 확인과 가중치 학습이며, 학습 실행과 모델 개선 효과 측정은 별도로 수행한다.
+[Human Evaluation 운영 절차](nickname-human-evaluation.md)에 독립적인 벤치마크·행동 평가, 일괄 승인, 표현군 단위 분할과 preference JSONL 내보내기를 명시한다. 학습 파일은 실제 입력·원본 응답·긍정 또는 부정 label만 포함한다. 교정 JSON 작성과 신규 SFT 후보 생성은 제공하지 않으며 과거 기록은 연구 이력으로 보존한다. 판단 지표는 각 분모·미측정 수와 함께 제공한다. GPU 학습 알고리즘 변경과 모델 개선 효과 측정은 후속 단계이다.
+
+
+## 지침 파일과 결과 다운로드
+
+지침 편집 영역의 **현재 지침 다운로드**는 `systemPrompt`, `actionPrompt`, `answerPrompt` 세 문자열을 UTF-8 JSON으로 저장한다. **지침 JSON 가져오기**는 최대 256 KiB와 항목별 8,000자를 검증한 뒤 편집값에만 적용한다. 생략한 항목에는 현재 프로파일의 기본 지침을 적용하며 빈 문자열·공백·줄바꿈은 보존한다. 잘못된 JSON·UTF-8·항목은 전체 가져오기를 거부하고 기존 편집값을 유지한다. 실행 상세의 **사용한 지침 다운로드**는 실행 시 저장한 세 원문을 제공한다. CLI의 `--prompts-file`에도 같은 검증을 적용한다.
+
+실험 결과 다운로드는 검색·처리 상태 필터·페이지와 관계없이 해당 실행 전체를 대상으로 한다. DB의 동일 시점 스냅샷에서 설정·결과·검수 이력을 읽으며, 실행 중인 경우에도 생성 시각과 당시 상태를 기록한다. 위험 판정 임계점은 화면의 입력값을 전달하고 Human Evaluation과 동일한 지표 계산 함수를 사용한다.
+
+| 형식 | 내용 |
+| --- | --- |
+| 전체 JSON | `formatVersion=nickname-evaluation-v2`, 생성 시각, 실행 설정·지침, 데이터셋 식별정보, 전체 사례·응답·수집 출처·실행 이력, 검수 revision·원본 스냅샷·현재 결과에 대한 유효성, 평가 지표 |
+| JSONL | 실행 순서대로 한 줄에 한 사례. 실행 식별정보·설정, 상세 결과·이력·검수, 사례별 평가값과 실행 지표 포함 |
+| 분석용 CSV | 한 행에 한 사례. 기대·생성 근거, 기대·실제 점수·오차, 출처, BERTScore, 유효한 최신 검수, 상태·오류·시간을 독립 열로 제공. 전체 결과 JSON 셀 제외 |
+
+CSV는 UTF-8 BOM과 CRLF를 사용하고 따옴표·셀 내부 줄바꿈을 보존한다. 수식으로 해석될 수 있는 문자열에는 작은따옴표를 접두하여 저장한다. 음수인 수치 오차는 숫자로 유지한다. 전체 검수 이력은 JSON·JSONL로 확인하며 CSV의 유효하지 않은 최신 검수는 판정 열을 비우고 `reviewValid=false`로 표시한다.
+
+## CPU 근거 유사도 평가
+
+생성 결과 저장 transaction에서 `LabBertScore` 작업을 등록하고 Benchmark Worker의 독립 loop에서 처리한다. 기대 근거는 이 평가 서비스에만 전달하며 생성 모델 입력에는 포함하지 않는다. 생성 실행의 완료 상태와 평가 진행 상태는 별도로 표시한다. **BERTScore만 재시도**는 실패·취소된 평가 작업만 다시 등록하고 모델 응답을 재생성하지 않는다.
+
+[CPU 서비스 구현](../../server/bertscore/service.py)은 [BERTScore 공식 구현](https://github.com/Tiiiger/bert_score)의 P/R/F1을 사용한다. 모델은 `google-bert/bert-base-multilingual-cased`, revision은 `3f076fdb1ab68d5b2880cb87a0886f315b8146f8`이다. 9번째 층, CPU 4스레드, 배치 4, slow tokenizer, IDF·baseline 보정 없음으로 고정한다. 모델과 tokenizer를 같은 revision에서 내려받으며 설정·관련 라이브러리 버전과 SHA-256을 결과에 보존한다. 서비스 의존성은 [requirements](../../server/bertscore/requirements.txt)에 고정한다.
+
+- 근거가 있는 유보 응답도 계산한다. 생성 실패·취소, 빈 근거, 512토큰 초과는 사유가 있는 미측정으로 기록한다. 길이 검사에는 특수 토큰을 포함하며 조용히 잘라 계산하지 않는다.
+- DB 전체에서 한 배치만 처리한다. 30초 lease를 1초마다 갱신하고 token과 만료 시각을 확인한 뒤 완료한다. 일시 오류는 5초·10초 간격으로 재시도하며 회차당 3회, 사례당 총 12회로 제한한다. 처리 중 Worker가 종료되면 lease 만료 후 회수한다.
+- 실행 취소는 미완료 생성과 대기·처리 중 평가를 취소한다. 이미 완료된 응답·평가는 보존한다. 취소 후 평가만 명시적으로 재시도할 수 있으며 실행의 생성 상태는 유지한다.
+- BERTScore는 근거 문장 유사도의 보조 지표이다. 정답 여부·위험 판정의 정확도와 동일하지 않다. 사람 검수 화면은 기대 정답 공개 전 사례별 값을 숨긴다. 파생 평가값은 사람 검수의 원본 결과 hash에서 제외한다.
+- Migration은 새 평가 table·index만 추가하고 transaction으로 적용한다. 기존 결과의 변환·재계산·backfill은 수행하지 않으며 데이터셋과 기존 검수 원본을 유지한다.
+
+### 로컬 실행과 배포 설정
+
+```sh
+docker build -f server/bertscore/Dockerfile -t pcu-bertscore:local .
+docker run -d --name pcu-bertscore --cpus=4 --memory=3g \
+  -p 127.0.0.1:8090:8090 -v pcu-bertscore-cache:/cache pcu-bertscore:local
+curl --fail http://127.0.0.1:8090/health
+# 기존 Benchmark Worker의 전용 환경에 추가
+export LAB_BERTSCORE_URL=http://127.0.0.1:8090
+npm run worker:benchmark -w apps/api
+```
+
+최초 실행은 모델 다운로드와 로딩 이후 `/health`를 제공한다. cache volume을 재사용하면 다운로드를 생략한다. Worker가 컨테이너에서 실행되면 같은 사설 network에서 접근 가능한 주소를 지정한다. API와 Web에는 평가 서비스 주소를 노출하지 않는다. 서비스 URL을 지정하지 않으면 평가 작업은 대기 상태로 유지한다. 운영 적용은 기존 릴리스 절차에 따라 API·Benchmark Worker·Web과 별도 CPU 서비스를 갱신하고 image digest·health를 확인한다.
+
+```sh
+python3 -m unittest discover -s server/bertscore -p 'test_*.py'
+# 실제 모델을 사용한 계산 검사: Docker 실행 권한과 최초 다운로드 필요
+docker run --rm --cpus=4 --memory=3g -e RUN_BERTSCORE_INTEGRATION=true \
+  -v pcu-bertscore-cache:/cache -v "$PWD/server/bertscore:/tests:ro" \
+  pcu-bertscore:local python -m unittest discover -s /tests -p 'test_*.py'
+# PostgreSQL·인증 API·독립 Worker 검사는 nickname-evaluation suite에 포함
+npm run test:integration:suite -- nickname-evaluation
+```
+
+실제 평가 서비스가 준비된 로컬 환경에서는 `TEST_BERTSCORE_URL`과 `RUN_POSTGRES_INTEGRATION=true`, 격리 schema를 생성할 수 있는 개발용 `DATABASE_URL`을 지정하여 `lab-bertscore.postgres.test.ts`를 실행한다. CI는 모델을 다운로드하지 않고 HTTP fixture로 실패·재시도·취소·재시작을 검증한다.

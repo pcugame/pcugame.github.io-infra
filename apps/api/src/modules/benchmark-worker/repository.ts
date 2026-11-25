@@ -2,6 +2,7 @@ import { LAB_CASE_ATTEMPT_LIMIT, LAB_NICKNAME_PROTOCOL, LAB_RESEARCH_PROFILE, la
 import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import type { Attempt, WorkItem } from './evaluate.js';
+import { enqueueBertScore } from './bertscore-repository.js';
 
 export const LEASE_MS = 30_000;
 const MAX_ATTEMPTS = 3;
@@ -35,10 +36,14 @@ export async function claimCase(db: PrismaClient, concurrency: number): Promise<
 					temperature: number;
 					maxTokens: number;
 					searchMode: string;
+					systemPrompt: string;
+					actionPrompt: string | null;
+					answerPrompt: string | null;
 					evaluationProtocol: string;
+          replayIdentity: WorkItem['replayIdentity'];
 				}[]
 			>`SELECT id, model, provider, temperature,
-			"maxTokens", "searchMode", "evaluationProtocol" FROM "LabRun" r
+			"maxTokens", "searchMode", "evaluationProtocol", "systemPrompt", "actionPrompt", "answerPrompt", "replayIdentity" FROM "LabRun" r
 			WHERE status IN ('QUEUED','RUNNING') AND EXISTS
 			(SELECT 1 FROM "LabResult" e WHERE e."runId"=r.id AND (e.status='PENDING'
 				OR (e.status='RUNNING' AND e."leaseUntil" <= clock_timestamp() AT TIME ZONE 'UTC')))
@@ -63,6 +68,7 @@ export async function claimCase(db: PrismaClient, concurrency: number): Promise<
 			if (result.attempts >= LAB_CASE_ATTEMPT_LIMIT || result.attempts - result.retryBase >= MAX_ATTEMPTS) {
 				await tx.$executeRaw`UPDATE "LabResult" SET status='FAILED', error='ATTEMPT_LIMIT', "leaseToken"=NULL, "leaseUntil"=NULL
 				WHERE "runId"=${run.id} AND "caseId"=${result.caseId}`;
+				await enqueueBertScore(tx, run.id, result.caseId);
 				await finalize(tx, run.id);
 				return 'reaped';
 			}
@@ -83,8 +89,11 @@ export async function claimCase(db: PrismaClient, concurrency: number): Promise<
 				temperature: run.temperature,
 				maxTokens: run.maxTokens,
 				searchMode: run.searchMode,
+				systemPrompt: run.systemPrompt,
+				actionPrompt: run.actionPrompt,
+				answerPrompt: run.answerPrompt,
 			};
-			const item: WorkItem = { ...settings, evaluationProtocol: run.evaluationProtocol, input: labNicknameInput(nickname) };
+			const item: WorkItem = { ...settings, evaluationProtocol: run.evaluationProtocol, replayIdentity: run.replayIdentity, input: labNicknameInput(nickname) };
 			if (![LAB_NICKNAME_PROTOCOL, LAB_RESEARCH_PROFILE].includes(run.evaluationProtocol))
 				throw new Error('Unsupported nickname evaluation protocol');
 			return { runId: run.id, caseId: id, token, item };
@@ -139,6 +148,7 @@ export async function finishCase(db: PrismaClient, claim: Claim, attempt: Attemp
 			WHERE "runId"=${claim.runId} AND "caseId"=${claim.caseId} AND "leaseToken"=${claim.token} AND status='RUNNING'
 			AND "leaseUntil" > clock_timestamp() AT TIME ZONE 'UTC'`;
 			if (changed !== 1) return false;
+			await enqueueBertScore(tx, claim.runId, claim.caseId);
 			await finalize(tx, claim.runId);
 			return true;
 		},

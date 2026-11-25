@@ -42,13 +42,35 @@ try {
   assert.equal(await tooltip.isVisible(), true);
   await page.keyboard.press('Escape');
   await tooltip.waitFor({ state: 'hidden' });
-  await button('고정 평가 지침 도움말').focus();
+  await button('공통 시스템 지침 도움말').focus();
   await tooltip.waitFor();
-  assert.match(await tooltip.innerText(), /같은 조건에서 결과를 비교/);
+  assert.match(await tooltip.innerText(), /판단 기준과 명령 표현을 바꾸어/);
   await page.keyboard.press('Escape');
   await tooltip.waitFor({ state: 'hidden' });
   await page.keyboard.press('Tab');
-  assert.equal(await input('고정 평가 지침').evaluate(el => el === document.activeElement), true);
+  assert.equal(await input('공통 시스템 지침').evaluate(el => el === document.activeElement), true);
+  const prompts = { systemPrompt: '  사용자 시스템 지침\n원문 보존  ', actionPrompt: '', answerPrompt: '다른 판단 기준' };
+  await input('공통 시스템 지침').fill(prompts.systemPrompt);
+  await page.getByText('검색·답변 단계 지침 편집', { exact: true }).click();
+  await input('검색 단계 지침').fill(prompts.actionPrompt);
+  await input('답변 단계 지침').fill(prompts.answerPrompt);
+  const promptDownload = page.waitForEvent('download');
+  await button('현재 지침 다운로드').click();
+  const promptFile = await promptDownload;
+  const promptContent = await readFile(await promptFile.path(), 'utf8');
+  assert.deepEqual(JSON.parse(promptContent), prompts);
+  await input('공통 시스템 지침').fill('임시 편집값');
+  await input('지침 JSON 가져오기 · 최대 256 KiB').setInputFiles({ name: 'prompts.json', mimeType: 'application/json', buffer: Buffer.from(promptContent) });
+  await page.getByText('지침 파일을 편집 영역에 적용했습니다.').waitFor();
+  assert.equal(await input('공통 시스템 지침').inputValue(), prompts.systemPrompt);
+  assert.equal(await input('검색 단계 지침').inputValue(), '');
+  for (const buffer of [Buffer.from('{"systemPrompt":null}'), Buffer.from([0xff]), Buffer.alloc(256 * 1024 + 1)]) {
+    await input('지침 JSON 가져오기 · 최대 256 KiB').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer });
+    await page.getByRole('alert').waitFor();
+    assert.equal(await input('공통 시스템 지침').inputValue(), prompts.systemPrompt);
+  }
+  await input('지침 JSON 가져오기 · 최대 256 KiB').setInputFiles({ name: 'prompts.json', mimeType: 'application/json', buffer: Buffer.from(promptContent) });
+  await page.getByText('지침 파일을 편집 영역에 적용했습니다.').waitFor();
   await input('데이터셋 등록 · 최대 4 MiB').setInputFiles(dataset);
   await page.getByText('57개 케이스를 검증해 등록했습니다.').waitFor();
 
@@ -84,11 +106,33 @@ try {
   await input('비교 결과 검색').fill(firstId);
   await panel('실험 비교').locator('.lab-row summary').first().click();
   await page.getByRole('heading', { name: '기준 실험', exact: true }).waitFor();
+  await input('위험 판정 임계점 (이상)').fill('65');
   const download = page.waitForEvent('download');
   await button('JSON 다운로드').click();
   const saved = await download;
   const exported = JSON.parse(await readFile(await saved.path(), 'utf8'));
   assert.equal(exported.run.provider, 'mock');
+  assert.equal(exported.riskThreshold, 65);
+  assert.equal(exported.metrics.riskThreshold, 65);
+  const savedPromptsDownload = page.waitForEvent('download');
+  await button('사용한 지침 다운로드').click();
+  assert.deepEqual(JSON.parse(await readFile(await (await savedPromptsDownload).path(), 'utf8')), prompts);
+  const jsonlDownload = page.waitForEvent('download');
+  await button('JSONL 다운로드').click();
+  const jsonl = (await readFile(await (await jsonlDownload).path(), 'utf8')).trim().split('\n').map(s => JSON.parse(s));
+  assert.deepEqual(jsonl.map(r => r.caseId), exported.results.map(r => r.caseId));
+  assert.ok(jsonl.every(r => r.riskThreshold === 65 && r.run.id === exported.run.id));
+  const csvDownload = page.waitForEvent('download');
+  await button('CSV 다운로드').click();
+  const csv = await readFile(await (await csvDownload).path(), 'utf8');
+  assert.ok(csv.startsWith('\uFEFF'));
+  assert.ok(csv.includes('expectedReason,reason,interpretedTerm'));
+  assert.ok(!csv.includes('resultJson'));
+  assert.ok(csv.includes('case-56'));
+  for (const [key, value] of Object.entries(prompts)) assert.equal(exported.run[key], value);
+  assert.equal(exported.results[0].history[0].generationContexts[0].messages[0].content,
+    prompts.systemPrompt + '\n' + prompts.answerPrompt);
+  await page.getByText('프롬프트와 실행 설정', { exact: true }).click();
   assert.equal(exported.results.length, 57);
   assert.ok(exported.results.every(result => result.jsonValid));
   await page.setViewportSize({ width: 390, height: 844 });
@@ -96,15 +140,15 @@ try {
 
   await input('Mock 사용자').selectOption('OPERATOR');
   await page.getByRole('heading', { name: '접근 권한이 없습니다' }).waitFor();
-  assert.equal(await input('고정 평가 지침').count(), 0);
+  assert.equal(await input('공통 시스템 지침').count(), 0);
   await input('Mock 사용자').selectOption('ADMIN');
-  await input('고정 평가 지침').waitFor();
+  await input('공통 시스템 지침').waitFor();
   await page.setViewportSize({ width: 1280, height: 900 });
   await input('실험 크기').selectOption('1');
   await input('가져오기 기본 용도').selectOption('test');
   await input('데이터셋 등록 · 최대 4 MiB').setInputFiles({ name: 'human.csv', mimeType: 'text/csv', buffer: Buffer.from('nickname,expectedReason,expectedScore,split\r\n가상연구하나,"검토할 가설, 인용",75,train\r\n가상연구둘,일반적인 해석,0,train\r\n가상모호닉네임,판단이 어려운 사례,50,\r\n') });
   await page.getByText('3개 케이스를 검증해 등록했습니다.').waitFor();
-  assert.equal(await input('고정 평가 지침').getAttribute('readonly'), '');
+  assert.equal(await input('공통 시스템 지침').getAttribute('readonly'), null);
   await page.getByText('테스트케이스 미리보기', { exact: false }).click();
   await input('케이스 검색').fill('가상연구하나');
   await page.getByText('기대 근거 (가설): 검토할 가설, 인용', { exact: false }).waitFor();
@@ -144,7 +188,7 @@ try {
     await page.setViewportSize({ width, height: 900 });
     for (const theme of ['light', 'dark']) {
       await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
-      for (const name of ['가져오기 기본 용도', '고정 평가 지침', '답변의 다양성', '응답 길이 제한']) {
+      for (const name of ['가져오기 기본 용도', '공통 시스템 지침', '답변의 다양성', '응답 길이 제한']) {
         const help = button(`${name} 도움말`);
         await help.click();
         await tooltip.waitFor();
@@ -174,7 +218,7 @@ try {
   await button('베타 권한 회수').click();
   await button('베타 권한 부여').waitFor();
   assert.deepEqual(errors, []);
-  console.log('Passed nickname JSONL 1/10/50/all and CSV import, preview, fixed instructions, selection, split/all/custom, export, reload, roles, help hover/focus/Escape/touch and 1280/390/320px light/dark layouts.');
+  console.log('Passed nickname JSONL 1/10/50/all and CSV import, preview, editable instructions, selection, split/all/custom, export, reload, roles, help hover/focus/Escape/touch and 1280/390/320px light/dark layouts.');
 } finally {
   await browser?.close();
   await vite.close();

@@ -145,10 +145,29 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('nickname-only L
 			await db.$executeRawUnsafe(await readFile(new URL(
 				'../../prisma/migrations/20261125120000_lab_human_evaluation/migration.sql', import.meta.url,
 			), 'utf8'));
+			await db.$executeRawUnsafe(await readFile(new URL(
+				'../../prisma/migrations/20261125130000_lab_editable_prompts/migration.sql', import.meta.url,
+			), 'utf8'));
+      const preservedDatasets = await db.labDataset.findMany();
+      const preservedResults = await db.labResult.findMany();
+      await db.$executeRawUnsafe(await readFile(new URL(
+        '../../prisma/migrations/20261125140000_lab_bertscore/migration.sql', import.meta.url,
+      ), 'utf8'));
+      expect(await db.labDataset.findMany()).toEqual(preservedDatasets);
+      expect(await db.labResult.findMany()).toEqual(preservedResults);
+      expect(await db.labBertScore.count()).toBe(0);
+      await db.$executeRawUnsafe(await readFile(new URL(
+        '../../prisma/migrations/20261125200000_lab_preference_feedback/migration.sql', import.meta.url,
+      ), 'utf8'));
+      expect(await db.labDataset.findMany()).toEqual(preservedDatasets);
+      expect(await db.labResult.findMany()).toEqual(preservedResults);
+      expect((await db.labRun.findMany()).every(run => run.feedbackPolicy === null && run.replayOf === null)).toBe(true);
 			const repo = createLabRepository(db);
 			const actor = { id: f.owner.id, role: 'BETA_TESTER' as const };
 			for (const run of await repo.runs(actor, 1)) {
 				LabRunSchema.parse(run);
+				expect(run).toMatchObject({ systemPrompt: LAB_NICKNAME_SYSTEM_PROMPT,
+					promptHash: 'preserved-prompt-hash', actionPrompt: null, answerPrompt: null });
 				const rows = await repo.results(actor, run.id, { page: 1, q: '' });
 				LabResultSchema.array().parse(rows.items);
 				expect(JSON.parse((await repo.exportRun(actor, run.id, 'json')).content).results).toHaveLength(1);
@@ -218,4 +237,41 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('nickname-only L
 			}
 		}, 60000);
 	}
+});
+
+describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('preference migration preserves research history', () => {
+  it('adds nullable run metadata without relabeling reviews, candidates or prior export files', async () => {
+    const migration = '20261125200000_lab_preference_feedback';
+    const database = await createIsolatedMigratedDatabase(process.env.DATABASE_URL!, migration);
+    const db = database.createClient();
+    try {
+      const owner = await db.user.create({ data: { googleSub: 'preference-migration', role: 'BETA_TESTER' } });
+      const dataset = await db.labDataset.create({ data: { ownerId: owner.id, name: 'historical', hash: 'legacy-hash', count: 1,
+        cases: { create: { caseId: 'legacy', ordinal: 0, nickname: '기존실험', familyId: 'legacy-family', split: 'train',
+          body: { id: 'legacy', nickname: '기존실험', familyId: 'legacy-family', split: 'train', reference: { expectedReason: '기존 기대 근거', expectedScore: 0 } } } } } });
+      const runId = randomUUID();
+      await db.$executeRaw`INSERT INTO "LabRun" (id,"ownerId","datasetId","datasetHash","systemPrompt","promptHash",model,provider,"searchMode",temperature,"maxTokens",size,status)
+        VALUES (${runId},${owner.id},${dataset.id},'legacy-hash','legacy instructions','legacy-prompt','fixture','ollama','no_search',0,256,1,'COMPLETED')`;
+      const output = { schemaVersion: '2', nickname: '기존실험', interpretedTerm: null, reason: '기존 모델 응답', score: 0, confidence: 1, sourceIds: [], abstained: false };
+      await db.labResult.create({ data: { runId, datasetId: dataset.id, caseId: 'legacy', ordinal: 0, status: 'SUCCEEDED', output, jsonValid: true } });
+      const body = { verdict: 'correct', errors: [], cause: 'none', cohort: 'normal', rationaleFit: null, interpretationSuccess: null,
+        sourceChecks: [], notes: '기존 검수', blind: false, correction: { reason: '기존 교정' }, correctedAction: null, reusedReference: false };
+      const review = await db.labHumanReview.create({ data: { runId, caseId: 'legacy', actorId: owner.id, revision: 1, resultHash: 'old', resultSnapshot: {}, body } });
+      const candidateBody = { version: 'human-curation-v1', objective: 'C', familyId: 'legacy-family', split: 'train', cohort: 'normal', errors: [], retention: false,
+        messages: [{ role: 'assistant', content: '기존 교정' }], suppliedSources: [], contextOrigin: 'recorded_answer', stepIndex: null, reusedReference: false, warnings: [] };
+      await db.labTrainingCandidate.create({ data: { reviewId: review.id, actorId: owner.id, contentHash: 'old', body: candidateBody } });
+      const file = await db.labCurationExport.create({ data: { runId, actorId: owner.id, kind: 'train',
+        files: [{ filename: 'historical.jsonl', content: '{"messages":[]}\n' }], manifest: { version: 'human-curation-v1' } } });
+      const snapshot = async () => ({ reviews: await db.labHumanReview.findMany(), candidates: await db.labTrainingCandidate.findMany(),
+        exports: await db.labCurationExport.findMany(), results: await db.labResult.findMany() });
+      const before = await snapshot();
+      await db.$executeRawUnsafe(await readFile(new URL(`../../prisma/migrations/${migration}/migration.sql`, import.meta.url), 'utf8'));
+      expect(await snapshot()).toEqual(before);
+      expect(await db.labRun.findUnique({ where: { id: runId } })).toMatchObject({ feedbackPolicy: null, replayOf: null, replayIdentity: null });
+      const repo = createLabRepository(db), actor = { id: owner.id, role: 'BETA_TESTER' as const };
+      expect((await repo.humanReview(actor, runId, 'legacy')).reviews[0]!.body).toEqual(body);
+      expect((await repo.curationOverview(actor, runId, 50)).scope).toBeNull();
+      expect((await repo.curationExport(actor, runId, file.id)).files).toEqual(file.files);
+    } finally { await database.close(); }
+  }, 60_000);
 });

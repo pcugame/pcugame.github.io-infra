@@ -6,14 +6,14 @@ import {
 	LabCaseSchema,
 	LabDatasetSchema,
 	LabRunSchema,
-	formatLabExport,
+	formatLabExport, LabHumanReviewSchema, labReviewResult, labBertScoreSummary, type LabBertScoreSummary,
 	parseLabUpload,
 	LAB_DATASET_IDENTITY,
-	LAB_NICKNAME_SYSTEM_PROMPT,
+	labPromptSettings,
+	labPromptSnapshot,
 	LAB_NICKNAME_PROTOCOL,
-  labFamilyKey,
+  labFamilyKey, labLastAttempt,
 	type LAB_RESEARCH_PROFILE,
-	LAB_RESEARCH_SYSTEM_PROMPT,
 	type LabUpload,
 	type LabSplitSchema,
 	type LabCreateRun,
@@ -49,12 +49,24 @@ async function runViews(db: Tx, runs: LabRun[]) {
       count(*) FILTER (WHERE output->>'abstained'='true')::int AS abstained
     FROM "LabResult" e JOIN "LabDataset" d ON e."datasetId" = d.id
     WHERE "runId" IN (${Prisma.join(runs.map((r) => r.id))}) GROUP BY "runId", d.version`;
+  const bertCounts = await db.$queryRaw<(LabBertScoreSummary & { runId: string })[]>`
+    SELECT "runId", count(*) FILTER (WHERE status='SUCCEEDED')::int AS measured,
+      count(*) FILTER (WHERE status='PENDING')::int AS pending, count(*) FILTER (WHERE status='RUNNING')::int AS running,
+      count(*) FILTER (WHERE status='FAILED')::int AS failed, count(*) FILTER (WHERE status='SKIPPED')::int AS skipped,
+      count(*) FILTER (WHERE status='CANCELLED')::int AS cancelled,
+      avg(precision) FILTER (WHERE status='SUCCEEDED') AS precision, avg(recall) FILTER (WHERE status='SUCCEEDED') AS recall,
+      avg(f1) FILTER (WHERE status='SUCCEEDED') AS f1 FROM "LabBertScore"
+    WHERE "runId" IN (${Prisma.join(runs.map(r => r.id))}) GROUP BY "runId"`;
+  const bertById = new Map(bertCounts.map(r => [r.runId, r]));
 	const byId = new Map(counts.map((item) => [item.runId, item]));
 	return runs.map((r) => {
 		const totals = byId.get(r.id)!;
+    const bert = bertById.get(r.id) ?? labBertScoreSummary([]);
+    const bertScore = { ...bert, missing: r.size - bert.measured,
+      waiting: r.size - bert.measured - bert.pending - bert.running - bert.failed - bert.skipped - bert.cancelled };
 		return LabRunSchema.parse({
 			...r,
-			...totals,
+			...totals, bertScore,
 			createdAt: r.createdAt.toISOString(),
 			startedAt: r.startedAt?.toISOString() ?? null,
 			completedAt: r.completedAt?.toISOString() ?? null,
@@ -122,7 +134,7 @@ export function createLabRepository(db: PrismaClient) {
 			return { items: rows.map((r) => LabCaseSchema.parse(r.body)), total };
 		},
 		async createRun(actor: Actor, request: LabCreateRun, provider: string, profile?: typeof LAB_RESEARCH_PROFILE) {
-			const systemPrompt = profile ? LAB_RESEARCH_SYSTEM_PROMPT : LAB_NICKNAME_SYSTEM_PROMPT;
+			const prompts = labPromptSettings(request, !!profile, provider === 'transformers-generate');
 			return db.$transaction(async (tx) => {
 				// Serialize the per-owner capacity check with other creates and retries.
 				await tx.$queryRaw`SELECT id FROM users WHERE id=${actor.id} FOR UPDATE`;
@@ -130,6 +142,29 @@ export function createLabRepository(db: PrismaClient) {
 					where: { ownerId: actor.id, status: { in: ['QUEUED', 'RUNNING'] } },
 				});
 				if (active >= LAB_ACTIVE_RUN_LIMIT) throw conflict('Three evaluations are already queued or running');
+        let replayIdentity: Prisma.InputJsonValue | undefined;
+        if (request.replayOf) {
+          await readableRun(tx, actor, request.replayOf);
+          await tx.$queryRaw`SELECT id FROM "LabRun" WHERE id=${request.replayOf} FOR UPDATE`;
+          const source = await readableRun(tx, actor, request.replayOf);
+          if (!['COMPLETED', 'CANCELLED'].includes(source.status)) throw conflict('원본 실험이 종료된 뒤 설정을 복사하여 실행하세요.');
+          if (source.provider !== provider || source.model !== request.model || source.datasetId !== request.datasetId ||
+              source.searchMode !== request.searchMode || source.temperature !== request.temperature || source.maxTokens !== request.maxTokens ||
+              source.evaluationProtocol !== (profile ?? LAB_NICKNAME_PROTOCOL) || source.size !== request.size ||
+              source.finalTest !== (request.finalTest ?? false) || source.split !== (request.split ?? null))
+            throw badRequest('원본 실험의 데이터셋·모델·검색·생성 설정을 유지하세요.');
+          const previous = await tx.labResult.findMany({ where: { runId: source.id }, include: withCase, orderBy: { ordinal: 'asc' } });
+          if (JSON.stringify(previous.map(r => r.caseId)) !== JSON.stringify(request.caseIds))
+            throw badRequest('원본 실험과 동일한 사례·순서로 재실행하세요.');
+          const identities = previous.flatMap(r => {
+            const trace = labLastAttempt(resultView(r))?.research;
+            const identity = trace?.identity as { weights_sha256?: string; chat_template_sha256?: string } | undefined;
+            return identity?.weights_sha256 && identity.chat_template_sha256
+              ? [{ weights_sha256: identity.weights_sha256, chat_template_sha256: identity.chat_template_sha256 }] : [];
+          });
+          if (new Set(identities.map(v => JSON.stringify(v))).size > 1) throw badRequest('원본 실험에 여러 모델 revision이 있습니다. 새 실험으로 분리하세요.');
+          replayIdentity = identities[0] ?? (source.replayIdentity as Prisma.InputJsonValue | null) ?? undefined;
+        }
 				const dataset = await readableDataset(tx, actor, request.datasetId);
 				const cases = await tx.labTestCase.findMany({
 					where: { datasetId: dataset.id, split: request.split, caseId: { in: request.caseIds } },
@@ -145,10 +180,11 @@ export function createLabRepository(db: PrismaClient) {
 				const run = await tx.labRun.create({
 					data: {
 						...settings,
+            replayIdentity,
 						ownerId: actor.id,
 						provider,
-						systemPrompt,
-						promptHash: sha(systemPrompt),
+						...prompts,
+						promptHash: sha(labPromptSnapshot(prompts)),
 						datasetHash: dataset.hash,
 						schemaVersion: dataset.schemaVersion,
 						evaluationProtocol: profile ?? LAB_NICKNAME_PROTOCOL,
@@ -213,6 +249,11 @@ export function createLabRepository(db: PrismaClient) {
 							where: { runId: id, status: { in: ['PENDING', 'RUNNING'] } },
 							data: { status: 'CANCELLED', leaseToken: null, leaseUntil: null },
 						});
+            const cancelled = await tx.labResult.findMany({ where: { runId: id, status: 'CANCELLED' }, select: { caseId: true } });
+            await tx.labBertScore.createMany({ data: cancelled.map(r => ({ runId: id, caseId: r.caseId, status: 'SKIPPED',
+              inputHash: '', reason: 'GENERATION_CANCELLED', completedAt: new Date() })), skipDuplicates: true });
+            await tx.labBertScore.updateMany({ where: { runId: id, status: { in: ['PENDING', 'RUNNING'] } },
+              data: { status: 'CANCELLED', reason: 'RUN_CANCELLED', leaseToken: null, leaseUntil: null, completedAt: new Date() } });
 						await tx.labRun.update({ where: { id }, data: { status: 'CANCELLED', completedAt: new Date() } });
 					}
 				} else {
@@ -229,11 +270,23 @@ export function createLabRepository(db: PrismaClient) {
             history=history || jsonb_build_object('event','manual_retry','actorId',${actor.id}::int,'at',clock_timestamp())
             WHERE "runId"=${id} AND status='FAILED' AND attempts<${LAB_CASE_ATTEMPT_LIMIT}`;
 					if (!changed) throw conflict('No eligible failed cases to retry');
+          await tx.labBertScore.deleteMany({ where: { runId: id, status: 'SKIPPED', result: { status: 'PENDING' } } });
 					await tx.labRun.update({ where: { id }, data: { status: 'QUEUED', completedAt: null } });
 				}
 				return { runId: id };
 			});
 		},
+    async retryBertScore(actor: Actor, id: string) {
+      return db.$transaction(async tx => {
+        await readableRun(tx, actor, id);
+        await tx.$queryRaw`SELECT id FROM "LabRun" WHERE id=${id} FOR UPDATE`;
+        const changed = await tx.$executeRaw`UPDATE "LabBertScore" SET status='PENDING', "retryBase"=attempts,
+          reason=NULL, "completedAt"=NULL, "nextAttemptAt"=clock_timestamp() AT TIME ZONE 'UTC', "leaseToken"=NULL, "leaseUntil"=NULL
+          WHERE "runId"=${id} AND status IN ('FAILED','CANCELLED') AND attempts<12`;
+        if (!changed) throw conflict('No eligible BERTScore jobs to retry');
+        return { runId: id };
+      });
+    },
 		async compare(actor: Actor, query: Page & { left: string; right: string }) {
 			return db.$transaction(
 				async (tx) => {
@@ -268,8 +321,8 @@ export function createLabRepository(db: PrismaClient) {
 				{ isolationLevel: 'RepeatableRead' },
 			);
 		},
-		async exportRun(actor: Actor, id: string, format: 'json' | 'jsonl' | 'csv') {
-			const { run, results } = await db.$transaction(
+		async exportRun(actor: Actor, id: string, format: 'json' | 'jsonl' | 'csv', threshold = 50) {
+			const { run, results, reviews, dataset, generatedAt } = await db.$transaction(
 				async (tx) => {
 					const [run] = await runViews(tx, [await readableRun(tx, actor, id)]);
 					const results = await tx.labResult.findMany({
@@ -277,11 +330,18 @@ export function createLabRepository(db: PrismaClient) {
 						orderBy: { ordinal: 'asc' },
 						include: withCase,
 					});
-					return { run: run!, results };
+          const reviews = await tx.labHumanReview.findMany({ where: { runId: id }, orderBy: [{ caseId: 'asc' }, { revision: 'asc' }] });
+          const dataset = await tx.labDataset.findUniqueOrThrow({ where: { id: run!.datasetId } });
+          const [snapshot] = await tx.$queryRaw<{ at: Date }[]>`SELECT transaction_timestamp() AS at`;
+					return { run: run!, results: results.map(resultView), reviews,
+            dataset: LabDatasetSchema.parse({ ...dataset, createdAt: dataset.createdAt.toISOString() }), generatedAt: snapshot!.at.toISOString() };
 				},
 				{ isolationLevel: 'RepeatableRead' },
 			);
-			return formatLabExport(run, results.map(resultView), format);
+			const hashes = new Map(results.map(r => [r.caseId, sha(JSON.stringify(labReviewResult(r)))]));
+      return formatLabExport(run, results, format, { threshold, dataset, generatedAt,
+        reviews: reviews.map(r => ({ ...LabHumanReviewSchema.parse({ ...r, createdAt: r.createdAt.toISOString() }),
+          resultSnapshot: r.resultSnapshot, valid: hashes.get(r.caseId) === r.resultHash })) });
 		},
 		async users(q: string, page: number) {
 			const contains = { contains: q, mode: 'insensitive' as const };

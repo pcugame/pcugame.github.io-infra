@@ -18,7 +18,7 @@ function Workspace() {
   const runs = useInfiniteQuery({
     queryKey: viewerKey(['lab-runs']), queryFn: ({ pageParam }) => labApi.runs(pageParam),
     initialPageParam: 1, getNextPageParam: (last, pages) => last.length === LAB_PAGE_SIZE ? pages.length + 1 : undefined, enabled: status.isSuccess && status.data.enabled,
-    refetchInterval: query => query.state.data?.pages.some(page => page.some(active)) ? 2500 : false,
+    refetchInterval: query => query.state.data?.pages.some(page => page.some(run => active(run) || run.bertScore.pending > 0 || run.bertScore.running > 0)) ? 2500 : false,
   });
   const history = runs.data?.pages.flat() ?? [];
   const id = params.get('run') || history[0]?.id || '';
@@ -34,7 +34,7 @@ function Workspace() {
     {status.isSuccess && status.data.enabled && <>
       {status.data.mock && <p className="lab-mock" role="status">Mock 실험실 · 개발용 모의 진행률과 합성 결과를 표시합니다.</p>}
       <Connections status={status.data} />
-      <RunEditor key={JSON.stringify([status.data.provider, status.data.model])} status={status.data} onCreated={select} />
+      <RunEditor key={JSON.stringify([status.data.provider, status.data.model])} status={status.data} onCreated={select} sourceRunId={id} />
       <section className="lab-panel">
         <h2>실험 결과</h2>
         <LabError error={runs.error} />

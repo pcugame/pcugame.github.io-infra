@@ -99,10 +99,12 @@ export async function chat(
 		192_000,
 	);
 	const envelope = ollama
-		? z.object({ message: assistantSchema }).safeParse(raw)
-		: z.object({ choices: z.array(z.object({ message: assistantSchema })).min(1) }).safeParse(raw);
+		? z.object({ message: assistantSchema, done_reason: z.string().optional() }).safeParse(raw)
+		: z.object({ choices: z.array(z.object({ message: assistantSchema, finish_reason: z.string().nullable().optional() })).min(1) }).safeParse(raw);
 	if (!envelope.success) throw new LabFailure('MODEL_INVALID_ENVELOPE');
-	return 'message' in envelope.data ? envelope.data.message : envelope.data.choices[0]!.message;
+	return 'message' in envelope.data
+    ? { ...envelope.data.message, finishReason: envelope.data.done_reason ?? 'unknown' }
+    : { ...envelope.data.choices[0]!.message, finishReason: envelope.data.choices[0]!.finish_reason ?? 'unknown' };
 }
 
 export function toolMessage(provider: LabConfig['provider'], call: ToolCall, result: unknown): Message {
