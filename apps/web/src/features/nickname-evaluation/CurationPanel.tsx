@@ -15,14 +15,13 @@ function downloadFiles(file: LabCurationExport) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 }
-export function CurationPanel({ runId, completedAt }: { runId: string; completedAt: string | null }) {
+export function CurationPanel({ runId, completedAt, threshold, setThreshold, evaluationVersion, showBertScore }: { runId: string; completedAt: string | null; threshold: number; setThreshold: (value: number) => void; evaluationVersion: string; showBertScore: boolean }) {
   const viewerKey = useViewerKey();
   const client = useQueryClient();
-  const [threshold, setThreshold] = useState(50);
   const [selected, setSelected] = useState<string[]>([]);
   const [approved, setApproved] = useState(false);
   const [policy, setPolicy] = useState(LabCurationPolicySchema.parse({}));
-  const overview = useQuery({ queryKey: viewerKey(['lab-curation', runId, completedAt, threshold]), queryFn: () => labApi.curation(runId, threshold) });
+  const overview = useQuery({ queryKey: viewerKey(['lab-curation', runId, completedAt, threshold, evaluationVersion]), queryFn: () => labApi.curation(runId, threshold) });
   const refresh = () => Promise.all([client.invalidateQueries({ queryKey: ['lab-curation', runId] }), client.invalidateQueries({ queryKey: ['lab-review', runId] })]);
   const release = useMutation({ mutationFn: (kind: LabCurationExportRequest['kind']) => labApi.createCurationExport(runId,
     { kind, candidateIds: kind === 'train' ? selected : [], policy, approved: true }),
@@ -41,7 +40,7 @@ export function CurationPanel({ runId, completedAt }: { runId: string; completed
       <TextField label="위험 판정 임계점 (이상)" type="number" min={0} max={100} value={threshold} onChange={e => { const n = Number(e.target.value); if (Number.isInteger(n) && n >= 0 && n <= 100) setThreshold(n); }} />
       <p className="lab-meta">미평가·유보·실패는 전체 건수에 남습니다. MAE·시간은 측정값이 있는 사례만 분모로 사용하며 누락 건수를 표시합니다. 오탐·미탐률은 사람이 분류한 사례 기준이므로 대상 미채점률과 함께 확인합니다. 출처 지표의 분모는 인용 ID 수입니다.</p>
       <div className="lab-metrics"><table><thead><tr><th>지표</th><th>값</th><th>분자 / 분모</th><th>미측정</th></tr></thead>
-        <tbody>{data.metrics.metrics.map(metric => <tr key={metric.key}><th>{metric.label}</th><td>{metric.value === null ? '—' : metric.unit === 'rate' ? `${(metric.value * 100).toFixed(1)}%` : `${metric.value.toFixed(1)}${metric.unit === 'ms' ? ' ms' : ''}`}</td><td>{metric.numerator.toFixed(Number.isInteger(metric.numerator) ? 0 : 1)} / {metric.denominator}</td><td>{metric.missing}</td></tr>)}</tbody></table></div>
+        <tbody>{data.metrics.metrics.filter(metric => showBertScore || !metric.key.startsWith('bertScore_')).map(metric => <tr key={metric.key}><th>{metric.label}</th><td>{metric.value === null ? '—' : metric.unit === 'rate' ? `${(metric.value * 100).toFixed(1)}%` : `${metric.value.toFixed(metric.key.startsWith('bertScore_') ? 4 : 1)}${metric.unit === 'ms' ? ' ms' : ''}`}</td><td>{metric.numerator.toFixed(Number.isInteger(metric.numerator) ? 0 : 1)} / {metric.denominator}</td><td>{metric.missing}</td></tr>)}</tbody></table></div>
       <details><summary>대표 사례 선택 ({selected.length}개 선택 · 후보 {data.candidates.length}개)</summary>
         <p>표현군과 오류 유형으로 묶인 후보 중 대표 사례만 선택합니다. 정상·모호 사례와 근거에 충실한 정답을 함께 포함하세요. 후보 생성과 학습 승인은 별도 단계입니다.</p>
         {[...groups].map(([group, candidates]) => <fieldset key={group}><legend>{group}</legend>{candidates.map(candidate => <div key={candidate.id}>

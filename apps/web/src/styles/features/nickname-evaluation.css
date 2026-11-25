@@ -9,6 +9,8 @@
 .lab-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; align-items: start; }
 .lab-grid--settings { grid-template-columns: 2fr 1fr 1fr; }
 .lab-actions, .lab-connections, .lab-users li { display: flex; flex-wrap: wrap; gap: .65rem 1.15rem; align-items: center; }
+.lab-actions > .form-field { min-width: 0; max-width: 100%; }
+.lab-page input[type="file"] { min-width: 0; max-width: 100%; box-sizing: border-box; }
 .lab-connections, .lab-meta, .lab-preview > p, .lab-row small, .lab-cases small, .lab-pager { font-size: .85rem; color: var(--color-text-muted); }
 .lab-connections strong { color: var(--color-text); }
 .lab-cases, .lab-users { list-style: none; padding: 0; }

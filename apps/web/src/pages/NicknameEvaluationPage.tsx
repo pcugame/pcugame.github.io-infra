@@ -18,7 +18,7 @@ function Workspace() {
   const runs = useInfiniteQuery({
     queryKey: viewerKey(['lab-runs']), queryFn: ({ pageParam }) => labApi.runs(pageParam),
     initialPageParam: 1, getNextPageParam: (last, pages) => last.length === LAB_PAGE_SIZE ? pages.length + 1 : undefined, enabled: status.isSuccess && status.data.enabled,
-    refetchInterval: query => query.state.data?.pages.some(page => page.some(active)) ? 2500 : false,
+    refetchInterval: query => query.state.data?.pages.some(page => page.some(run => active(run) || run.bertScore.pending > 0 || run.bertScore.running > 0)) ? 2500 : false,
   });
   const history = runs.data?.pages.flat() ?? [];
   const id = params.get('run') || history[0]?.id || '';

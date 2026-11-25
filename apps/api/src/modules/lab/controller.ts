@@ -88,6 +88,9 @@ export function createLabController(
       api.get<{ Params: Id & { exportId: string } }>('/runs/:id/curation/exports/:exportId', async (r, reply) =>
         sendOk(reply, await store.curationExport(r.currentUser!, r.params.id, r.params.exportId)));
 
+      api.post<{ Params: Id }>('/runs/:id/bertscore/retry', { config: writeLimit }, async (r, reply) =>
+        sendOk(reply, await store.retryBertScore(r.currentUser!, r.params.id)));
+
 			for (const action of ['cancel', 'retry'] as const) {
 				api.post<{ Params: Id }>(`/runs/:id/${action}`, { config: writeLimit }, async (r, reply) =>
 					sendOk(reply, await store.changeRun(r.currentUser!, r.params.id, action)),
@@ -98,7 +101,7 @@ export function createLabController(
 			);
 			// One large export at a time per API process, including socket backpressure.
 			let exporting = false;
-			api.get<{ Params: Id; Querystring: { format: 'json' | 'jsonl' | 'csv' } }>(
+			api.get<{ Params: Id; Querystring: { format: 'json' | 'jsonl' | 'csv'; threshold: number } }>(
 				'/runs/:id/export',
 				{ config: { rateLimit: { max: 10, timeWindow: 60000 } } },
 				async (r, reply) => {
@@ -112,7 +115,7 @@ export function createLabController(
 					};
 					reply.raw.once('finish', release);
 					reply.raw.once('close', release);
-					sendOk(reply, await store.exportRun(r.currentUser!, r.params.id, r.query.format));
+					sendOk(reply, await store.exportRun(r.currentUser!, r.params.id, r.query.format, r.query.threshold));
 				},
 			);
 			const admin = { onRequest: requireRole('ADMIN'), config: writeLimit };

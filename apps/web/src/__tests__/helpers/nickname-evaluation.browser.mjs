@@ -54,6 +54,23 @@ try {
   await page.getByText('검색·답변 단계 지침 편집', { exact: true }).click();
   await input('검색 단계 지침').fill(prompts.actionPrompt);
   await input('답변 단계 지침').fill(prompts.answerPrompt);
+  const promptDownload = page.waitForEvent('download');
+  await button('현재 지침 다운로드').click();
+  const promptFile = await promptDownload;
+  const promptContent = await readFile(await promptFile.path(), 'utf8');
+  assert.deepEqual(JSON.parse(promptContent), prompts);
+  await input('공통 시스템 지침').fill('임시 편집값');
+  await input('지침 JSON 가져오기 · 최대 256 KiB').setInputFiles({ name: 'prompts.json', mimeType: 'application/json', buffer: Buffer.from(promptContent) });
+  await page.getByText('지침 파일을 편집 영역에 적용했습니다.').waitFor();
+  assert.equal(await input('공통 시스템 지침').inputValue(), prompts.systemPrompt);
+  assert.equal(await input('검색 단계 지침').inputValue(), '');
+  for (const buffer of [Buffer.from('{"systemPrompt":null}'), Buffer.from([0xff]), Buffer.alloc(256 * 1024 + 1)]) {
+    await input('지침 JSON 가져오기 · 최대 256 KiB').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer });
+    await page.getByRole('alert').waitFor();
+    assert.equal(await input('공통 시스템 지침').inputValue(), prompts.systemPrompt);
+  }
+  await input('지침 JSON 가져오기 · 최대 256 KiB').setInputFiles({ name: 'prompts.json', mimeType: 'application/json', buffer: Buffer.from(promptContent) });
+  await page.getByText('지침 파일을 편집 영역에 적용했습니다.').waitFor();
   await input('데이터셋 등록 · 최대 4 MiB').setInputFiles(dataset);
   await page.getByText('57개 케이스를 검증해 등록했습니다.').waitFor();
 
@@ -89,11 +106,29 @@ try {
   await input('비교 결과 검색').fill(firstId);
   await panel('실험 비교').locator('.lab-row summary').first().click();
   await page.getByRole('heading', { name: '기준 실험', exact: true }).waitFor();
+  await input('위험 판정 임계점 (이상)').fill('65');
   const download = page.waitForEvent('download');
   await button('JSON 다운로드').click();
   const saved = await download;
   const exported = JSON.parse(await readFile(await saved.path(), 'utf8'));
   assert.equal(exported.run.provider, 'mock');
+  assert.equal(exported.riskThreshold, 65);
+  assert.equal(exported.metrics.riskThreshold, 65);
+  const savedPromptsDownload = page.waitForEvent('download');
+  await button('사용한 지침 다운로드').click();
+  assert.deepEqual(JSON.parse(await readFile(await (await savedPromptsDownload).path(), 'utf8')), prompts);
+  const jsonlDownload = page.waitForEvent('download');
+  await button('JSONL 다운로드').click();
+  const jsonl = (await readFile(await (await jsonlDownload).path(), 'utf8')).trim().split('\n').map(s => JSON.parse(s));
+  assert.deepEqual(jsonl.map(r => r.caseId), exported.results.map(r => r.caseId));
+  assert.ok(jsonl.every(r => r.riskThreshold === 65 && r.run.id === exported.run.id));
+  const csvDownload = page.waitForEvent('download');
+  await button('CSV 다운로드').click();
+  const csv = await readFile(await (await csvDownload).path(), 'utf8');
+  assert.ok(csv.startsWith('\uFEFF'));
+  assert.ok(csv.includes('expectedReason,reason,interpretedTerm'));
+  assert.ok(!csv.includes('resultJson'));
+  assert.ok(csv.includes('case-56'));
   for (const [key, value] of Object.entries(prompts)) assert.equal(exported.run[key], value);
   assert.equal(exported.results[0].history[0].generationContexts[0].messages[0].content,
     prompts.systemPrompt + '\n' + prompts.answerPrompt);

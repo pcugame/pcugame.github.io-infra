@@ -32,11 +32,12 @@ export const labApi = {
   create: (input: LabCreateRun) => api.post<{ runId: string }>('/api/lab/runs', input),
   results: (id: string, page: number, q: string, status: string) => api.get<Page<LabResult>>(`/api/lab/runs/${encodeURIComponent(id)}/results?${pageQuery(page, q, status)}`),
   cancel: (id: string) => api.post<{ runId: string }>(`/api/lab/runs/${encodeURIComponent(id)}/cancel`),
+  retryBertScore: (id: string) => api.post<{ runId: string }>(`${runPath(id)}/bertscore/retry`),
   retry: (id: string) => api.post<{ runId: string }>(`/api/lab/runs/${encodeURIComponent(id)}/retry`),
   compare: (left: string, right: string, page: number, q: string) =>
     api.get<Page<CompareEntry>>(`/api/lab/compare?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}&${pageQuery(page, q)}`),
-  export: (id: string, format: LabFormat) =>
-    api.get<{ filename: string; content: string }>(`/api/lab/runs/${encodeURIComponent(id)}/export?format=${format}`),
+  export: (id: string, format: LabFormat, threshold = 50) =>
+    api.get<{ filename: string; content: string }>(`/api/lab/runs/${encodeURIComponent(id)}/export?format=${format}&threshold=${threshold}`),
   betaUsers: (q: string, page = 1) => api.get<{ items: LabBetaUser[] }>(`/api/lab/beta-users?q=${encodeURIComponent(q)}&page=${page}`),
   changeBeta: (id: number, role: 'USER' | 'BETA_TESTER') => api.patch<LabBetaUser>(`/api/lab/beta-users/${id}`, { role }),
 };

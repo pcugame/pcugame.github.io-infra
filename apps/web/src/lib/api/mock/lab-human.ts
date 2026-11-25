@@ -1,4 +1,4 @@
-import { LabSaveReviewSchema, LabCreateCandidateSchema, LabCandidateDecisionSchema, LabCurationExportRequestSchema,
+import { labReviewResult, LabSaveReviewSchema, LabCreateCandidateSchema, LabCandidateDecisionSchema, LabCurationExportRequestSchema,
   labBuildCandidate, labFamilyPlan, labFamilyKey, labHumanMetrics, labValidateSelection, labTrainingLine, labEvaluationLine,
   type LabHumanReview, type LabCandidate, type LabCurationExport, type LabResult, type LabRun, type LabCase,
 } from '@pcu/contracts';
@@ -16,7 +16,7 @@ export async function handleLabHuman(state: MockHumanState, actorId: number, run
   pathname: string, method: string, options: MockRequestOptions, threshold: number) {
   const runId = run.info.id;
   const latest = (caseId: string) => state.reviews.find(r => r.runId === runId && r.caseId === caseId);
-  const hashes = new Map(await Promise.all(run.rows.map(async r => [r.caseId, await labMockHash(r)] as const)));
+  const hashes = new Map(await Promise.all(run.rows.map(async r => [r.caseId, await labMockHash(labReviewResult(r))] as const)));
   const row = (caseId: string) => run.rows.find(r => r.caseId === caseId) ?? missing('Result not found');
   const plan = () => validate(() => labFamilyPlan(allCases, state.families));
   const fresh = (candidate: LabCandidate) => ({ ...candidate, stale: latest(candidate.caseId)?.id !== candidate.reviewId || latest(candidate.caseId)?.resultHash !== hashes.get(candidate.caseId) });

@@ -1297,6 +1297,7 @@ model LabResult {
   testCase       LabTestCase @relation(fields: [datasetId, caseId], references: [datasetId, caseId])
 
   reviews        LabHumanReview[]
+  bertScore      LabBertScore?
 
   @@id([runId, caseId])
   @@unique([runId, ordinal])
@@ -1365,4 +1366,26 @@ model LabCurationExport {
   run LabRun @relation(fields: [runId], references: [id], onDelete: Restrict)
   actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
   @@index([runId, createdAt])
+}
+
+// Derived metrics have independent leases and cannot mutate generation or human reviews.
+model LabBertScore {
+  runId String
+  caseId String
+  status String @default("PENDING")
+  inputHash String
+  attempts Int @default(0)
+  retryBase Int @default(0)
+  leaseToken String?
+  leaseUntil DateTime?
+  nextAttemptAt DateTime @default(now())
+  precision Float?
+  recall Float?
+  f1 Float?
+  reason String?
+  identity Json?
+  completedAt DateTime?
+  result LabResult @relation(fields: [runId, caseId], references: [runId, caseId], onDelete: Cascade)
+  @@id([runId, caseId])
+  @@index([status, nextAttemptAt, leaseUntil])
 }

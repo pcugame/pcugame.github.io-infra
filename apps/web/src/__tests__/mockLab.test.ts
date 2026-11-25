@@ -78,7 +78,7 @@ describe('nickname evaluation lab mock HTTP boundary', () => {
     expect(compare.items[0]).toMatchObject({ caseId: 'case-0', left: { caseId: 'case-0' }, right: { caseId: 'case-0' } });
     expect(JSON.parse((await labApi.export(last.id, 'json')).content).results).toHaveLength(57);
     expect((await labApi.export(runs[1].id, 'jsonl')).content.trimEnd().split('\n')).toHaveLength(10);
-    expect((await labApi.export(last.id, 'csv')).content).toContain('score,confidence,durationMs');
+    expect((await labApi.export(last.id, 'csv')).content).toContain('score,scoreError,absoluteError');
     await selectMockUser('ADMIN');
     expect(await labApi.run(last.id)).toMatchObject({ id: last.id });
     await labApi.changeBeta(3, 'BETA_TESTER'); await selectMockUser('owner');
@@ -143,7 +143,7 @@ it('imports nickname references and CSV, preserves custom instructions and split
  expect(await labApi.run(runId)).toMatchObject(prompts);
  const result = LabResultSchema.parse((await labApi.results(runId, 1, '', '')).items[0]);
  expect(result).toMatchObject({ caseId: 'nick-0002', testCase: { reference: { expectedScore: 0 } }, output: { schemaVersion: '2', nickname: '가상둘' } });
- expect(JSON.parse((await labApi.export(runId, 'jsonl')).content)).toMatchObject({ schemaVersion: '3', evaluationProtocol: 'nickname-risk-v1', sources: [] });
+ expect(JSON.parse((await labApi.export(runId, 'jsonl')).content)).toMatchObject({ run: { schemaVersion: '3', evaluationProtocol: 'nickname-risk-v1' }, sources: [] });
  const otherDataset = await upload('other snapshot', jsonl);
  const other = await labApi.create({ ...settings, datasetId: otherDataset.id });
  await expect(labApi.compare(runId, other.runId, 1, '')).rejects.toMatchObject({ status: 400 });

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  LabCandidateSchema, LabCurationExportSchema, LabHumanReviewSchema, LabReviewBodySchema,
+  labReviewResult, LabCandidateSchema, LabCurationExportSchema, LabHumanReviewSchema, LabReviewBodySchema,
   labBuildCandidate, labEvaluationLine, labFamilyKey, labFamilyPlan, labHumanMetrics, labTrainingLine, labValidateSelection,
   type LabCandidate, type LabCandidateDecision, type LabCreateCandidate, type LabCurationExportRequest,
   type LabReviewBody, type LabSaveReview, type LabCase,
@@ -69,7 +69,7 @@ export function createLabHumanRepository(db: PrismaClient) {
     const results = rawResults.map(resultView);
     const latest = new Map<string, ReviewRow>();
     for (const r of rawReviews) if (!latest.has(r.caseId)) latest.set(r.caseId, r);
-    const hashes = new Map(results.map(r => [r.caseId, sha(JSON.stringify(r))]));
+    const hashes = new Map(results.map(r => [r.caseId, sha(JSON.stringify(labReviewResult(r)))]));
     const valid = new Map<string, LabReviewBody>();
     for (const [caseId, review] of latest) if (review.resultHash === hashes.get(caseId)) valid.set(caseId, LabReviewBodySchema.parse(review.body));
     return { run, results, latest, valid, hashes,
@@ -82,7 +82,7 @@ export function createLabHumanRepository(db: PrismaClient) {
       return db.$transaction(async tx => {
         await readableRun(tx, actor, runId);
         const result = await getResult(tx, runId, caseId);
-        const resultHash = sha(JSON.stringify(result));
+        const resultHash = sha(JSON.stringify(labReviewResult(result)));
         const reviews = await tx.labHumanReview.findMany({ where: { runId, caseId }, orderBy: { revision: 'desc' } });
         const candidates = await tx.labTrainingCandidate.findMany({ where: { review: { runId, caseId } }, include: { review: true }, orderBy: { createdAt: 'desc' } });
         let effectiveSplit = null;
@@ -98,7 +98,7 @@ export function createLabHumanRepository(db: PrismaClient) {
         await lockRun(tx, actor, runId);
         const result = await getResult(tx, runId, caseId);
         if (!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(result.status)) throw conflict('실행 중인 결과는 검수할 수 없습니다.');
-        if (sha(JSON.stringify(result)) !== input.resultHash) throw conflict('결과가 변경되었습니다. 새로 불러와 검수하세요.');
+        if (sha(JSON.stringify(labReviewResult(result))) !== input.resultHash) throw conflict('결과가 변경되었습니다. 새로 불러와 검수하세요.');
         const previous = await currentReview(tx, runId, caseId);
         if ((previous?.id ?? null) !== input.previousReviewId) throw conflict('다른 검수 내용이 저장되었습니다. 새로 불러오세요.');
         if (input.body.verdict === 'correct' && (result.status !== 'SUCCEEDED' || !result.output || !result.jsonValid)) throw badRequest('유효한 성공 응답만 정답으로 평가할 수 있습니다.');
@@ -113,7 +113,7 @@ export function createLabHumanRepository(db: PrismaClient) {
         await lockRun(tx, actor, runId);
         const review = await currentReview(tx, runId, caseId);
         const result = await getResult(tx, runId, caseId);
-        const resultHash = sha(JSON.stringify(result));
+        const resultHash = sha(JSON.stringify(labReviewResult(result)));
         if (!review || review.id !== input.reviewId || review.resultHash !== resultHash) throw conflict('최신 결과에 대한 검수를 먼저 저장하세요.');
         const plan = await freezeLabFamilies(tx, [result.testCase]);
         const family = result.testCase.familyId;
@@ -129,7 +129,7 @@ export function createLabHumanRepository(db: PrismaClient) {
         const row = await tx.labTrainingCandidate.findFirst({ where: { id: candidateId, review: { runId } }, include: { review: true } });
         if (!row) throw notFound('Candidate not found');
         const review = await currentReview(tx, runId, row.review.caseId);
-        const hash = sha(JSON.stringify(await getResult(tx, runId, row.review.caseId)));
+        const hash = sha(JSON.stringify(labReviewResult(await getResult(tx, runId, row.review.caseId))));
         const candidate = viewCandidate(row, row.review, review, hash);
         if (input.contentHash !== candidate.contentHash || (input.decision === 'approved' && candidate.stale)) throw conflict('후보 또는 검수 내용이 변경되었습니다.');
         const decisions = [...candidate.decisions, { actorId: actor.id, at: new Date().toISOString(), ...input }].map(({ actorId, at, decision, grounded, familyVerified }) => ({ actorId, at, decision, grounded, familyVerified }));

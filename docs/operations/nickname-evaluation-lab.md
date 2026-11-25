@@ -129,9 +129,9 @@ llama.cpp b12559와 실제 Qwen GGUF template에서 단순 JSON probe와 전체 
 | 누적 입력 / 출력 | 8,192 / 2,304토큰 |
 | 전체 / 단일 생성 | 240초 / 90초 |
 
-실제 token count가 넘으면 두 검색 단계의 발췌문을 300→180→100자로 압축하고, 여전히 초과하면 일부 자료를 제외한다. 정확히 제공한 자료와 프롬프트를 기록한다. 다음 생성의 출력 예산을 먼저 예약하므로 응답 유실 시에도 한도를 초과하여 재시도하지 않는다. 누적 예산이 부족하면 최종 재생성을 생략할 수 있다. 연구 오류에는 전체 조사 자동 재시도를 적용하지 않는다. 기존 Worker의 lease 복구·명시적 재실행 횟수 제한은 유지한다.
+실제 token count가 한도를 초과하면 두 검색 단계의 발췌문을 300→180→100자로 압축하고, 여전히 초과하면 일부 자료를 제외한다. 정확히 제공한 자료와 프롬프트를 기록한다. 다음 생성의 출력 예산을 먼저 예약하므로 응답 유실 시에도 한도를 초과하여 재시도하지 않는다. 누적 예산이 부족하면 최종 재생성을 생략할 수 있다. 연구 오류에는 전체 조사 자동 재시도를 적용하지 않는다. 기존 Worker의 lease 복구·명시적 재실행 횟수 제한은 유지한다.
 
-`history[].research`에 가중치·template·엔진, 시스템 지침과 단계별 프롬프트·schema, 해석 후보, 모델 검색어, 실제 검색 결과, 제공 자료, 인용 검증, 생성 설정, 입력·출력 토큰과 소요 시간을 보존한다. 전체 시간에는 검색·토큰화도 포함된다. 응답 유실 시 실제 출력 토큰은 `null`이고 예약량을 별도로 기록한다. 숨겨진 사고 과정의 출력을 요구하지 않는다. 자료와 이력은 JSON·JSONL·CSV export에도 포함하므로 대규모 실행은 DB·export 메모리 용량을 함께 검토한다.
+`history[].research`에 가중치·template·엔진, 시스템 지침과 단계별 프롬프트·schema, 해석 후보, 모델 검색어, 실제 검색 결과, 제공 자료, 인용 검증, 생성 설정, 입력·출력 토큰과 소요 시간을 보존한다. 전체 시간에는 검색·토큰화도 포함된다. 응답 유실 시 실제 출력 토큰은 `null`이고 예약량을 별도로 기록한다. 숨겨진 사고 과정의 출력을 요구하지 않는다. 자료와 전체 이력은 JSON·JSONL export에 포함하고 CSV는 분석용 독립 열로 제공하므로 대규모 실행은 DB·export 메모리 용량을 함께 검토한다.
 
 ### 단일 평가와 비교 실행
 
@@ -171,3 +171,56 @@ npm run lab:research -w apps/api -- --nickname '달빛산책' --mode all --promp
 ## Human Evaluation과 다음 연구 단계
 
 [Human Evaluation 운영 절차](nickname-human-evaluation.md)에 검수 UI, 오류 분류, A/B/C 교정 후보, 명시적 승인, 표현군 단위 분할과 학습·평가 JSONL 내보내기를 명시한다. 실제 제공 자료를 기준으로 교정 후보를 생성하고 원본·검수·승인·생성 이력을 별도로 보존한다. 판단 지표는 전체 사례 수와 각 분모·미측정 수를 함께 제공한다. 다음 단계는 검수 자료의 대표성 확인과 가중치 학습이며, 학습 실행과 모델 개선 효과 측정은 별도로 수행한다.
+
+
+## 지침 파일과 결과 다운로드
+
+지침 편집 영역의 **현재 지침 다운로드**는 `systemPrompt`, `actionPrompt`, `answerPrompt` 세 문자열을 UTF-8 JSON으로 저장한다. **지침 JSON 가져오기**는 최대 256 KiB와 항목별 8,000자를 검증한 뒤 편집값에만 적용한다. 생략한 항목에는 현재 프로파일의 기본 지침을 적용하며 빈 문자열·공백·줄바꿈은 보존한다. 잘못된 JSON·UTF-8·항목은 전체 가져오기를 거부하고 기존 편집값을 유지한다. 실행 상세의 **사용한 지침 다운로드**는 실행 시 저장한 세 원문을 제공한다. CLI의 `--prompts-file`에도 같은 검증을 적용한다.
+
+실험 결과 다운로드는 검색·처리 상태 필터·페이지와 관계없이 해당 실행 전체를 대상으로 한다. DB의 동일 시점 스냅샷에서 설정·결과·검수 이력을 읽으며, 실행 중인 경우에도 생성 시각과 당시 상태를 기록한다. 위험 판정 임계점은 화면의 입력값을 전달하고 Human Evaluation과 동일한 지표 계산 함수를 사용한다.
+
+| 형식 | 내용 |
+| --- | --- |
+| 전체 JSON | `formatVersion=nickname-evaluation-v2`, 생성 시각, 실행 설정·지침, 데이터셋 식별정보, 전체 사례·응답·수집 출처·실행 이력, 검수 revision·원본 스냅샷·현재 결과에 대한 유효성, 평가 지표 |
+| JSONL | 실행 순서대로 한 줄에 한 사례. 실행 식별정보·설정, 상세 결과·이력·검수, 사례별 평가값과 실행 지표 포함 |
+| 분석용 CSV | 한 행에 한 사례. 기대·생성 근거, 기대·실제 점수·오차, 출처, BERTScore, 유효한 최신 검수, 상태·오류·시간을 독립 열로 제공. 전체 결과 JSON 셀 제외 |
+
+CSV는 UTF-8 BOM과 CRLF를 사용하고 따옴표·셀 내부 줄바꿈을 보존한다. 수식으로 해석될 수 있는 문자열에는 작은따옴표를 접두하여 저장한다. 음수인 수치 오차는 숫자로 유지한다. 전체 검수 이력은 JSON·JSONL로 확인하며 CSV의 유효하지 않은 최신 검수는 판정 열을 비우고 `reviewValid=false`로 표시한다.
+
+## CPU 근거 유사도 평가
+
+생성 결과 저장 transaction에서 `LabBertScore` 작업을 등록하고 Benchmark Worker의 독립 loop에서 처리한다. 기대 근거는 이 평가 서비스에만 전달하며 생성 모델 입력에는 포함하지 않는다. 생성 실행의 완료 상태와 평가 진행 상태는 별도로 표시한다. **BERTScore만 재시도**는 실패·취소된 평가 작업만 다시 등록하고 모델 응답을 재생성하지 않는다.
+
+[CPU 서비스 구현](../../server/bertscore/service.py)은 [BERTScore 공식 구현](https://github.com/Tiiiger/bert_score)의 P/R/F1을 사용한다. 모델은 `google-bert/bert-base-multilingual-cased`, revision은 `3f076fdb1ab68d5b2880cb87a0886f315b8146f8`이다. 9번째 층, CPU 4스레드, 배치 4, slow tokenizer, IDF·baseline 보정 없음으로 고정한다. 모델과 tokenizer를 같은 revision에서 내려받으며 설정·관련 라이브러리 버전과 SHA-256을 결과에 보존한다. 서비스 의존성은 [requirements](../../server/bertscore/requirements.txt)에 고정한다.
+
+- 근거가 있는 유보 응답도 계산한다. 생성 실패·취소, 빈 근거, 512토큰 초과는 사유가 있는 미측정으로 기록한다. 길이 검사에는 특수 토큰을 포함하며 조용히 잘라 계산하지 않는다.
+- DB 전체에서 한 배치만 처리한다. 30초 lease를 1초마다 갱신하고 token과 만료 시각을 확인한 뒤 완료한다. 일시 오류는 5초·10초 간격으로 재시도하며 회차당 3회, 사례당 총 12회로 제한한다. 처리 중 Worker가 종료되면 lease 만료 후 회수한다.
+- 실행 취소는 미완료 생성과 대기·처리 중 평가를 취소한다. 이미 완료된 응답·평가는 보존한다. 취소 후 평가만 명시적으로 재시도할 수 있으며 실행의 생성 상태는 유지한다.
+- BERTScore는 근거 문장 유사도의 보조 지표이다. 정답 여부·위험 판정의 정확도와 동일하지 않다. 사람 검수 화면은 기대 정답 공개 전 사례별 값을 숨긴다. 파생 평가값은 사람 검수의 원본 결과 hash에서 제외한다.
+- Migration은 새 평가 table·index만 추가하고 transaction으로 적용한다. 기존 결과의 변환·재계산·backfill은 수행하지 않으며 데이터셋과 기존 검수 원본을 유지한다.
+
+### 로컬 실행과 배포 설정
+
+```sh
+docker build -f server/bertscore/Dockerfile -t pcu-bertscore:local .
+docker run -d --name pcu-bertscore --cpus=4 --memory=3g \
+  -p 127.0.0.1:8090:8090 -v pcu-bertscore-cache:/cache pcu-bertscore:local
+curl --fail http://127.0.0.1:8090/health
+# 기존 Benchmark Worker의 전용 환경에 추가
+export LAB_BERTSCORE_URL=http://127.0.0.1:8090
+npm run worker:benchmark -w apps/api
+```
+
+최초 실행은 모델 다운로드와 로딩 이후 `/health`를 제공한다. cache volume을 재사용하면 다운로드를 생략한다. Worker가 컨테이너에서 실행되면 같은 사설 network에서 접근 가능한 주소를 지정한다. API와 Web에는 평가 서비스 주소를 노출하지 않는다. 서비스 URL을 지정하지 않으면 평가 작업은 대기 상태로 유지한다. 운영 적용은 기존 릴리스 절차에 따라 API·Benchmark Worker·Web과 별도 CPU 서비스를 갱신하고 image digest·health를 확인한다.
+
+```sh
+python3 -m unittest discover -s server/bertscore -p 'test_*.py'
+# 실제 모델을 사용한 계산 검사: Docker 실행 권한과 최초 다운로드 필요
+docker run --rm --cpus=4 --memory=3g -e RUN_BERTSCORE_INTEGRATION=true \
+  -v pcu-bertscore-cache:/cache -v "$PWD/server/bertscore:/tests:ro" \
+  pcu-bertscore:local python -m unittest discover -s /tests -p 'test_*.py'
+# PostgreSQL·인증 API·독립 Worker 검사는 nickname-evaluation suite에 포함
+npm run test:integration:suite -- nickname-evaluation
+```
+
+실제 평가 서비스가 준비된 로컬 환경에서는 `TEST_BERTSCORE_URL`과 `RUN_POSTGRES_INTEGRATION=true`, 격리 schema를 생성할 수 있는 개발용 `DATABASE_URL`을 지정하여 `lab-bertscore.postgres.test.ts`를 실행한다. CI는 모델을 다운로드하지 않고 HTTP fixture로 실패·재시도·취소·재시작을 검증한다.

@@ -1,9 +1,9 @@
 import {
-  LAB_ACTIVE_RUN_LIMIT, LAB_CASE_ATTEMPT_LIMIT, LAB_PAGE_SIZE, LabBetaUserSchema, LabCompareQuerySchema, LabCreateRunSchema, LabExportFormatSchema, LabOutputSchema, LabPageQuerySchema,
+  labBertScoreSummary, labReviewResult, LabRiskThresholdSchema, LAB_ACTIVE_RUN_LIMIT, LAB_CASE_ATTEMPT_LIMIT, LAB_PAGE_SIZE, LabBetaUserSchema, LabCompareQuerySchema, LabCreateRunSchema, LabExportFormatSchema, LabOutputSchema, LabPageQuerySchema,
   LabCasesQuerySchema, LabResultsQuerySchema, LabRoleChangeSchema, LabUploadSchema, formatLabExport, parseLabUpload, labFamilyPlan, labFamilyKey, LAB_DATASET_IDENTITY, labPromptSettings, labPromptSnapshot, labSystemMessage, LAB_NICKNAME_PROTOCOL,
   type LabCase, type LabDataset, type LabResult, type LabRun, type LabStatus,
 } from '@pcu/contracts';
-import { handleLabHuman, type MockHumanState } from './lab-human';
+import { labMockHash, handleLabHuman, type MockHumanState } from './lab-human';
 import { canUseLab } from '../../auth/roles';
 import { allowMethod, bodyObject, conflict, forbidden, missing, parseInput } from './common';
 import { effectiveMockUser, MOCK_USERS, MockHttpError, UNHANDLED, type MockContext, type MockRequestOptions } from './context';
@@ -37,7 +37,7 @@ async function sha256(text: string) {
 function pending(testCase: LabCase): LabResult {
   return {
     caseId: testCase.id, testCase, status: 'PENDING', output: null, sources: [], durationMs: null, searchCount: 0,
-    jsonValid: false, error: null, attempts: 0, toolSucceeded: false, toolSupport: 'supported', history: [],
+    jsonValid: false, error: null, attempts: 0, toolSucceeded: false, toolSupport: 'supported', history: [], bertScore: null,
   };
 }
 function advance(ctx: MockContext, job: StoredRun) {
@@ -82,10 +82,12 @@ function advance(ctx: MockContext, job: StoredRun) {
         run.stats.meanScore = (sum + value) / run.stats.scored;
       }
     }
+    row.bertScore = { status: 'SKIPPED', precision: null, recall: null, f1: null, reason: 'MOCK_NOT_MEASURED', attempts: 0, inputHash: '', identity: null, completedAt: ctx.now() };
     row.history.push({ event: 'finished', attempt: row.attempts, status: row.status, at: ctx.now(), mock: true,
       searchDurationMs: 0, generationDurationMs: 80, generationContexts: [{ stage: 'answer', durationMs: 80, suppliedSources: [],
         messages: [{ role: 'system', content: labSystemMessage(labPromptSettings(run), 'answer') }, { role: 'user', content: JSON.stringify({ nickname: row.testCase.nickname, sources: [] }) }] }] });
   }
+  run.bertScore = labBertScoreSummary(job.rows);
   if (run.failed + run.success + run.cancelled === run.size) {
     run.status = 'COMPLETED';
     run.completedAt = ctx.now();
@@ -173,7 +175,7 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
       ownerId: actor.id, nextAt: Date.now() + 300, rows: cases.map(c => pending(c!)),
       info: { ...settings, ...prompts, id, schemaVersion: d.info.schemaVersion, evaluationProtocol: LAB_NICKNAME_PROTOCOL, datasetVersion: d.info.version, datasetHash: d.info.hash, promptHash: await sha256(labPromptSnapshot(prompts)), provider: STATUS.provider,
         status: 'QUEUED', createdAt: ctx.now(), startedAt: null, completedAt: null, success: 0, failed: 0, cancelled: 0,
-        stats: { meanScore: null, scored: 0, abstained: 0 } },
+        stats: { meanScore: null, scored: 0, abstained: 0 }, bertScore: labBertScoreSummary(cases.map(() => ({}))) },
     });
     return { runId: id };
   }
@@ -191,7 +193,7 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
     return handleLabHuman(state.human ??= { reviews: [], candidates: [], exports: [], families: {} }, actor.id, current,
       state.datasets.flatMap(d => d.cases), pathname, method, options, Number(query.threshold ?? 50));
   }
-  const detail = /^\/api\/lab\/runs\/([^/]+)(?:\/(results|cancel|retry|export))?$/.exec(pathname);
+  const detail = /^\/api\/lab\/runs\/([^/]+)(?:\/(results|cancel|retry|export|bertscore\/retry))?$/.exec(pathname);
   if (!detail) return UNHANDLED;
   const current = run(detail[1]);
   const action = detail[2];
@@ -204,25 +206,31 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
   }
   if (action === 'export') {
     allowMethod(method, 'GET');
-    return formatLabExport(current.info, current.rows, parseInput(LabExportFormatSchema, query.format));
+    const hashes = new Map(await Promise.all(current.rows.map(async r => [r.caseId, await labMockHash(labReviewResult(r))] as const)));
+    return formatLabExport(current.info, current.rows, parseInput(LabExportFormatSchema, query.format), {
+      threshold: parseInput(LabRiskThresholdSchema, query.threshold), dataset: dataset(current.info.datasetId).info,
+      reviews: (state.human?.reviews ?? []).filter(r => r.runId === current.info.id).map(r => ({ ...r, valid: r.resultHash === hashes.get(r.caseId) })),
+    });
   }
   allowMethod(method, 'POST');
   const info = current.info;
+  if (action === 'bertscore/retry') conflict('Mock 모드에서는 실제 BERTScore를 계산하지 않습니다.');
   if (action === 'cancel') {
     if (info.status === 'COMPLETED') conflict('Run already completed');
     if (info.status !== 'CANCELLED') {
-      for (const row of current.rows) if (row.status === 'PENDING' || row.status === 'RUNNING') { row.status = 'CANCELLED'; info.cancelled++; }
+      for (const row of current.rows) if (row.status === 'PENDING' || row.status === 'RUNNING') { row.status = 'CANCELLED'; row.bertScore = { status: 'SKIPPED', precision: null, recall: null, f1: null, reason: 'GENERATION_CANCELLED', inputHash: '', attempts: 0, identity: null, completedAt: ctx.now() }; info.cancelled++; }
       info.status = 'CANCELLED';
       info.completedAt = ctx.now();
     }
   } else {
     const failed = current.rows.filter(r => r.status === 'FAILED' && r.attempts < LAB_CASE_ATTEMPT_LIMIT);
     if (!['COMPLETED','CANCELLED'].includes(info.status) || !failed.length || ownedActive(current.ownerId) >= LAB_ACTIVE_RUN_LIMIT) conflict('No eligible retry');
-    for (const row of failed) { row.status = 'PENDING'; row.error = null; }
+    for (const row of failed) { row.status = 'PENDING'; row.error = null; row.bertScore = null; }
     info.failed -= failed.length;
     info.status = 'QUEUED';
     info.completedAt = null;
     current.nextAt = Date.now() + 300;
   }
+  info.bertScore = labBertScoreSummary(current.rows);
   return { runId: info.id };
 }

@@ -4,8 +4,8 @@ import type { Prisma } from '../../generated/prisma/client.js';
 import { notFound } from '../../shared/errors.js';
 export type Actor = { id: number; role: UserRole };
 type Tx = Prisma.TransactionClient;
-type ResultRow = Prisma.LabResultGetPayload<{ include: { testCase: { select: { body: true } } } }>;
-export const withCase = { testCase: { select: { body: true } } } as const;
+type ResultRow = Prisma.LabResultGetPayload<{ include: { testCase: { select: { body: true } }; bertScore: true } }>;
+export const withCase = { testCase: { select: { body: true } }, bertScore: true } as const;
 export const betaRoles = ['USER', 'BETA_TESTER'] as const;
 export const userFields = { id: true, email: true, name: true, role: true };
 export const sha = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -18,7 +18,7 @@ export function matchesCase(q: string): Prisma.LabTestCaseWhereInput {
 }
 
 export function resultView(row: ResultRow): LabResult {
-	return LabResultSchema.parse({ ...row, testCase: row.testCase.body });
+	return LabResultSchema.parse({ ...row, testCase: row.testCase.body, bertScore: row.bertScore ? { ...row.bertScore, completedAt: row.bertScore.completedAt?.toISOString() ?? null } : null });
 }
 
 export async function readableRun(db: Tx, actor: Actor, id: string) {

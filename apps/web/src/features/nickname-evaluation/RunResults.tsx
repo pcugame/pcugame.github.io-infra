@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LAB_PAGE_SIZE, type LabRun } from '@pcu/contracts';
 import { Button, ProgressBar, SelectField, TextField } from '../../components/ui';
@@ -9,9 +9,10 @@ import { active, resultLabels, runLabel, runLabels } from './labels';
 import { ResultDetail } from './ResultDetail';
 import { HumanReview } from './HumanReview';
 import { CurationPanel } from './CurationPanel';
+import { downloadPrompts } from './downloads';
 
-async function download(id: string, format: LabFormat) {
-  const file = await labApi.export(id, format);
+async function download(id: string, format: LabFormat, threshold: number) {
+  const file = await labApi.export(id, format, threshold);
   const type = { json: 'application/json', jsonl: 'application/x-ndjson', csv: 'text/csv' }[format];
   const url = URL.createObjectURL(new Blob([file.content], { type: `${type};charset=utf-8` }));
   const link = document.createElement('a');
@@ -24,6 +25,7 @@ async function download(id: string, format: LabFormat) {
 export function RunResults({ id }: { id: string }) {
   const viewerKey = useViewerKey();
   const client = useQueryClient();
+  const [threshold, setThreshold] = useState(50);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
@@ -32,23 +34,28 @@ export function RunResults({ id }: { id: string }) {
   const [reviewMode, setReviewMode] = useState(true);
   const run = useQuery({
     queryKey: viewerKey(['lab-run', id]), queryFn: () => labApi.run(id),
-    refetchInterval: query => active(query.state.data) ? 1800 : false,
+    refetchInterval: query => (active(query.state.data) || !!query.state.data?.bertScore.pending || !!query.state.data?.bertScore.running) ? 1800 : false,
   });
   const info = run.data;
+  const scoring = !!info && (info.bertScore.pending > 0 || info.bertScore.running > 0);
+  const evaluationVersion = JSON.stringify(info?.bertScore);
   const count = info ? info.success + info.failed + info.cancelled : 0;
   const rows = useQuery({
-    queryKey: viewerKey(['lab-results', id, info?.completedAt, page, q, status]), queryFn: () => labApi.results(id, page, q, status),
+    queryKey: viewerKey(['lab-results', id, page, q, status]), queryFn: () => labApi.results(id, page, q, status),
     enabled: run.isSuccess,
-    refetchInterval: active(info) ? 1800 : false,
+    refetchInterval: active(info) || scoring ? 1800 : false,
   });
+  useEffect(() => {
+    void client.invalidateQueries({ queryKey: ['lab-results', id] });
+  }, [client, id, evaluationVersion, info?.completedAt]);
   const action = useMutation({
-    mutationFn: (kind: 'cancel' | 'retry') => kind === 'cancel' ? labApi.cancel(id) : labApi.retry(id),
+    mutationFn: (kind: 'cancel' | 'retry' | 'bertscore') => kind === 'cancel' ? labApi.cancel(id) : kind === 'bertscore' ? labApi.retryBertScore(id) : labApi.retry(id),
     onSuccess: () => Promise.all([
       client.invalidateQueries({ queryKey: ['lab-run', id] }), client.invalidateQueries({ queryKey: ['lab-runs'] }),
       client.invalidateQueries({ queryKey: ['lab-results', id] }),
     ]),
   });
-  const save = useMutation({ mutationFn: (format: LabFormat) => download(id, format) });
+  const save = useMutation({ mutationFn: (format: LabFormat) => download(id, format, threshold) });
   if (!info || run.error) return <><LabError error={run.error}/>{run.isLoading && <p>실험을 불러오는 중…</p>}</>;
   return <>
     <div className="lab-summary" aria-live="polite">
@@ -59,6 +66,10 @@ export function RunResults({ id }: { id: string }) {
         <span>평균 점수 <b>{info.stats.meanScore?.toFixed(1) ?? '—'}</b> ({info.stats.scored}개)</span><span>답변 유보 <b>{info.stats.abstained}</b></span>
       </div>
     </div>
+    <p aria-live="polite">BERTScore · {scoring ? '계산 중' : active(info) ? '생성 결과 대기' : '계산 대기 작업 없음'} · 측정 {info.bertScore.measured} / 미측정 {info.bertScore.missing}
+      {' · '}대기 {info.bertScore.pending} · 처리 {info.bertScore.running} · 실패 {info.bertScore.failed} · 제외 {info.bertScore.skipped} · 취소 {info.bertScore.cancelled}
+      {!reviewMode && <> · 평균 P {info.bertScore.precision?.toFixed(4) ?? '—'} / R {info.bertScore.recall?.toFixed(4) ?? '—'} / F1 {info.bertScore.f1?.toFixed(4) ?? '—'}</>}</p>
+    <p className="lab-meta">BERTScore는 기대 근거와 생성된 근거의 문장 유사도를 나타내는 보조 지표입니다. 판단의 정답 여부를 뜻하지 않습니다.</p>
     <details className="lab-metadata"><summary>프롬프트와 실행 설정</summary>
       <h3>공통 시스템 지침</h3><pre>{info.systemPrompt || '(비어 있음)'}</pre>
       <h3>검색 단계 지침</h3><pre>{info.actionPrompt === '' ? '(비어 있음)' : info.actionPrompt ?? '이전 실행: 단계 지침 원문을 별도로 저장하지 않았습니다. 전체 실행 이력을 확인하세요.'}</pre>
@@ -74,11 +85,16 @@ export function RunResults({ id }: { id: string }) {
       </dl>
     </details>
     <div className="lab-actions">
+      <Button variant="secondary" size="small" disabled={info.actionPrompt == null || info.answerPrompt == null}
+        onClick={() => downloadPrompts({ systemPrompt: info.systemPrompt, actionPrompt: info.actionPrompt!, answerPrompt: info.answerPrompt! }, id)}>사용한 지침 다운로드</Button>
+      {(info.bertScore.failed > 0 || info.bertScore.cancelled > 0) && <Button size="small" disabled={action.isPending}
+        onClick={() => action.mutate('bertscore')}>BERTScore만 재시도</Button>}
       {active(info) && <Button variant="danger" size="small" disabled={action.isPending} onClick={() => action.mutate('cancel')}>실행 취소</Button>}
       {!active(info) && info.failed > 0 && <Button size="small" disabled={action.isPending} onClick={() => action.mutate('retry')}>실패 케이스 재실행</Button>}
       {(['json', 'jsonl', 'csv'] as const).map(format =>
         <Button key={format} variant="secondary" size="small" disabled={save.isPending} onClick={() => save.mutate(format)}>{format.toUpperCase()} 다운로드</Button>)}
     </div>
+    <p className="lab-meta">다운로드는 현재 검색·페이지와 관계없이 실행 전체를 포함하며, 다운로드 시점의 상태와 위험 임계점 {threshold}을 기록합니다.</p>
     <LabError error={action.error || save.error} />
     <div className="lab-grid">
       <TextField label="결과 검색" disabled={editing} type="search" maxLength={160} placeholder="닉네임 또는 케이스 ID" value={q} onChange={e => { setQ(e.target.value); setPage(1); setIndex(0); }} />
@@ -100,7 +116,7 @@ export function RunResults({ id }: { id: string }) {
       {!rows.data.items.length && <p>조건에 맞는 결과가 없습니다.</p>}
       <div inert={editing}><Pager page={page} total={rows.data.total} change={value => { setPage(value); setIndex(0); }} /></div>
     </>}
-    <CurationPanel key={id} runId={id} completedAt={info.completedAt} />
+    <CurationPanel key={id} runId={id} completedAt={info.completedAt} threshold={threshold} setThreshold={setThreshold} showBertScore={!reviewMode} evaluationVersion={`${count}/${evaluationVersion}`} />
   </>;
 }
 
@@ -112,9 +128,9 @@ export function RunCompare({ left, runs }: { left: LabRun; runs: LabRun[] }) {
   const candidates = runs.filter(run => run.id !== left.id && run.datasetHash === left.datasetHash && run.schemaVersion === left.schemaVersion);
   const right = candidates.find(run => run.id === rightId);
   const compare = useQuery({
-    queryKey: viewerKey(['lab-compare', left.id, rightId, left.status, right?.status, page, q]),
+    queryKey: viewerKey(['lab-compare', left.id, rightId, left.status, right?.status, JSON.stringify(left.bertScore), JSON.stringify(right?.bertScore), page, q]),
     queryFn: () => labApi.compare(left.id, rightId, page, q), enabled: !!right,
-    refetchInterval: right && (active(left) || active(right)) ? 2500 : false,
+    refetchInterval: right && (active(left) || active(right) || left.bertScore.pending || left.bertScore.running || right.bertScore.pending || right.bertScore.running) ? 2500 : false,
   });
   return <section className="lab-panel">
     <h2>실험 비교</h2>

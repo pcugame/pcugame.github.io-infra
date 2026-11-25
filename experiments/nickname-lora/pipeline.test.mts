@@ -23,7 +23,7 @@ async function fixtureExport(directory: string) {
     const step = { kind: action ? 'action' : 'answer', prompt: example.messages[1].content,
       systemPrompt: example.messages[0].content, suppliedSources: input.sources,
       ...(action ? { action: value } : { answer, evidenceChecks, interpretationStatus }) };
-    const result = LabResultSchema.parse({ caseId: `case-${i}`, testCase: { id: `case-${i}`, nickname, familyId: `family-${i}`,
+    const result = LabResultSchema.parse({ bertScore: null, caseId: `case-${i}`, testCase: { id: `case-${i}`, nickname, familyId: `family-${i}`,
       split: 'train', tags: ['obfuscation:none'], reference: { expectedReason: 'fixture', expectedScore: 5, sources: [] } },
       status: 'SUCCEEDED', output: action ? null : answer, sources: [], durationMs: 1, searchCount: 0,
       jsonValid: true, error: null, attempts: 1, toolSucceeded: false, toolSupport: 'unsupported',

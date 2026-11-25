@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LabBertScoreSchema, LabBertScoreSummarySchema } from './lab-bertscore.js';
 
 // PostgreSQL text and jsonb accept Unicode scalar values except U+0000.
 const pgText = (max: number) =>
@@ -295,6 +296,7 @@ export const LabRunSchema = z.object({
 	failed: z.number(),
 	cancelled: z.number(),
 	stats: z.object({ meanScore: z.number().nullable(), scored: z.number(), abstained: z.number() }),
+  bertScore: LabBertScoreSummarySchema,
 });
 export const LabResultSchema = z.object({
 	caseId,
@@ -310,6 +312,7 @@ export const LabResultSchema = z.object({
 	toolSucceeded: z.boolean(),
 	toolSupport: LabToolSupportSchema,
 	history: z.array(z.unknown()),
+  bertScore: LabBertScoreSchema.nullable(),
 });
 export type LabDataset = z.infer<typeof LabDatasetSchema>;
 export type LabRun = z.infer<typeof LabRunSchema>;
@@ -338,80 +341,3 @@ export const LabBetaUserSchema = z.object({
 export const LAB_PAGE_SIZE = 25;
 export const LAB_ACTIVE_RUN_LIMIT = 3;
 export const LAB_CASE_ATTEMPT_LIMIT = 12;
-
-export function formatLabExport(
-	run: LabRun,
-	results: LabResult[],
-	format: z.infer<typeof LabExportFormatSchema>,
-) {
-	const filename = `nickname-evaluation-${run.id}.${format}`;
-	if (format === 'json') return { filename, content: JSON.stringify({ run, results }, null, 2) };
-	if (format === 'jsonl')
-		return {
-			filename,
-			content:
-				results
-					.map((result) =>
-						JSON.stringify({
-							runId: run.id,
-							schemaVersion: run.schemaVersion,
-							datasetHash: run.datasetHash,
-							datasetVersion: run.datasetVersion,
-							evaluationProtocol: run.evaluationProtocol,
-							selectedSplit: run.split,
-							systemPrompt: run.systemPrompt,
-							actionPrompt: run.actionPrompt,
-							answerPrompt: run.answerPrompt,
-							promptHash: run.promptHash,
-							...result,
-						}),
-					)
-					.join('\n') + '\n',
-		};
-	const columns = [
-		'runId',
-		'caseId',
-		'nickname',
-		'status',
-		'score',
-		'confidence',
-		'durationMs',
-		'searchCount',
-		'attempts',
-		'resultJson',
-		'schemaVersion',
-		'datasetHash',
-		'datasetVersion',
-		'evaluationProtocol',
-		'selectedSplit',
-		'systemPrompt', 'actionPrompt', 'answerPrompt', 'promptHash',
-	];
-	function cell(value: string | number | null | undefined) {
-		const str = String(value ?? '');
-		const safe = /^[\t\r\n]|^\s*[=+@-]/.test(str) ? "'" + str : str;
-		return '"' + safe.replaceAll('"', '""') + '"';
-	}
-	const rows = results.map((r) => {
-		return [
-			run.id,
-			r.caseId,
-			r.testCase.nickname,
-			r.status,
-			r.output?.score,
-			r.output?.confidence,
-			r.durationMs,
-			r.searchCount,
-			r.attempts,
-			JSON.stringify(r),
-			run.schemaVersion,
-			run.datasetHash,
-			run.datasetVersion,
-			run.evaluationProtocol,
-			run.split,
-			run.systemPrompt, run.actionPrompt, run.answerPrompt, run.promptHash,
-		]
-			.map(cell)
-			.join(',');
-	});
-	return { filename, content: [columns.join(','), ...rows].join('\r\n') + '\r\n' };
-}

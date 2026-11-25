@@ -5,7 +5,7 @@ import { LabCurationPolicySchema, type LabCandidate } from './lab-human.js';
 
 function result(): LabResult {
   const output = { schemaVersion: '2', nickname: '달빛산책', interpretedTerm: null, reason: '평범한 조합', score: 0, confidence: 0.8, sourceIds: ['S1'], abstained: false };
-  return LabResultSchema.parse({ caseId: 'one', testCase: { id: 'one', nickname: '달빛산책', familyId: 'moon', split: 'train', reference: { expectedReason: '비공개 정답', expectedScore: 0, sources: ['https://unseen.example.org'] } },
+  return LabResultSchema.parse({ bertScore: null, caseId: 'one', testCase: { id: 'one', nickname: '달빛산책', familyId: 'moon', split: 'train', reference: { expectedReason: '비공개 정답', expectedScore: 0, sources: ['https://unseen.example.org'] } },
     status: 'SUCCEEDED', output, sources: [{ id: 'S1', title: '자료', url: 'https://example.org', snippet: '평범한 조합이며 후반은 모델에서 잘림', collectedAt: '2026-11-25T00:00:00Z' }],
     durationMs: 30, searchCount: 1, jsonValid: true, error: null, attempts: 1, toolSucceeded: true, toolSupport: 'unsupported',
     history: [{ event: 'finished', research: { steps: [

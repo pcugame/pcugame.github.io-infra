@@ -102,3 +102,10 @@ export type LabCurationExport = z.infer<typeof LabCurationExportSchema>;
 export type LabHumanMetrics = z.infer<typeof LabHumanMetricsSchema>;
 export type LabCurationOverview = z.infer<typeof LabCurationOverviewSchema>;
 export type LabCorrection = z.infer<typeof LabOutputSchema>;
+
+// Derived evaluations never change the generation snapshot reviewed by a person.
+export function labReviewResult(result: z.infer<typeof LabResultSchema>) {
+  const { bertScore: _derived, ...original } = result;
+  return original;
+}
+export const LabRiskThresholdSchema = z.coerce.number().int().min(0).max(100).default(50);

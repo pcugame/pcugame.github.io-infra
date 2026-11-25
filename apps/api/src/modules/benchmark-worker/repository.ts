@@ -2,6 +2,7 @@ import { LAB_CASE_ATTEMPT_LIMIT, LAB_NICKNAME_PROTOCOL, LAB_RESEARCH_PROFILE, la
 import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import type { Attempt, WorkItem } from './evaluate.js';
+import { enqueueBertScore } from './bertscore-repository.js';
 
 export const LEASE_MS = 30_000;
 const MAX_ATTEMPTS = 3;
@@ -66,6 +67,7 @@ export async function claimCase(db: PrismaClient, concurrency: number): Promise<
 			if (result.attempts >= LAB_CASE_ATTEMPT_LIMIT || result.attempts - result.retryBase >= MAX_ATTEMPTS) {
 				await tx.$executeRaw`UPDATE "LabResult" SET status='FAILED', error='ATTEMPT_LIMIT', "leaseToken"=NULL, "leaseUntil"=NULL
 				WHERE "runId"=${run.id} AND "caseId"=${result.caseId}`;
+				await enqueueBertScore(tx, run.id, result.caseId);
 				await finalize(tx, run.id);
 				return 'reaped';
 			}
@@ -145,6 +147,7 @@ export async function finishCase(db: PrismaClient, claim: Claim, attempt: Attemp
 			WHERE "runId"=${claim.runId} AND "caseId"=${claim.caseId} AND "leaseToken"=${claim.token} AND status='RUNNING'
 			AND "leaseUntil" > clock_timestamp() AT TIME ZONE 'UTC'`;
 			if (changed !== 1) return false;
+			await enqueueBertScore(tx, claim.runId, claim.caseId);
 			await finalize(tx, claim.runId);
 			return true;
 		},

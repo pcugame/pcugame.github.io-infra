@@ -3,15 +3,16 @@ import {
 	LabCreateRunSchema,
 	LabOutputSchema,
 	LabUploadSchema,
-	formatLabExport,
 	type LabRun,
 	type LabResult,
 } from './lab.js';
+import { formatLabExport } from './lab-export.js';
 
 const run = { id: '51512681-b19c-4da7-8e98-955e17dd938c' } as LabRun;
 const result = {
 	caseId: 'nick-0001',
-	testCase: { nickname: '=unsafe "cell", example' },
+	testCase: { nickname: '=unsafe "cell", example', tags: [], reference: { expectedReason: '기대', expectedScore: 30, sources: [] } },
+  history: [], sources: [], bertScore: null,
 	output: null,
 	status: 'FAILED',
 } as LabResult;
@@ -67,9 +68,9 @@ describe('nickname evaluation contracts', () => {
 		const csv = formatLabExport(run, [result], 'csv');
 		expect(csv.filename).toMatch(/^nickname-evaluation-/);
 		expect(csv.content).toContain(`"'=unsafe ""cell"", example"`);
-		expect(csv.content.split('\r\n')[0]).toContain('runId,caseId,nickname,status');
+		expect(csv.content.split('\r\n')[0]).toContain('ordinal,caseId,nickname');
 		expect(csv.content.split('\r\n')[0]).not.toMatch(/term|context|language|datasetType/);
-		expect(JSON.parse(formatLabExport(run, [result], 'json').content).results).toEqual([result]);
+		expect(JSON.parse(formatLabExport(run, [result], 'json').content).results).toMatchObject([result]);
 		expect(JSON.parse(formatLabExport(run, [result], 'jsonl').content).testCase.nickname).toBe(
 			result.testCase.nickname,
 		);

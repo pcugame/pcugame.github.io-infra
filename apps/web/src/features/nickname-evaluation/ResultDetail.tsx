@@ -1,6 +1,6 @@
 import { labLastAttempt, type LabResult } from '@pcu/contracts';
 import { z } from 'zod';
-import { resultLabels } from './labels';
+import { resultLabels, bertScoreLabels, bertScoreReasons } from './labels';
 
 export function ResultDetail({ item, showReference = true }: { item: LabResult; showReference?: boolean }) {
   const out = item.output;
@@ -32,6 +32,9 @@ export function ResultDetail({ item, showReference = true }: { item: LabResult; 
         <dt>판단 신뢰도</dt><dd>{Math.round(out.confidence * 100)}%</dd>
       </>}
       {showReference && <>
+      <dt>BERTScore · 근거 문장 유사도</dt><dd>{item.bertScore?.status === 'SUCCEEDED'
+        ? `P ${item.bertScore.precision?.toFixed(4)} / R ${item.bertScore.recall?.toFixed(4)} / F1 ${item.bertScore.f1?.toFixed(4)}`
+        : `${item.bertScore ? bertScoreLabels[item.bertScore.status] : '생성 결과 대기 또는 미등록'}${item.bertScore?.reason ? ' · ' + (bertScoreReasons[item.bertScore.reason] ?? item.bertScore.reason) : ''}`}</dd>
       <dt>사람의 기대 근거 (검토 가설)</dt><dd>{item.testCase.reference.expectedReason}</dd>
       <dt>기대 점수 / 범위</dt><dd>{item.testCase.reference.expectedScore} / {item.testCase.reference.scoreRange?.join('–') ?? '미지정'}</dd>
       <dt>실제 − 기대 점수</dt><dd>{out?.score == null ? '채점 불가' : `${out.score - item.testCase.reference.expectedScore}점 (절대 오차 ${Math.abs(out.score - item.testCase.reference.expectedScore)})`}</dd>

@@ -9,7 +9,8 @@ import { labApi } from '../lib/api/lab';
 vi.mock('../lib/api/lab', () => ({ labApi: { review: vi.fn(), saveReview: vi.fn(), candidate: vi.fn() } }));
 vi.mock('../lib/query/visibility', () => ({ useViewerKey: () => (key: unknown[]) => key }));
 afterEach(cleanup);
-const item = LabResultSchema.parse({ caseId: 'one', testCase: { id: 'one', nickname: '달빛산책', familyId: 'moon', split: 'train', reference: { expectedReason: 'SECRET_EXPECTED_REASON', expectedScore: 0 } },
+const item = LabResultSchema.parse({ bertScore: { status: 'SUCCEEDED', precision: 0.8765, recall: 0.7654, f1: 0.8192,
+  reason: null, attempts: 1, inputHash: 'a'.repeat(64), identity: null, completedAt: '2026-11-25T00:00:00Z' }, caseId: 'one', testCase: { id: 'one', nickname: '달빛산책', familyId: 'moon', split: 'train', reference: { expectedReason: 'SECRET_EXPECTED_REASON', expectedScore: 0 } },
   status: 'SUCCEEDED', output: { schemaVersion: '2', nickname: '달빛산책', interpretedTerm: null, reason: 'MODEL_REASON', score: 80, confidence: 0.6, sourceIds: [], abstained: false },
   sources: [], history: [], durationMs: 10, searchCount: 0, jsonValid: true, error: null, attempts: 1, toolSucceeded: false, toolSupport: 'unknown' });
 let bundle: LabReviewBundle;
@@ -32,6 +33,7 @@ describe('human review UI', () => {
     const { next, client } = mount();
     await screen.findByText('MODEL_REASON', { selector: 'dd' });
     expect(screen.queryByText('SECRET_EXPECTED_REASON')).toBeNull();
+    expect(screen.queryByText(/0.8765/)).toBeNull();
     fireEvent.keyDown(window, { key: '1' });
     fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true });
     await waitFor(() => expect(next).toHaveBeenCalledOnce());
@@ -48,6 +50,7 @@ describe('human review UI', () => {
     fireEvent.click(screen.getByText('필요한 부분만 교정'));
     fireEvent.click(screen.getByRole('button', { name: '기대 근거·점수로 교정 초안 채우기' }));
     expect(screen.getByText('SECRET_EXPECTED_REASON', { selector: 'dd' })).toBeTruthy();
+    expect(screen.getByText('P 0.8765 / R 0.7654 / F1 0.8192')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /검수 저장/ }));
     await waitFor(() => expect(labApi.saveReview).toHaveBeenCalled());
     expect(vi.mocked(labApi.saveReview).mock.calls[0][2].body).toMatchObject({ verdict: 'incorrect', errors: ['score', 'false_positive'], blind: false, reusedReference: true,

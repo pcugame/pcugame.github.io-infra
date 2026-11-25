@@ -148,6 +148,14 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('nickname-only L
 			await db.$executeRawUnsafe(await readFile(new URL(
 				'../../prisma/migrations/20261125130000_lab_editable_prompts/migration.sql', import.meta.url,
 			), 'utf8'));
+      const preservedDatasets = await db.labDataset.findMany();
+      const preservedResults = await db.labResult.findMany();
+      await db.$executeRawUnsafe(await readFile(new URL(
+        '../../prisma/migrations/20261125140000_lab_bertscore/migration.sql', import.meta.url,
+      ), 'utf8'));
+      expect(await db.labDataset.findMany()).toEqual(preservedDatasets);
+      expect(await db.labResult.findMany()).toEqual(preservedResults);
+      expect(await db.labBertScore.count()).toBe(0);
 			const repo = createLabRepository(db);
 			const actor = { id: f.owner.id, role: 'BETA_TESTER' as const };
 			for (const run of await repo.runs(actor, 1)) {

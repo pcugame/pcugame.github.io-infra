@@ -219,6 +219,7 @@ export function labHumanMetrics(results: LabResult[], reviews: Map<string, LabRe
     if (attempt?.research) return attempt.research.steps.filter(s => kind === 'search' ? s.kind === 'search' : s.kind !== 'search').reduce((sum, s) => sum + (s.durationMs ?? 0), 0);
     return (kind === 'search' ? attempt?.searchDurationMs : attempt?.generationDurationMs) ?? null;
   }), 'ms', false);
+  for (const key of ['precision', 'recall', 'f1'] as const) add('bertScore_' + key, 'BERTScore ' + key + ' (근거 유사도)', results.map(r => r.bertScore?.status === 'SUCCEEDED' ? r.bertScore[key] : null), 'score', false);
   return { total, reviewed: reviews.size, staleReviews, failed: results.filter(r => r.status === 'FAILED').length,
     cancelled: results.filter(r => r.status === 'CANCELLED').length, pending: results.filter(r => ['PENDING', 'RUNNING'].includes(r.status)).length,
     infrastructure: results.filter(labInfrastructureFailure).length,

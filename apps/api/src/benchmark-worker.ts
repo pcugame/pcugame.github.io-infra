@@ -3,6 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createPrismaClientForDatabase } from './lib/prisma-client.js';
 import { readLabConfig } from './modules/benchmark-worker/config.js';
+import { processNextBertScores } from './modules/benchmark-worker/bertscore.js';
 import { processNextCase } from './modules/benchmark-worker/service.js';
 
 export async function runBenchmarkWorker() {
@@ -16,11 +17,11 @@ export async function runBenchmarkWorker() {
 	const stop = () => controller.abort();
 	process.once('SIGTERM', stop);
 	process.once('SIGINT', stop);
-	async function poll() {
+	async function poll(processNext = processNextCase) {
 		while (!controller.signal.aborted) {
 			let processed = false;
 			try {
-				processed = await processNextCase(db, config, controller.signal);
+				processed = await processNext(db, config, controller.signal);
 			} catch {
 				console.error('Benchmark worker could not update the work queue');
 			}
@@ -28,7 +29,7 @@ export async function runBenchmarkWorker() {
 		}
 	}
 	try {
-		await Promise.all(Array.from({ length: config.concurrency }, poll));
+		await Promise.all([...Array.from({ length: config.concurrency }, () => poll()), poll(processNextBertScores)]);
 	} finally {
 		process.off('SIGTERM', stop);
 		process.off('SIGINT', stop);

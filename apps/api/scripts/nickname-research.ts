@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
-import { LAB_RESEARCH_PROFILE, LabPromptOverridesSchema, labPromptSettings, labPromptSnapshot, labNicknameInput, parseLabDataset, type LabCase } from '@pcu/contracts';
+import { LAB_RESEARCH_PROFILE, parseLabPromptFile, labPromptSettings, labPromptSnapshot, labNicknameInput, parseLabDataset, type LabCase } from '@pcu/contracts';
 import { readLabConfig } from '../src/modules/benchmark-worker/config.js';
 import { evaluateCase, type Attempt } from '../src/modules/benchmark-worker/evaluate.js';
 
@@ -11,8 +11,8 @@ const { values } = parseArgs({ options: {
 	'prompts-file': { type: 'string' },
 } });
 if (!!values.nickname === !!values.dataset) throw new Error('Provide exactly one --nickname or --dataset (JSONL)');
-const prompts = labPromptSettings(values['prompts-file']
-	? LabPromptOverridesSchema.parse(JSON.parse(await readFile(values['prompts-file'], 'utf8'))) : {}, true);
+const prompts = values['prompts-file']
+  ? parseLabPromptFile(await readFile(values['prompts-file']), true) : labPromptSettings({}, true);
 const config = readLabConfig();
 if (!config.enabled || config.generateProfile !== LAB_RESEARCH_PROFILE)
 	throw new Error('Enable LAB_GENERATE_PROFILE=nickname-research-v1 with the configured 4B /generate endpoint');

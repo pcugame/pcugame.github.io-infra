@@ -7,6 +7,7 @@ export interface LabConfig {
 	modelUrl?: string;
 	apiKey?: string;
 	searchUrl?: string;
+	bertScoreUrl?: string;
 	concurrency: number;
 	generateProfile?: typeof LAB_RESEARCH_PROFILE;
 }
@@ -20,7 +21,8 @@ type LabEnvironment = Partial<
 		| 'LAB_MODEL_API_KEY'
 		| 'LAB_SEARXNG_URL'
 		| 'LAB_CONCURRENCY'
-		| 'LAB_GENERATE_PROFILE',
+		| 'LAB_GENERATE_PROFILE'
+    | 'LAB_BERTSCORE_URL',
 		string
 	>
 >;
@@ -54,6 +56,7 @@ export function readLabConfig(env: LabEnvironment = process.env): LabConfig {
 		modelUrl: endpoint(env.LAB_MODEL_URL),
 		apiKey: env.LAB_MODEL_API_KEY,
 		searchUrl: endpoint(env.LAB_SEARXNG_URL),
+    bertScoreUrl: endpoint(env.LAB_BERTSCORE_URL),
 	};
 }
 

@@ -313,7 +313,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 			const jsonl = await api('GET', `/runs/${full}/export?format=jsonl`);
 			expect(jsonl.content.trim().split('\n')).toHaveLength(57);
 			const csv = await api('GET', `/runs/${smoke}/export?format=csv`);
-			expect(csv.content).toContain('runId,caseId');
+			expect(csv.content).toContain('ordinal,caseId,nickname');
 		}, 120_000);
 
 		it('imports human research CSV/JSONL, protects references, selects splits and exports resolved evidence', async () => {

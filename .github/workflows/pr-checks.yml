@@ -50,6 +50,7 @@ jobs:
         if: steps.changes.outputs.release == 'true'
         run: |
           python3 -m unittest discover -s server/local-llm -p 'test_*.py'
+          python3 -m unittest discover -s server/bertscore -p 'test_*.py'
           python3 -m unittest discover -s experiments/nickname-lora -p 'test_*.py'
 
       - name: Test release controls and deployment fixtures

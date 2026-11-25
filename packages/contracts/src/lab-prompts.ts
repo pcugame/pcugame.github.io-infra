@@ -1,4 +1,4 @@
-import { LAB_NICKNAME_SYSTEM_PROMPT } from './lab.js';
+import { LAB_NICKNAME_SYSTEM_PROMPT, LabPromptOverridesSchema } from './lab.js';
 import { LAB_RESEARCH_SYSTEM_PROMPT, LAB_RESEARCH_ACTION_PROMPT, LAB_RESEARCH_ANSWER_PROMPT } from './lab-research.js';
 
 export type LabPromptSettings = { systemPrompt: string; actionPrompt: string; answerPrompt: string };
@@ -24,4 +24,13 @@ export function labSystemMessage(settings: LabPromptSettings, stage: 'action' | 
 // Stable key order across API, mock, CLI and comparison exports. No trimming or normalization.
 export function labPromptSnapshot(settings: LabPromptSettings) {
 	return JSON.stringify({ systemPrompt: settings.systemPrompt, actionPrompt: settings.actionPrompt, answerPrompt: settings.answerPrompt });
+}
+
+export const LAB_PROMPT_FILE_MAX_BYTES = 256 * 1024;
+export function parseLabPromptFile(bytes: Uint8Array, research = false, promptOnly = false): LabPromptSettings {
+  if (bytes.byteLength > LAB_PROMPT_FILE_MAX_BYTES) throw new Error('지침 파일은 256 KiB 이하여야 합니다.');
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  const parsed = LabPromptOverridesSchema.safeParse(JSON.parse(text));
+  if (!parsed.success) throw new Error('systemPrompt·actionPrompt·answerPrompt는 각각 8,000자 이하의 문자열이어야 합니다.');
+  return labPromptSettings(parsed.data, research, promptOnly);
 }

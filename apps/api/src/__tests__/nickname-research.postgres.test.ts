@@ -124,7 +124,8 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('research profil
 			expect(JSON.stringify(result.history)).not.toContain('SECRET_REFERENCE');
 			for (const format of ['json', 'jsonl', 'csv']) {
 				const exported = await api('GET', `/runs/${runId}/export?format=${format}`);
-				expect(exported.content).toContain('weights_sha256');
+				if (format !== 'csv') expect(exported.content).toContain('weights_sha256');
+        else { expect(exported.content).toContain('expectedReason,reason,interpretedTerm'); expect(exported.content).not.toContain('resultJson'); }
 				expect(exported.content).toContain('promptHash');
 				expect(exported.content).toContain('answerPrompt');
 				if (searchMode !== 'no_search') expect(exported.content).toContain('https://example.org/research');
