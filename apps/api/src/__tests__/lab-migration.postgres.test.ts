@@ -127,7 +127,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('nickname-only L
 			>`SELECT * FROM "LabDataset" WHERE id=${preservedId}`;
 			await db.$executeRawUnsafe(sql);
 			expect(await db.labDataset.findMany()).toEqual(datasets.map(({ datasetType: _type, ...row }) => row));
-			expect(await db.labRun.findMany({ orderBy: { id: 'asc' } })).toEqual(
+			expect(await db.$queryRaw`SELECT * FROM "LabRun" ORDER BY id`).toEqual(
 				preserved.map(({ datasetType: _type, ...row }) => row),
 			);
 			expect(await db.labTestCase.findMany()).toEqual(
@@ -141,6 +141,10 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')('nickname-only L
 			expect(columns.map((c) => c.column_name)).not.toEqual(expect.arrayContaining(['datasetType']));
 			for (const name of ['term', 'context', 'language', 'datasetType'])
 				expect(columns.map((c) => c.column_name)).not.toContain(name);
+			// Exercise the current repository only after its additive successor schema exists.
+			await db.$executeRawUnsafe(await readFile(new URL(
+				'../../prisma/migrations/20261125120000_lab_human_evaluation/migration.sql', import.meta.url,
+			), 'utf8'));
 			const repo = createLabRepository(db);
 			const actor = { id: f.owner.id, role: 'BETA_TESTER' as const };
 			for (const run of await repo.runs(actor, 1)) {

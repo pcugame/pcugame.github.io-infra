@@ -60,6 +60,7 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   const limits = status.generationLimits;
   const outputLimit = limits?.maxOutputTokens ?? 4096;
   const effectiveMode = status.toolSupport === 'unsupported' && searchMode === 'model_tool_call' ? 'no_search' : searchMode;
+  const searchUnavailable = effectiveMode !== 'no_search' && status.searchStatus !== 'available';
   const dataset = datasetsList.find(item => item.id === datasetId) ?? datasetsList[0];
   const available = useQuery({ queryKey: viewerKey(['lab-count', dataset?.id, split]), queryFn: () => labApi.cases(dataset!.id, 1, '', split || undefined), enabled: !!dataset });
   const count = available.data?.total ?? 0;
@@ -116,7 +117,7 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
     {upload.isPending && <p role="status">파일을 검증하고 등록하는 중…</p>}
     {upload.data && <p role="status">{upload.data.count}개 케이스를 검증해 등록했습니다.</p>}
     <LabError error={upload.error || datasets.error} />
-    <form className="lab-form" onSubmit={e => { e.preventDefault(); if (dataset && validSize && !create.isPending) create.mutate(); }}>
+    <form className="lab-form" onSubmit={e => { e.preventDefault(); if (dataset && validSize && !searchUnavailable && !create.isPending) create.mutate(); }}>
       <div className="lab-grid">
         <SelectField label="실험 크기" value={sizeMode} onChange={e => { setSizeMode(e.target.value); setSelected([]); }}>
           <option value="1">1개 · Smoke Test</option><option value="10">10개 · 간단한 시험</option>
@@ -146,10 +147,11 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
         <TextField type="number" label="최대 출력 토큰" min={128} max={outputLimit} step={1} required value={maxTokens} onChange={e => setMaxTokens(e.target.value)} />
       </div>
       <LabError error={create.error} />
+      {searchUnavailable && <p>검색 서비스에 연결할 수 없습니다. 연결 복구 후 실행하거나 검색 없이 분석을 선택하세요.</p>}
       {!validSize && dataset && <p>현재 split에서 실행 가능한 개수는 {count}개입니다.</p>}
       <label><input type="checkbox" checked={finalTest} onChange={e => setFinalTest(e.target.checked)} />설정을 확정한 최종 평가이며 test 결과를 반복 튜닝에 사용하지 않습니다.</label>
       <div className="lab-actions">
-        <Button type="submit" disabled={!validSize || !dataset || !status.model || upload.isPending || create.isPending || (selected.length > 0 && selected.length !== size)}>
+        <Button type="submit" disabled={!validSize || !dataset || !status.model || searchUnavailable || upload.isPending || create.isPending || (selected.length > 0 && selected.length !== size)}>
           {create.isPending ? '요청 중…' : `${size}개 평가 실행`}
         </Button>
         {selected.length > 0 && selected.length !== size && <span>직접 선택하려면 {size - selected.length}개를 더 선택하세요.</span>}

@@ -94,7 +94,7 @@ describe('bounded JSON actions through Fake Provider (not model reasoning valida
 		const result = await run();
 		expect(result.searchCount).toBe(2);
 		expect(result.research!.steps.filter(s => s.kind === 'search')).toMatchObject([
-			{ error: 'PROVIDER_HTTP_503', sources: [] }, { error: 'PROVIDER_HTTP_503', sources: [] },
+			{ error: 'SEARCH_PROVIDER_HTTP_503', sources: [] }, { error: 'SEARCH_PROVIDER_HTTP_503', sources: [] },
 		]);
 		expect(result.output).toMatchObject({ score: null, abstained: true, sourceIds: [] });
 	});

@@ -98,7 +98,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 				status: 'PENDING', attempts: 0,
 			});
 			const claim = await next();
-			expect(claim.item.testCase.context).toBe('context');
+			expect(claim.item.input).toEqual({ nickname: '가상닉네임0' });
 			await finishCase(db, claim, failure);
 		});
 

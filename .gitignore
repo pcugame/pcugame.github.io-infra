@@ -52,3 +52,5 @@ apps/web/src/pages/admin/AdminPreview.tsx
 # Reviewed Quadlet adoption policy
 !server/quadlet/ADOPTION.md
 !server/quadlet/COMPATIBILITY.md
+__pycache__/
+*.pyc

@@ -48,7 +48,9 @@ jobs:
 
       - name: Test local LLM profiles
         if: steps.changes.outputs.release == 'true'
-        run: python3 -m unittest discover -s server/local-llm -p 'test_*.py'
+        run: |
+          python3 -m unittest discover -s server/local-llm -p 'test_*.py'
+          python3 -m unittest discover -s experiments/nickname-lora -p 'test_*.py'
 
       - name: Test release controls and deployment fixtures
         if: steps.changes.outputs.release == 'true'
@@ -80,6 +82,12 @@ jobs:
       - name: Validate expression DB and curated nickname evaluation
         if: steps.changes.outputs.contracts == 'true'
         run: node --test benchmarks/nickname-evaluation/expressions/validate.test.mjs
+
+      - name: Verify offline nickname LoRA pipeline
+        if: steps.changes.outputs.contracts == 'true'
+        run: |
+          node_modules/.bin/tsx --test experiments/nickname-lora/pipeline.test.mts
+          node_modules/.bin/tsc -p experiments/nickname-lora/tsconfig.json
 
       - name: Test shared contracts
         if: steps.changes.outputs.contracts == 'true' && steps.changes.outputs.full != 'true'

@@ -59,8 +59,6 @@ export function createLabController(
 				if (config.provider === 'transformers-generate') {
 					const problem = invalidGenerateSetting(r.body, config.generateProfile);
 					if (problem) throw badRequest(problem);
-					if ((await status()).systemPromptSupported === false)
-						throw badRequest('The 4B model server requires an update to support system_prompt');
 				}
 				if (r.body.searchMode === 'agentic_retrieval' && !config.generateProfile)
 					throw badRequest('RESEARCH_PROFILE_REQUIRED');
