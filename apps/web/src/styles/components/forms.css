@@ -82,6 +82,49 @@ fieldset.form-section {
   line-height: 1.5;
 }
 
+.form-field__heading {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  margin-bottom: var(--form-label-gap, .35rem);
+}
+
+.form-field__heading .form-field__label { margin-bottom: 0; }
+.field-help { display: inline-flex; align-self: stretch; align-items: center; }
+.field-help__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  padding: .15rem;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: help;
+}
+.field-help__button:hover { color: var(--color-primary); }
+.field-help__button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.field-help__tooltip {
+  position: absolute;
+  z-index: 10;
+  inset-block-start: 100%;
+  inset-inline-start: 0;
+  width: min(22rem, 100%);
+  padding: .65rem .8rem;
+  border: 1px solid var(--color-border);
+  border-radius: .5rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 .25rem .8rem rgb(0 0 0 / .15);
+  font-size: .85rem;
+  font-weight: 400;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 .form-control:focus,
 .form-choice input:focus {
   outline: none;

@@ -33,6 +33,22 @@ try {
   await page.getByRole('heading', { name: '접근 권한이 없습니다' }).waitFor();
   await input('Mock 사용자').selectOption('BETA_TESTER');
   await page.getByText('개발용 모의 진행률', { exact: false }).waitFor();
+  const defaultHelp = button('가져오기 기본 용도 도움말');
+  await defaultHelp.hover();
+  const tooltip = page.getByRole('tooltip');
+  await tooltip.waitFor();
+  assert.match(await tooltip.innerText(), /이미 지정된 용도는 유지/);
+  await tooltip.hover();
+  assert.equal(await tooltip.isVisible(), true);
+  await page.keyboard.press('Escape');
+  await tooltip.waitFor({ state: 'hidden' });
+  await button('고정 평가 지침 도움말').focus();
+  await tooltip.waitFor();
+  assert.match(await tooltip.innerText(), /같은 조건에서 결과를 비교/);
+  await page.keyboard.press('Escape');
+  await tooltip.waitFor({ state: 'hidden' });
+  await page.keyboard.press('Tab');
+  assert.equal(await input('고정 평가 지침').evaluate(el => el === document.activeElement), true);
   await input('데이터셋 등록 · 최대 4 MiB').setInputFiles(dataset);
   await page.getByText('57개 케이스를 검증해 등록했습니다.').waitFor();
 
@@ -56,8 +72,9 @@ try {
 
   await input('처리 상태').selectOption('SUCCEEDED');
   const results = panel('실험 결과');
+  await input('한 사례씩 검수 (정답은 공개 전 숨김)').uncheck();
   await results.getByText('1 / 3 페이지 · 총 57개').waitFor();
-  await results.getByRole('button', { name: '다음' }).click();
+  await results.getByRole('button', { name: '다음', exact: true }).click();
   await results.getByText('2 / 3 페이지 · 총 57개').waitFor();
   await input('결과 검색').fill(firstId);
   await results.locator('.lab-row summary').first().click();
@@ -84,7 +101,7 @@ try {
   await input('고정 평가 지침').waitFor();
   await page.setViewportSize({ width: 1280, height: 900 });
   await input('실험 크기').selectOption('1');
-  await input('가져오기 기본 split').selectOption('test');
+  await input('가져오기 기본 용도').selectOption('test');
   await input('데이터셋 등록 · 최대 4 MiB').setInputFiles({ name: 'human.csv', mimeType: 'text/csv', buffer: Buffer.from('nickname,expectedReason,expectedScore,split\r\n가상연구하나,"검토할 가설, 인용",75,train\r\n가상연구둘,일반적인 해석,0,train\r\n가상모호닉네임,판단이 어려운 사례,50,\r\n') });
   await page.getByText('3개 케이스를 검증해 등록했습니다.').waitFor();
   assert.equal(await input('고정 평가 지침').getAttribute('readonly'), '');
@@ -94,15 +111,17 @@ try {
   await page.locator('.lab-cases label input').first().check();
   await button('1개 평가 실행').click();
   await page.getByText('완료 · 1 / 1개 처리').waitFor();
-  await input('평가 split').selectOption('train');
+  await input('평가 대상 용도').selectOption('train');
   await input('실험 크기').selectOption('all');
   await button('2개 평가 실행').click();
   await page.getByText('완료 · 2 / 2개 처리').waitFor();
-  await input('평가 split').selectOption('');
+  await input('평가 대상 용도').selectOption('');
   await input('실험 크기').selectOption('custom');
   await input('사용자 지정 개수').fill('3');
+  await input('설정을 확정하고 최종 평가로 실행').check();
   await button('3개 평가 실행').click();
   await page.getByText('완료 · 3 / 3개 처리').waitFor();
+  await input('한 사례씩 검수 (정답은 공개 전 숨김)').uncheck();
   await results.locator('.lab-row summary').first().click();
   await results.getByText('판단 신뢰도', { exact: true }).first().waitFor();
   await results.getByText('사람의 기대 근거 (검토 가설)', { exact: true }).first().waitFor();
@@ -121,13 +140,41 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   await page.screenshot({ path: '/tmp/lab-nickname-mobile.png', fullPage: true });
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
+      for (const name of ['가져오기 기본 용도', '고정 평가 지침', '답변의 다양성', '응답 길이 제한']) {
+        const help = button(`${name} 도움말`);
+        await help.click();
+        await tooltip.waitFor();
+        const bounds = await tooltip.boundingBox();
+        assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, `${name} overflows at ${width}px`);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('body *')]
+            .filter(el => el.getBoundingClientRect().right > innerWidth).map(el => `${el.tagName}.${el.className}`).slice(0, 10))));
+        if (name === '가져오기 기본 용도') await page.screenshot({ path: `/tmp/lab-help-${width}-${theme}.png` });
+        await page.keyboard.press('Escape');
+        await tooltip.waitFor({ state: 'hidden' });
+      }
+    }
+  }
+  const touch = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const touchPage = await touch.newPage();
+  await touchPage.goto(`${base}/lab/nickname-evaluation`);
+  await touchPage.getByLabel('Mock 사용자', { exact: true }).selectOption('BETA_TESTER');
+  await touchPage.getByRole('button', { name: '가져오기 기본 용도 도움말', exact: true }).tap();
+  await touchPage.getByRole('tooltip').waitFor();
+  await touchPage.getByRole('heading', { name: '새 실험', exact: true }).tap();
+  await touchPage.getByRole('tooltip').waitFor({ state: 'hidden' });
+  await touch.close();
   await page.goto(`${base}/admin/beta-users`);
   await input('사용자 검색').fill('2088099');
   await button('베타 권한 부여').click();
   await button('베타 권한 회수').click();
   await button('베타 권한 부여').waitFor();
   assert.deepEqual(errors, []);
-  console.log('Passed nickname JSONL 1/10/50/all and CSV import, preview, fixed instructions, selection, split/all/custom, export, reload, mobile and role workflows.');
+  console.log('Passed nickname JSONL 1/10/50/all and CSV import, preview, fixed instructions, selection, split/all/custom, export, reload, roles, help hover/focus/Escape/touch and 1280/390/320px light/dark layouts.');
 } finally {
   await browser?.close();
   await vite.close();

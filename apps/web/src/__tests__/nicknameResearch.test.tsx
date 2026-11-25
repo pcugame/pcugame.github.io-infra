@@ -17,7 +17,7 @@ describe('nickname research presentation', () => {
       provider: 'transformers-generate', modelStatus: 'available', searchStatus: 'available', toolSupport: 'unsupported',
       agenticRetrieval: true, mock: false, generationLimits: { fixedTemperature: 0, maxInputTokens: 2048, maxOutputTokens: 768 },
     }} onCreated={() => {}} /></QueryClientProvider>);
-    const option = await screen.findByRole('option', { name: '모델 능동 조사' });
+    const option = await screen.findByRole('option', { name: '모델이 검색하며 분석' });
     expect((option as HTMLOptionElement).disabled).toBe(false);
     fireEvent.change(screen.getByLabelText('검색 모드'), { target: { value: 'agentic_retrieval' } });
     expect((screen.getByLabelText('검색 모드') as HTMLSelectElement).value).toBe('agentic_retrieval');
