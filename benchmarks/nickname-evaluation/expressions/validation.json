@@ -1,0 +1,37 @@
+{
+  "groups": 111,
+  "decisions": {
+    "accepted": 71,
+    "held": 36,
+    "excluded": 4
+  },
+  "statuses": {
+    "verified": 71,
+    "provisional": 35,
+    "unverified": 5
+  },
+  "riskTypes": {
+    "deceased": 4,
+    "political": 14,
+    "gender": 21,
+    "violence": 8,
+    "region": 13,
+    "history": 5,
+    "disaster": 3,
+    "housing": 5,
+    "class": 3,
+    "community": 13,
+    "orientation": 3,
+    "age": 8,
+    "ethnicity": 12,
+    "religion": 3,
+    "disability": 6,
+    "sexual": 12,
+    "illness": 9,
+    "family": 2,
+    "appearance": 5
+  },
+  "variants": 120,
+  "sourceSha256": "40f1a771f7b56624ed8a064de933b3a0b20045fa6f093035fae10d3005006be0",
+  "modelPerformance": "unmeasured"
+}

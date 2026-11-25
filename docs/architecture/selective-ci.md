@@ -33,6 +33,11 @@ tests, lint, architecture checks and builds. Web selections run Web tests, lint
 and builds. Full selections retain root `npm test`, `npm run lint`, and
 `npm run build`, so new workspaces remain included in the baseline.
 
+Every selection also validates the offline expression DB and its generated
+index. Selections that build contracts run the linked curated nickname checks,
+including evidence provenance and exclusion of unverified evaluation material.
+Benchmark paths retain the unknown-path full baseline classification.
+
 Web source changes do not select service integration because its Web check only
 fetches the root HTML and requires HTTP success; it does not execute browser
 source. Web startup configuration still selects the full baseline. API tests

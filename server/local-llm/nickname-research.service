@@ -1,0 +1,26 @@
+[Unit]
+Description=Bounded Qwen3-4B nickname research
+After=network.target
+
+[Service]
+Type=notify
+User=song
+Group=song
+WorkingDirectory=/opt/nickname-llm
+Environment=LOCAL_LLM_PROFILE=nickname-research-v1
+Environment=LOCAL_LLM_ROOT=/opt/nickname-llm
+Environment=LOCAL_LLM_SOCKET=/run/nickname-research/llama.sock
+Environment=LOCAL_LLM_PORT=8089
+ExecStart=/usr/bin/python3 -u /opt/nickname-llm/server.py
+RuntimeDirectory=nickname-research
+RuntimeDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=180
+KillMode=control-group
+Nice=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

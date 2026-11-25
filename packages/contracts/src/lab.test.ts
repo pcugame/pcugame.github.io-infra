@@ -1,26 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { LabCreateRunSchema, LabOutputSchema, formatLabExport, parseLabJsonl, type LabRun, type LabResult } from './lab.js';
+import {
+	LabCreateRunSchema,
+	LabOutputSchema,
+	LabUploadSchema,
+	formatLabExport,
+	type LabRun,
+	type LabResult,
+} from './lab.js';
 
 const run = { id: '51512681-b19c-4da7-8e98-955e17dd938c' } as LabRun;
-const item = { term: '=unsafe cell', context: 'say "hi", then leave', language: 'en' };
-const result = { caseId: 'en-0001', testCase: item, output: null, status: 'FAILED' } as LabResult;
+const result = {
+	caseId: 'nick-0001',
+	testCase: { nickname: '=unsafe "cell", example' },
+	output: null,
+	status: 'FAILED',
+} as LabResult;
 
-describe('lab evaluation boundaries', () => {
-	it('accepts nickname-only uploads verbatim and rejects hints, duplicate nicknames and duplicate IDs', () => {
-		const rows = Array.from({ length: 500 }, (_, i) => ({ id: 'k-' + i, nickname: '음절' + i }));
-		rows[1]!.nickname = 'ㄱ ㅅ';
-		const encode = (data: unknown[]) => data.map((row) => JSON.stringify(row)).join('\n');
-		expect(parseLabJsonl(encode(rows))).toEqual(rows);
-		for (const invalid of [
-			{ ...rows[0], hint: '의미' },
-			{ ...rows[0], context: '예문' },
-			{ ...rows[0], nickname: 'ㄱ  ㅅ' },
-			{ ...rows[0], id: rows[1]!.id },
-			{ ...rows[0], nickname: '  ' },
-			{ ...rows[0], nickname: '두\n줄' },
-		]) expect(() => parseLabJsonl(encode([invalid, ...rows.slice(1)]))).toThrow();
-	});
-	it('rejects invalid SQL text and UTF-16 without changing valid user prompt bytes', () => {
+describe('nickname evaluation contracts', () => {
+	it('rejects retired upload shapes, dataset types and custom system prompts', () => {
+		expect(LabUploadSchema.safeParse({ name: 'old', jsonl: '{}' }).success).toBe(false);
+		expect(
+			LabUploadSchema.safeParse({ name: 'old', datasetType: 'context_terms', format: 'jsonl', content: '{}' })
+				.success,
+		).toBe(false);
 		const request = {
 			datasetId: run.id,
 			size: 1,
@@ -29,51 +31,42 @@ describe('lab evaluation boundaries', () => {
 			searchMode: 'no_search',
 			model: 'local',
 		};
-		for (const systemPrompt of ['x\u0000', '\uD800', '\uDFFF', '  ']) {
-			expect(LabCreateRunSchema.safeParse({ ...request, systemPrompt }).success).toBe(false);
-		}
-		const systemPrompt = '  history\r\n🚀  ';
-		expect(LabCreateRunSchema.parse({ ...request, systemPrompt }).systemPrompt).toBe(systemPrompt);
+		expect(LabCreateRunSchema.safeParse(request).success).toBe(true);
+		expect(LabCreateRunSchema.safeParse({ ...request, systemPrompt: 'hidden answer' }).success).toBe(false);
+		for (const model of ['x\u0000', '\uD800', '\uDFFF'])
+			expect(LabCreateRunSchema.safeParse({ ...request, model }).success).toBe(false);
 	});
-	it('accepts either a nickname or a dataset selection and defaults to retrieval', () => {
-		const settings = { systemPrompt: 'Assess usage.', model: 'local', temperature: 0, maxTokens: 256 };
-		const direct = { ...settings, nickname: '계집' };
-		expect(LabCreateRunSchema.parse(direct)).toMatchObject({ nickname: '계집', searchMode: 'backend_retrieval' });
-		for (const fields of [{ nickname: '' }, { nickname: '  ' }, { nickname: 'a\nb' },
-			{ nickname: '계집', size: 1 }, { nickname: '계집', datasetId: run.id, size: 1 }]) {
-			expect(LabCreateRunSchema.safeParse({ ...settings, ...fields }).success).toBe(false);
-		}
-	});
-	it('allows uncertainty but rejects out-of-range scores and confidence', () => {
+	it('allows uncertainty and rejects invalid scores, confidence and retired output fields', () => {
 		const output = {
-			schemaVersion: '1',
-			caseId: 'en-0001',
-			language: 'en',
-			term: 'x',
-			originSummary: 'unclear',
-			earliestAttestation: null,
-			controversySummary: 'context dependent',
-			controversyScore: null,
-			controversyReason: 'unknown',
-			originConfidence: 0,
+			schemaVersion: '2',
+			nickname: '가상닉네임',
+			interpretedTerm: null,
+			reason: '판단 자료 부족',
+			score: null,
+			confidence: 0,
 			sourceIds: [],
-			uncertainties: [],
 			abstained: true,
 		};
-		expect(LabOutputSchema.parse(output).controversyScore).toBeNull();
+		expect(LabOutputSchema.parse(output).score).toBeNull();
 		for (const invalid of [
-			{ controversyScore: 101 },
-			{ controversyScore: -1 },
-			{ controversyScore: 1.5 },
-			{ originConfidence: 1.1 },
+			{ score: 101 },
+			{ score: -1 },
+			{ score: 1.5 },
+			{ confidence: 1.1 },
+			{ originSummary: 'retired' },
+			{ schemaVersion: '1' },
 		])
 			expect(LabOutputSchema.safeParse({ ...output, ...invalid }).success).toBe(false);
 	});
-	it('escapes CSV quotes and formula cells, preserves original data in JSON and JSONL', () => {
-		expect(formatLabExport(run, [result], 'csv').content).toContain(
-			`"'=unsafe cell","en","say ""hi"", then leave"`,
-		);
+	it('escapes CSV quotes and formulas and retains original nickname data in JSON and JSONL', () => {
+		const csv = formatLabExport(run, [result], 'csv');
+		expect(csv.filename).toMatch(/^nickname-evaluation-/);
+		expect(csv.content).toContain(`"'=unsafe ""cell"", example"`);
+		expect(csv.content.split('\r\n')[0]).toContain('runId,caseId,nickname,status');
+		expect(csv.content.split('\r\n')[0]).not.toMatch(/term|context|language|datasetType/);
 		expect(JSON.parse(formatLabExport(run, [result], 'json').content).results).toEqual([result]);
-		expect(JSON.parse(formatLabExport(run, [result], 'jsonl').content).testCase.term).toBe(item.term);
+		expect(JSON.parse(formatLabExport(run, [result], 'jsonl').content).testCase.nickname).toBe(
+			result.testCase.nickname,
+		);
 	});
 });

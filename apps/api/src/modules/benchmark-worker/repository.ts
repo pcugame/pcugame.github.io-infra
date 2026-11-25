@@ -1,4 +1,4 @@
-import { LAB_CASE_ATTEMPT_LIMIT, LAB_DIRECT_VERSION } from '@pcu/contracts';
+import { LAB_CASE_ATTEMPT_LIMIT, LAB_NICKNAME_PROTOCOL, LAB_RESEARCH_PROFILE, labNicknameInput } from '@pcu/contracts';
 import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import type { Attempt, WorkItem } from './evaluate.js';
@@ -28,9 +28,17 @@ export async function claimCase(db: PrismaClient, concurrency: number): Promise<
 			WHERE status='RUNNING' AND "leaseUntil" > clock_timestamp() AT TIME ZONE 'UTC'`;
 			if (Number(capacity?.active) >= concurrency) return null;
 			const [run] = await tx.$queryRaw<
-				({ id: string } & Omit<WorkItem, 'testCase'>)[]
+				{
+					id: string;
+					model: string;
+					provider: string;
+					temperature: number;
+					maxTokens: number;
+					searchMode: string;
+					evaluationProtocol: string;
+				}[]
 			>`SELECT id, model, provider, temperature,
-			"maxTokens", "searchMode", "systemPrompt" FROM "LabRun" r
+			"maxTokens", "searchMode", "evaluationProtocol" FROM "LabRun" r
 			WHERE status IN ('QUEUED','RUNNING') AND EXISTS
 			(SELECT 1 FROM "LabResult" e WHERE e."runId"=r.id AND (e.status='PENDING'
 				OR (e.status='RUNNING' AND e."leaseUntil" <= clock_timestamp() AT TIME ZONE 'UTC')))
@@ -65,14 +73,21 @@ export async function claimCase(db: PrismaClient, concurrency: number): Promise<
 			WHERE "runId"=${run.id} AND "caseId"=${result.caseId}`;
 			await tx.$executeRaw`UPDATE "LabRun" SET status='RUNNING',"startedAt"=COALESCE("startedAt",clock_timestamp() AT TIME ZONE 'UTC')
 			WHERE id=${run.id} AND status='QUEUED'`;
-			const { caseId: id, dataset, ...fields } = await tx.labTestCase.findUniqueOrThrow({
+			const { caseId: id, nickname } = await tx.labTestCase.findUniqueOrThrow({
 				where: { datasetId_caseId: { datasetId: result.datasetId, caseId: result.caseId } },
-				select: { caseId: true, term: true, language: true, context: true, dataset: { select: { version: true } } },
+				select: { caseId: true, nickname: true },
 			});
-			return {
-				runId: run.id, caseId: id, token,
-				item: { ...run, directNickname: dataset.version === LAB_DIRECT_VERSION, testCase: { id, ...fields } },
+			const settings = {
+				model: run.model,
+				provider: run.provider,
+				temperature: run.temperature,
+				maxTokens: run.maxTokens,
+				searchMode: run.searchMode,
 			};
+			const item: WorkItem = { ...settings, evaluationProtocol: run.evaluationProtocol, input: labNicknameInput(nickname) };
+			if (![LAB_NICKNAME_PROTOCOL, LAB_RESEARCH_PROFILE].includes(run.evaluationProtocol))
+				throw new Error('Unsupported nickname evaluation protocol');
+			return { runId: run.id, caseId: id, token, item };
 		},
 		{ isolationLevel: 'ReadCommitted' },
 	);
@@ -104,7 +119,14 @@ export async function finishCase(db: PrismaClient, claim: Claim, attempt: Attemp
 				jsonAttempts: attempt.jsonAttempts,
 				outputFormat: attempt.outputFormat,
 				generationUsage: attempt.generationUsage,
+        generationContexts: attempt.generationContexts,
+        searchDurationMs: attempt.searchDurationMs,
+        searchSteps: attempt.searchSteps,
+        generationDurationMs: attempt.generationDurationMs,
+        output: attempt.output,
+        sources: attempt.sources,
 				suppliedSourceIds: attempt.suppliedSourceIds,
+				research: attempt.research,
 				error: attempt.error,
 			});
 			const changed = await tx.$executeRaw`UPDATE "LabResult" SET

@@ -1,9 +1,9 @@
-import '../../styles/features/term-origins.css';
+import '../../styles/features/nickname-evaluation.css';
 import { LAB_PAGE_SIZE } from '@pcu/contracts';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, TextField } from '../../components/ui';
-import { LabError } from '../../features/term-origins/common';
+import { LabError } from '../../features/nickname-evaluation/common';
 import { labApi, type LabBetaUser } from '../../lib/api/lab';
 import { useViewerKey } from '../../lib/query/visibility';
 

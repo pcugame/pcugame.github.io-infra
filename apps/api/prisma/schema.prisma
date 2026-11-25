@@ -191,6 +191,9 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  labHumanReviews LabHumanReview[]
+  labTrainingCandidates LabTrainingCandidate[]
+  labCurationExports LabCurationExport[]
   labDatasets  LabDataset[]
   labRuns      LabRun[]
   labChangesMade LabRoleAudit[] @relation("LabRoleActor")
@@ -1209,7 +1212,8 @@ model LabDataset {
   id        String @id @default(uuid())
   ownerId   Int
   name      String
-  version   String @default("1")
+  version   String @default("3")
+  schemaVersion String @default("3")
   hash      String
   count     Int
   createdAt DateTime @default(now())
@@ -1225,15 +1229,16 @@ model LabTestCase {
   datasetId String
   caseId    String
   ordinal   Int
-  term      String
-  context   String
-  language  String
+  nickname  String
   body      Json
+  split     String?
+  familyId  String?
   dataset   LabDataset @relation(fields: [datasetId], references: [id])
   results   LabResult[]
 
   @@id([datasetId, caseId])
   @@unique([datasetId, ordinal])
+  @@index([datasetId, split, ordinal])
 }
 
 model LabRun {
@@ -1241,6 +1246,10 @@ model LabRun {
   ownerId      Int
   datasetId    String
   datasetHash  String
+  schemaVersion String @default("3")
+  evaluationProtocol String @default("nickname-risk-v1")
+  finalTest Boolean @default(false)
+  split        String?
   systemPrompt String
   promptHash   String
   model        String
@@ -1256,6 +1265,7 @@ model LabRun {
   owner        User @relation(fields: [ownerId], references: [id])
   dataset      LabDataset @relation(fields: [datasetId], references: [id])
   results      LabResult[]
+  curationExports LabCurationExport[]
 
   @@unique([id, datasetId])
   @@index([ownerId, createdAt])
@@ -1284,6 +1294,8 @@ model LabResult {
   run            LabRun @relation(fields: [runId, datasetId], references: [id, datasetId])
   testCase       LabTestCase @relation(fields: [datasetId, caseId], references: [datasetId, caseId])
 
+  reviews        LabHumanReview[]
+
   @@id([runId, caseId])
   @@unique([runId, ordinal])
   @@index([status, leaseUntil])
@@ -1300,4 +1312,55 @@ model LabRoleAudit {
   target     User @relation("LabRoleTarget", fields: [targetId], references: [id])
 
   @@index([targetId, changedAt])
+}
+
+// Human annotations and candidate content are immutable revisions, separate from Worker results.
+model LabHumanReview {
+  id String @id @default(uuid())
+  runId String
+  caseId String
+  revision Int
+  actorId Int
+  createdAt DateTime @default(now())
+  resultHash String
+  resultSnapshot Json
+  body Json
+  result LabResult @relation(fields: [runId, caseId], references: [runId, caseId], onDelete: Restrict)
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  candidates LabTrainingCandidate[]
+  @@unique([runId, caseId, revision])
+}
+
+model LabTrainingCandidate {
+  id String @id @default(uuid())
+  reviewId String
+  actorId Int
+  createdAt DateTime @default(now())
+  contentHash String
+  body Json
+  status String @default("draft")
+  decisions Json @default("[]")
+  review LabHumanReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  @@index([reviewId])
+}
+
+// Shared across dataset versions and owners: the same named expression family has one frozen split.
+model LabFamilySplit {
+  familyId String @id
+  split String
+  createdAt DateTime @default(now())
+}
+
+model LabCurationExport {
+  id String @id @default(uuid())
+  runId String
+  actorId Int
+  createdAt DateTime @default(now())
+  kind String
+  files Json
+  manifest Json
+  run LabRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  @@index([runId, createdAt])
 }

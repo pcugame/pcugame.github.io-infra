@@ -1,0 +1,21 @@
+{
+  "version": "nickname-promotion-v1",
+  "riskThreshold": 50,
+  "minCases": 60,
+  "minNormal": 30,
+  "minPerSlice": 15,
+  "minCitations": 10,
+  "maxFalsePositiveRate": 0.05,
+  "maxFalsePositiveRegression": 0.0,
+  "minRationaleGain": 0.05,
+  "minSearchGain": 0.02,
+  "maxQualityRegression": 0.0,
+  "maxScoreMaeRegression": 2.0,
+  "minCitationSupport": 0.95,
+  "minJsonValidity": 0.99,
+  "minUncertaintyQuality": 0.9,
+  "maxNormalUnresolved": 0.05,
+  "maxTokenRatio": 1.25,
+  "maxLatencyRatio": 1.5,
+  "requireReplay": true
+}

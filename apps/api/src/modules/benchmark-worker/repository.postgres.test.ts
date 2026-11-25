@@ -1,3 +1,4 @@
+import { LAB_NICKNAME_SYSTEM_PROMPT } from '@pcu/contracts';
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createIsolatedMigratedDatabase } from '../../__tests__/helpers/isolated-migrated-database.js';
@@ -30,10 +31,13 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 				caseId: 'en-' + (i + 1),
 				datasetId: dataset.id,
 				ordinal: i,
-				term: 'term',
-				language: 'en',
-				context: 'context',
-				body: {},
+				nickname: '가상닉네임' + i,
+				body: {
+					id: 'en-' + (i + 1),
+					nickname: '가상닉네임' + i,
+					reference: { expectedReason: 'SECRET_REASON', expectedScore: 79 },
+					tags: [],
+				},
 			}));
 			await db.labTestCase.createMany({ data: cases });
 			const run = await db.labRun.create({
@@ -42,7 +46,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 					datasetId: dataset.id,
 					datasetHash: dataset.hash,
 					promptHash: 'hash',
-					systemPrompt: 'Analyze.',
+					systemPrompt: LAB_NICKNAME_SYSTEM_PROMPT,
 					provider: 'ollama',
 					model: 'test',
 					temperature: 0,
@@ -94,7 +98,7 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 				status: 'PENDING', attempts: 0,
 			});
 			const claim = await next();
-			expect(claim.item.testCase.context).toBe('context');
+			expect(claim.item.input).toEqual({ nickname: '가상닉네임0' });
 			await finishCase(db, claim, failure);
 		});
 
@@ -103,6 +107,8 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 			const claims = await Promise.all([claimCase(db, 1), claimCase(db, 1), claimCase(db, 1)]);
 			const old = claims.find((claim): claim is Claim => !!claim && claim !== 'reaped')!;
 			expect(claims.filter(Boolean)).toHaveLength(1);
+			expect(old.item.input).toEqual({ nickname: '가상닉네임0' });
+			expect(JSON.stringify(old.item)).not.toMatch(/SECRET_REASON|expectedScore|reference|caseId|familyId/);
 			expect(await renewLease(db, old)).toBe(true);
 			await expire(old);
 			expect(await renewLease(db, old)).toBe(false);
@@ -134,7 +140,12 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 			expect(await claimCase(db, 1)).toBe('reaped');
 			expect(await claimCase(db, 1)).toBeNull();
 			const result = await db.labResult.findFirstOrThrow({ where: { runId: id } });
-			expect(result).toMatchObject({ status: 'FAILED', attempts: 3, error: 'ATTEMPT_LIMIT', leaseToken: null });
+			expect(result).toMatchObject({
+				status: 'FAILED',
+				attempts: 3,
+				error: 'ATTEMPT_LIMIT',
+				leaseToken: null,
+			});
 			expect((await db.labRun.findUniqueOrThrow({ where: { id } })).status).toBe('COMPLETED');
 		});
 		it('preserves cancellation after a late model response', async () => {
@@ -164,7 +175,8 @@ describe.runIf(process.env.RUN_POSTGRES_INTEGRATION === 'true')(
 			});
 			let aborted = false;
 			vi.stubGlobal('fetch', (url: string, init: RequestInit) => {
-				if (url.endsWith('/api/show')) return Promise.resolve(Response.json({ capabilities: ['completion'] }));
+				if (url.endsWith('/api/show'))
+					return Promise.resolve(Response.json({ capabilities: ['completion'] }));
 				notifyStarted();
 				return new Promise<Response>((_resolve, reject) => {
 					init.signal!.addEventListener(

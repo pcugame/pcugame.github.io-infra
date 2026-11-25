@@ -36,7 +36,7 @@ describe('route guards', () => {
   });
 
   it('requires an authenticated beta tester or administrator for the lab', () => {
-    const props = expectRouteElement<{ children: ReactElement<{allowed: string[]}> }>(topLevelRoute('/lab/term-origins'), RequireAuth);
+    const props = expectRouteElement<{ children: ReactElement<{allowed: string[]}> }>(topLevelRoute('/lab/nickname-evaluation'), RequireAuth);
     expect(props.children.type).toBe(RequireRole);
     expect(props.children.props.allowed).toEqual(['BETA_TESTER', 'ADMIN']);
     const admin = expectRouteElement<{ allowed: string[] }>(adminChildRoute('beta-users'), RequireRole);

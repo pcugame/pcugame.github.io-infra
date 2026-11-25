@@ -1,63 +1,38 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {
 	LAB_ACTIVE_RUN_LIMIT,
 	LAB_CASE_ATTEMPT_LIMIT,
-	LAB_DIRECT_VERSION,
 	LAB_PAGE_SIZE,
 	LabCaseSchema,
 	LabDatasetSchema,
-	LabResultSchema,
 	LabRunSchema,
 	formatLabExport,
-	labCaseFields,
-	parseLabJsonl,
+	parseLabUpload,
+	LAB_DATASET_IDENTITY,
+	LAB_NICKNAME_SYSTEM_PROMPT,
+	LAB_NICKNAME_PROTOCOL,
+  labFamilyKey,
+	type LAB_RESEARCH_PROFILE,
+	LAB_RESEARCH_SYSTEM_PROMPT,
+	type LabUpload,
+	type LabSplitSchema,
 	type LabCreateRun,
-	type LabResult,
-	type UserRole,
 } from '@pcu/contracts';
+import type { z } from 'zod';
 import { Prisma, type PrismaClient, type LabRun } from '../../generated/prisma/client.js';
 import { badRequest, conflict, notFound } from '../../shared/errors.js';
 
-type Actor = { id: number; role: UserRole };
-type Page = { page: number; q: string };
+import { betaRoles, userFields, sha, offset, scope, withCase, matchesCase, resultView, readableRun, readableDataset, type Actor } from './access.js';
+import { createLabHumanRepository, freezeLabFamilies } from './human-repository.js';
+
+type Page = { page: number; q: string; split?: z.infer<typeof LabSplitSchema> };
 type Tx = Prisma.TransactionClient;
-type ResultRow = Prisma.LabResultGetPayload<{ include: { testCase: { select: { body: true } } } }>;
-const withCase = { testCase: { select: { body: true } } } as const;
-const betaRoles = ['USER', 'BETA_TESTER'] as const;
-const userFields = { id: true, email: true, name: true, role: true };
-const sha = (text: string) => createHash('sha256').update(text).digest('hex');
-const offset = (page: number) => (page - 1) * LAB_PAGE_SIZE;
-const scope = (actor: Actor) => (actor.role === 'ADMIN' ? {} : { ownerId: actor.id });
-
-function matchesCase(q: string): Prisma.LabTestCaseWhereInput {
-	const contains = { contains: q, mode: 'insensitive' as const };
-	return q ? { OR: [{ caseId: contains }, { term: contains }, { context: contains }] } : {};
-}
-
-function resultView(row: ResultRow): LabResult {
-	return LabResultSchema.parse({ ...row, testCase: row.testCase.body });
-}
-
-async function readableRun(db: Tx, actor: Actor, id: string) {
-	const run = await db.labRun.findFirst({ where: { id, ...scope(actor) } });
-	if (!run) throw notFound('Run not found');
-	return run;
-}
-
-async function readableDataset(db: Tx, actor: Actor, id: string) {
-	const dataset = await db.labDataset.findFirst({
-		where: { id, ...scope(actor), version: { not: LAB_DIRECT_VERSION } },
-	});
-	if (!dataset) throw notFound('Dataset not found');
-	return dataset;
-}
 
 // Aggregate within PostgreSQL. Progress polling never transfers case bodies or response text.
 async function runViews(db: Tx, runs: LabRun[]) {
 	if (!runs.length) return [];
 	type Counts = {
 		datasetVersion: string;
-		nickname: string | null;
 		runId: string;
 		success: number;
 		failed: number;
@@ -67,23 +42,19 @@ async function runViews(db: Tx, runs: LabRun[]) {
 		meanScore: number | null;
 	};
 	const counts = await db.$queryRaw<Counts[]>`
-    SELECT "runId", d.version AS "datasetVersion",
-      CASE WHEN d.version=${LAB_DIRECT_VERSION} THEN d.name END AS nickname,
-      count(*) FILTER (WHERE status='SUCCEEDED')::int AS success,
+    SELECT "runId", d.version AS "datasetVersion", count(*) FILTER (WHERE status='SUCCEEDED')::int AS success,
       count(*) FILTER (WHERE status='FAILED')::int AS failed,
       count(*) FILTER (WHERE status='CANCELLED')::int AS cancelled,
-      count(output->>'controversyScore') FILTER (WHERE output->>'abstained'='false')::int AS scored,
-      avg((output->>'controversyScore')::float8) FILTER (WHERE output->>'abstained'='false') AS "meanScore",
+      count(output->>'score')::int AS scored, avg((output->>'score')::float8) AS "meanScore",
       count(*) FILTER (WHERE output->>'abstained'='true')::int AS abstained
     FROM "LabResult" e JOIN "LabDataset" d ON e."datasetId" = d.id
-    WHERE "runId" IN (${Prisma.join(runs.map((r) => r.id))}) GROUP BY "runId", d.version, d.name`;
+    WHERE "runId" IN (${Prisma.join(runs.map((r) => r.id))}) GROUP BY "runId", d.version`;
 	const byId = new Map(counts.map((item) => [item.runId, item]));
 	return runs.map((r) => {
 		const totals = byId.get(r.id)!;
 		return LabRunSchema.parse({
 			...r,
 			...totals,
-			nickname: totals.nickname ?? undefined,
 			createdAt: r.createdAt.toISOString(),
 			startedAt: r.startedAt?.toISOString() ?? null,
 			completedAt: r.completedAt?.toISOString() ?? null,
@@ -92,76 +63,52 @@ async function runViews(db: Tx, runs: LabRun[]) {
 	});
 }
 
-async function selectRunCases(tx: Tx, actor: Actor, request: LabCreateRun) {
-	if ('nickname' in request) {
-		const nickname = request.nickname.trim();
-		const hash = sha(JSON.stringify(['direct', nickname]));
-		const existing = await tx.labDataset.findUnique({ where: { ownerId_hash: { ownerId: actor.id, hash } } });
-		// createRun already holds the owner's row lock. The snapshot UUID is also its stable case ID.
-		const id = existing?.id ?? randomUUID();
-		if (!existing) {
-			const body = { id, nickname };
-			await tx.labDataset.create({
-				data: {
-					id, hash, ownerId: actor.id, name: nickname, count: 1, version: LAB_DIRECT_VERSION,
-					cases: { create: { caseId: id, ordinal: 0, ...labCaseFields(body), body } },
-				},
-			});
-		}
-		return { datasetId: id, datasetHash: hash, ids: [id] };
-	}
-	const dataset = await readableDataset(tx, actor, request.datasetId);
-	const cases = await tx.labTestCase.findMany({
-		where: { datasetId: dataset.id, caseId: { in: request.caseIds } },
-		orderBy: { ordinal: 'asc' },
-		select: { caseId: true },
-		take: request.size,
-	});
-	if (cases.length !== request.size) throw badRequest('Invalid case selection');
-	return { datasetId: dataset.id, datasetHash: dataset.hash, ids: request.caseIds ?? cases.map((c) => c.caseId) };
-}
-
 export function createLabRepository(db: PrismaClient) {
 	return {
+		...createLabHumanRepository(db),
 		async datasets(actor: Actor, page: number) {
 			const datasets = await db.labDataset.findMany({
-				where: { ...scope(actor), version: { not: LAB_DIRECT_VERSION } },
+				where: scope(actor),
 				orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
 				skip: offset(page),
 				take: LAB_PAGE_SIZE,
 			});
 			return datasets.map((r) => LabDatasetSchema.parse({ ...r, createdAt: r.createdAt.toISOString() }));
 		},
-		async upload(actor: Actor, name: string, jsonl: string) {
+		async upload(actor: Actor, input: LabUpload) {
 			let cases;
 			try {
-				cases = parseLabJsonl(jsonl);
+				cases = parseLabUpload(input);
 			} catch (e) {
 				throw badRequest(e instanceof Error ? e.message : 'Invalid dataset', 'VALIDATION_ERROR');
 			}
-			const version = 'nickname' in cases[0]! ? '2' : '1';
-			const hash = sha(jsonl);
+			const identity = LAB_DATASET_IDENTITY;
+			const name = input.name;
+			const hash = sha(JSON.stringify({ ...identity, cases }));
 			const rows = cases.map((body, ordinal) => ({
 				caseId: body.id,
 				ordinal,
-				...labCaseFields(body),
+				nickname: body.nickname,
+				split: body.split ?? null,
+				familyId: body.familyId ?? null,
 				body,
 			}));
 			const dataset = await db.$transaction(async (tx) => {
 				const id = randomUUID();
 				const inserted = await tx.labDataset.createMany({
-					data: { id, ownerId: actor.id, name, hash, count: rows.length, version },
+					data: { id, ownerId: actor.id, name, hash, count: rows.length, ...identity },
 					skipDuplicates: true,
 				});
 				if (inserted.count)
 					await tx.labTestCase.createMany({ data: rows.map((row) => ({ ...row, datasetId: id })) });
+				await freezeLabFamilies(tx, cases);
 				return tx.labDataset.findUniqueOrThrow({ where: { ownerId_hash: { ownerId: actor.id, hash } } });
 			});
 			return LabDatasetSchema.parse({ ...dataset, createdAt: dataset.createdAt.toISOString() });
 		},
 		async cases(actor: Actor, datasetId: string, query: Page) {
 			await readableDataset(db, actor, datasetId);
-			const where = { datasetId, ...matchesCase(query.q) };
+			const where = { datasetId, split: query.split, ...matchesCase(query.q) };
 			const [rows, total] = await Promise.all([
 				db.labTestCase.findMany({
 					where,
@@ -174,7 +121,8 @@ export function createLabRepository(db: PrismaClient) {
 			]);
 			return { items: rows.map((r) => LabCaseSchema.parse(r.body)), total };
 		},
-		async createRun(actor: Actor, request: LabCreateRun, provider: string) {
+		async createRun(actor: Actor, request: LabCreateRun, provider: string, profile?: typeof LAB_RESEARCH_PROFILE) {
+			const systemPrompt = profile ? LAB_RESEARCH_SYSTEM_PROMPT : LAB_NICKNAME_SYSTEM_PROMPT;
 			return db.$transaction(async (tx) => {
 				// Serialize the per-owner capacity check with other creates and retries.
 				await tx.$queryRaw`SELECT id FROM users WHERE id=${actor.id} FOR UPDATE`;
@@ -182,16 +130,33 @@ export function createLabRepository(db: PrismaClient) {
 					where: { ownerId: actor.id, status: { in: ['QUEUED', 'RUNNING'] } },
 				});
 				if (active >= LAB_ACTIVE_RUN_LIMIT) throw conflict('Three evaluations are already queued or running');
-				const { datasetId, datasetHash, ids } = await selectRunCases(tx, actor, request);
-				const { systemPrompt, model, searchMode, temperature, maxTokens } = request;
+				const dataset = await readableDataset(tx, actor, request.datasetId);
+				const cases = await tx.labTestCase.findMany({
+					where: { datasetId: dataset.id, split: request.split, caseId: { in: request.caseIds } },
+					orderBy: { ordinal: 'asc' },
+					select: { caseId: true, nickname: true, familyId: true, split: true },
+					take: request.size,
+				});
+				if (cases.length !== request.size) throw badRequest('Invalid case selection');
+        const plan = await freezeLabFamilies(tx, cases.map(c => ({ nickname: c.nickname, familyId: c.familyId ?? undefined, split: (c.split ?? undefined) as 'train' | 'validation' | 'test' | undefined })));
+        if (cases.some(c => c.split === 'test' || (c.familyId && plan[labFamilyKey(c.familyId)] === 'test')) && !request.finalTest)
+          throw badRequest('test 표현군은 튜닝에서 제외됩니다. 설정을 확정하고 최종 평가 사용을 명시하세요.');
+				const { caseIds, ...settings } = request;
 				const run = await tx.labRun.create({
 					data: {
-						datasetId, datasetHash, size: ids.length, ownerId: actor.id, provider,
-						systemPrompt, promptHash: sha(systemPrompt), model, searchMode, temperature, maxTokens,
+						...settings,
+						ownerId: actor.id,
+						provider,
+						systemPrompt,
+						promptHash: sha(systemPrompt),
+						datasetHash: dataset.hash,
+						schemaVersion: dataset.schemaVersion,
+						evaluationProtocol: profile ?? LAB_NICKNAME_PROTOCOL,
 					},
 				});
+				const ids = caseIds ?? cases.map((c) => c.caseId);
 				await tx.labResult.createMany({
-					data: ids.map((caseId, ordinal) => ({ runId: run.id, datasetId, caseId, ordinal })),
+					data: ids.map((caseId, ordinal) => ({ runId: run.id, datasetId: dataset.id, caseId, ordinal })),
 				});
 				return { runId: run.id };
 			});
@@ -237,7 +202,8 @@ export function createLabRepository(db: PrismaClient) {
 		async changeRun(actor: Actor, id: string, action: 'cancel' | 'retry') {
 			return db.$transaction(async (tx) => {
 				const visible = await readableRun(tx, actor, id);
-				if (action === 'retry') await tx.$queryRaw`SELECT id FROM users WHERE id=${visible.ownerId} FOR UPDATE`;
+				if (action === 'retry')
+					await tx.$queryRaw`SELECT id FROM users WHERE id=${visible.ownerId} FOR UPDATE`;
 				await tx.$queryRaw`SELECT id FROM "LabRun" WHERE id=${id} FOR UPDATE`;
 				const run = await readableRun(tx, actor, id);
 				if (action === 'cancel') {
@@ -272,7 +238,10 @@ export function createLabRepository(db: PrismaClient) {
 			return db.$transaction(
 				async (tx) => {
 					const sides = [query.left, query.right];
-					for (const id of sides) await readableRun(tx, actor, id);
+					const left = await readableRun(tx, actor, query.left);
+					const right = await readableRun(tx, actor, query.right);
+					if (left.datasetHash !== right.datasetHash || left.schemaVersion !== right.schemaVersion)
+						throw badRequest('Compare runs from the same dataset snapshot and schema');
 					const keys = await tx.labResult.findMany({
 						where: { runId: { in: sides }, testCase: matchesCase(query.q) },
 						select: { caseId: true },

@@ -8,7 +8,7 @@ import { RequireAuth, RequireRole } from '../features/auth';
 import { lazy, Suspense } from 'react';
 import { LoadingSpinner } from '../components/common';
 
-const TermOriginsPage = lazy(() => import('../pages/TermOriginsPage'));
+const NicknameEvaluationPage = lazy(() => import('../pages/NicknameEvaluationPage'));
 const BetaUsersPage = lazy(() => import('../pages/admin/BetaUsersPage'));
 const VotePage = lazy(() => import('../pages/VotePage'));
 const AdminVotesPage = lazy(() => import('../pages/admin/AdminVotesPage'));
@@ -147,7 +147,7 @@ export const routes: RouteObject[] = [
         { path: '/me/projects/:id/network', element: (<RequireAuth><Lazy><WebglNetworkPage /></Lazy></RequireAuth>) },
         { path: '/me/change-requests/:id', element: (<RequireAuth><Lazy><MyChangeRequestPage /></Lazy></RequireAuth>) },
 
-        { path: '/lab/term-origins', element: <RequireAuth><RequireRole allowed={['BETA_TESTER', 'ADMIN']}><Lazy><TermOriginsPage /></Lazy></RequireRole></RequireAuth> },
+        { path: '/lab/nickname-evaluation', element: <RequireAuth><RequireRole allowed={['BETA_TESTER', 'ADMIN']}><Lazy><NicknameEvaluationPage /></Lazy></RequireRole></RequireAuth> },
 
         // ── Admin ──────────────────────────────────────────
         {

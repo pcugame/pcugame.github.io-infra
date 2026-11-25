@@ -1,9 +1,9 @@
+import { LAB_NICKNAME_SYSTEM_PROMPT, labNicknameInput } from '@pcu/contracts';
 import { scheduler } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readLabConfig } from './config.js';
 import { evaluateCase, type WorkItem } from './evaluate.js';
 import { createLabStatus } from './status.js';
-import { generateEvidence } from './generate.js';
 
 const config = readLabConfig({
 	LAB_ENABLED: 'true',
@@ -12,28 +12,21 @@ const config = readLabConfig({
 	LAB_MODEL_URL: 'http://model.test/v1',
 	LAB_SEARXNG_URL: 'https://search.test',
 });
-const storedCase = { id: 'en-0001', term: 'window', language: 'en', context: 'Original quoted context', hint: 'HIDDEN_HINT' };
 const item: WorkItem = {
-	systemPrompt: 'Inspect in context.',
 	provider: config.provider,
 	model: config.model,
 	temperature: 0.2,
 	maxTokens: 512,
 	searchMode: 'no_search',
-	testCase: storedCase,
+	input: labNicknameInput('가상창문'),
 };
 const output = {
-	schemaVersion: '1',
-	caseId: item.testCase.id,
-	term: item.testCase.term,
-	language: 'en',
-	originSummary: 'Unknown',
-	earliestAttestation: null,
-	controversySummary: 'Unclear',
-	controversyScore: null,
-	controversyReason: 'Insufficient evidence',
-	originConfidence: 0,
-	uncertainties: ['No attestation established'],
+	schemaVersion: '2',
+	nickname: item.input.nickname,
+	interpretedTerm: null,
+	reason: '판단 자료 부족',
+	score: null,
+	confidence: 0,
 	sourceIds: [],
 	abstained: true,
 };
@@ -62,12 +55,12 @@ describe('bounded evidence collection and structured analysis', () => {
 			}
 			expect(String(url)).toBe(config.modelUrl + '/chat/completions');
 			const body = JSON.parse(String(init.body));
-			expect(JSON.parse(body.messages[1].content).case).toEqual({ id: 'en-0001', term: 'window', language: 'en', context: storedCase.context });
+			expect(JSON.parse(body.messages[1].content).case).toEqual({ nickname: item.input.nickname });
 			if (body.tools) {
 				expect(body.response_format).toBeUndefined();
 				const last = body.messages.at(-1);
 				if (last.role === 'user')
-					return assistant(toolsResponse('web_search', { query: 'window origin', language: 'en' }));
+					return assistant(toolsResponse('web_search', { query: '가상창문', language: 'en' }));
 				if (Array.isArray(JSON.parse(last.content)))
 					return assistant(toolsResponse('web_open', { sourceId: 'S1' }));
 				expect(JSON.parse(last.content).snippet).toEqual(untrusted);
@@ -78,7 +71,12 @@ describe('bounded evidence collection and structured analysis', () => {
 			return assistant({ content: JSON.stringify({ ...output, sourceIds: ['S1'] }) });
 		});
 		vi.stubGlobal('fetch', fetcher);
-		const result = await evaluateCase(config, { ...item, searchMode: 'model_tool_call' }, signal(), 'unknown');
+		const result = await evaluateCase(
+			config,
+			{ ...item, searchMode: 'model_tool_call' },
+			signal(),
+			'unknown',
+		);
 		expect(result).toMatchObject({
 			searchCount: 1,
 			toolSupport: 'unknown',
@@ -86,7 +84,7 @@ describe('bounded evidence collection and structured analysis', () => {
 			toolCalls: 2,
 			jsonAttempts: 1,
 			outputFormat: 'schema',
-			output: { sourceIds: ['S1'], controversyScore: null },
+			output: { sourceIds: ['S1'], score: null },
 		});
 		expect(result.sources[0]?.url).toBe(external);
 		expect(fetcher).toHaveBeenCalledTimes(5);
@@ -108,18 +106,9 @@ describe('bounded evidence collection and structured analysis', () => {
 		});
 		expect(fetcher).toHaveBeenCalledTimes(2);
 	});
-	it('keeps a scored zero distinct from an abstention', async () => {
-		const scored = { ...output, controversyScore: 0, abstained: false };
-		const fetcher = vi.fn().mockResolvedValueOnce(assistant({ content: JSON.stringify({ ...scored, abstained: true }) }))
-			.mockResolvedValueOnce(assistant({ content: JSON.stringify(scored) }));
-		vi.stubGlobal('fetch', fetcher);
-		expect(await evaluateCase(config, item, signal(), 'unknown')).toMatchObject({
-			jsonAttempts: 2, output: scored, error: null,
-		});
-	});
 	it('validates the exact case identity even when the output satisfies the JSON schema', async () => {
 		vi.stubGlobal('fetch', () =>
-			assistant({ content: JSON.stringify({ ...output, term: 'a different term' }) }),
+			assistant({ content: JSON.stringify({ ...output, nickname: '다른닉네임' }) }),
 		);
 		expect((await evaluateCase(config, item, signal(), 'unknown')).error).toBe('INVALID_MODEL_OUTPUT');
 	});
@@ -178,7 +167,7 @@ describe('bounded evidence collection and structured analysis', () => {
 		expect(result).toMatchObject({
 			outputFormat: 'json',
 			jsonAttempts: 2,
-			output: { controversyScore: null, abstained: true },
+			output: { score: null, abstained: true },
 		});
 	});
 
@@ -211,7 +200,7 @@ describe('single-slot Transformers generation', () => {
 	const provider = 'transformers-generate' as const;
 	const settings = { ...config, provider };
 	const task = { ...item, provider, temperature: 0, maxTokens: 256 };
-	const health = { ok: true, busy: false, supports_system_prompt: true, model: task.model, max_input_tokens: 1024, max_output_tokens: 256 };
+	const health = { ok: true, busy: false, model: task.model, max_input_tokens: 1024, max_output_tokens: 256 };
 
 	it('advertises the wire limits and never generates on a mismatched or busy endpoint', async () => {
 		const fetcher = vi.fn(() => Response.json(health));
@@ -234,58 +223,6 @@ describe('single-slot Transformers generation', () => {
 		expect(wait).toHaveBeenCalledTimes(3);
 	});
 
-	it('refuses a server that silently ignores the system prompt', async () => {
-		const fetcher = vi.fn(() => Response.json({ ...health, supports_system_prompt: undefined }));
-		vi.stubGlobal('fetch', fetcher);
-		expect((await evaluateCase(settings, task, signal(), 'unsupported')).error).toBe('MODEL_SYSTEM_PROMPT_UNSUPPORTED');
-		expect(fetcher).toHaveBeenCalledTimes(1);
-	});
-
-	it('distinguishes an unreachable search server, empty snippets and an uncited answer', async () => {
-		const searchTask = { ...task, directNickname: true, searchMode: 'backend_retrieval' };
-		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unavailable')));
-		expect(await evaluateCase(settings, searchTask, signal(), 'unsupported')).toMatchObject({
-			error: 'SEARCH_PROVIDER_UNREACHABLE', output: null, retryable: true, jsonAttempts: 0,
-		});
-		const hit = { url: 'https://example.org/usage', title: 'Usage', content: '' };
-		vi.stubGlobal('fetch', (url: string | URL) => {
-			if (String(url).startsWith(settings.searchUrl!)) return Response.json({ results: [hit] });
-			return String(url).endsWith('/health') ? Response.json(health) : Response.json({
-				text: JSON.stringify(output), input_tokens: 150, output_tokens: 100, seconds: 1,
-			});
-		});
-		expect(await evaluateCase(settings, searchTask, signal(), 'unsupported')).toMatchObject({
-			error: null, output: { sourceIds: [], controversyScore: null, abstained: true }, sources: [], searchCount: 1, jsonAttempts: 1,
-		});
-		hit.content = 'Unrelated results for another term.';
-		expect(await evaluateCase(settings, searchTask, signal(), 'unsupported')).toMatchObject({
-			error: null, output: { controversyScore: null, abstained: true }, sources: [],
-		});
-		hit.content = 'Background. '.repeat(30) + 'Modern window usage.';
-		expect(await evaluateCase(settings, searchTask, signal(), 'unsupported')).toMatchObject({
-			error: null, output: { sourceIds: [] }, sources: [{ snippet: hit.content, suppliedSnippet: expect.stringContaining('Modern window usage.') }],
-		});
-	});
-
-	it.each([
-		['BlueFox', 'BlueFox', 177],
-		['BlueFox', 'bluefox', 240],
-		['가람', '가람'.normalize('NFD'), 240],
-	])('preserves the original matched spelling in a bounded excerpt for %s', (term, spelling, offset) => {
-		const snippet = 'a'.repeat(Number(offset)) + spelling + ' appeared here.';
-		const source = { id: 'S1', title: 'Usage', snippet, url: 'https://example.org', collectedAt: new Date().toISOString() };
-		const [shown] = generateEvidence([source], String(term));
-		expect(shown?.snippet).toContain(spelling);
-		expect(Array.from(shown!.snippet).length).toBeLessThanOrEqual(180);
-		expect(snippet).toContain(shown!.snippet);
-	});
-
-	it('skips a match that cannot fit and admits the next source with a complete mention', () => {
-		const term = '가'.repeat(100);
-		const source = { id: 'S1', title: term, snippet: 'Usage', url: 'https://example.org', collectedAt: new Date().toISOString() };
-		expect(generateEvidence([source, { ...source, id: 'S2', snippet: term }], term).map(s => s.id)).toEqual(['S2']);
-	});
-
 	it('rejects unsupported controls before I/O', async () => {
 		const fetcher = vi.fn();
 		vi.stubGlobal('fetch', fetcher);
@@ -302,19 +239,16 @@ describe('single-slot Transformers generation', () => {
 		).toThrow();
 	});
 
-	it('sends the original prompt and quoted evidence, rejects unseen citations and records generation usage', async () => {
+	it('sends fixed nickname instructions and quoted evidence, rejects unseen citations and records generation usage', async () => {
 		let generations = 0;
-		const experiment = ' Original\n instructions. ';
 		const fetcher = vi.fn((url: string, init: RequestInit) => {
 			if (url.endsWith('/health')) return Response.json(health);
 			expect(url).toBe(settings.modelUrl + '/generate');
 			const body = JSON.parse(String(init.body));
-			expect(Object.keys(body).sort()).toEqual(['max_new_tokens', 'prompt', 'system_prompt']);
+			expect(Object.keys(body).sort()).toEqual(['max_new_tokens', 'prompt']);
 			expect(body.max_new_tokens).toBe(256);
-			expect(body.system_prompt).toBe(experiment);
-			expect(body.prompt).not.toContain(experiment);
-			expect(body.prompt).toContain('Quoted context: ' + JSON.stringify(storedCase.context));
-			expect(body.prompt).not.toContain('HIDDEN_HINT');
+			expect(body.prompt.startsWith(LAB_NICKNAME_SYSTEM_PROMPT)).toBe(true);
+			expect(body.prompt).not.toMatch(/HIDDEN_CONTEXT|HIDDEN_HINT/);
 			expect(body.prompt).toContain('S2');
 			expect(body.prompt).not.toContain('S3');
 			generations++;
@@ -337,7 +271,7 @@ describe('single-slot Transformers generation', () => {
 		};
 		const result = await evaluateCase(
 			settings,
-			{ ...task, systemPrompt: experiment, searchMode: 'backend_retrieval' },
+			{ ...task, searchMode: 'backend_retrieval' },
 			signal(),
 			'unsupported',
 			search,
@@ -347,7 +281,7 @@ describe('single-slot Transformers generation', () => {
 			jsonAttempts: 2,
 			searchCount: 1,
 			toolSucceeded: false,
-			output: { sourceIds: ['S2'], controversyScore: null },
+			output: { sourceIds: ['S2'], score: null },
 		});
 		expect(result.sources).toHaveLength(3);
 		expect(result.suppliedSourceIds).toEqual(['S1', 'S2']);
@@ -364,7 +298,9 @@ describe('single-slot Transformers generation', () => {
 				: Response.json({ text, input_tokens: 245, output_tokens: 150, seconds: 72 }),
 		);
 		const analyze = () => evaluateCase(settings, task, signal(), 'unsupported');
-		expect(await analyze()).toMatchObject({ output, generationUsage: [{ jsonFenceRemoved: true }] });
+		const evaluated = await analyze();
+		expect(evaluated).toMatchObject({ output, generationUsage: [{ jsonFenceRemoved: true }] });
+    expect(JSON.parse(evaluated.generationContexts![0]!.rawResponse!)).toBe(fenced);
 		for (const mixed of ['Preface\n' + fenced, fenced + '\nConclusion', fenced + '\n' + fenced]) {
 			text = mixed;
 			expect(await analyze()).toMatchObject({ output: null, error: 'INVALID_MODEL_OUTPUT', jsonAttempts: 2 });

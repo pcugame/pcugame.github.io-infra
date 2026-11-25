@@ -61,7 +61,7 @@ export default function MePage() {
         내 작품 관리
       </Link>
 
-      {canUseLab(user.role) && <Link to="/lab/term-origins" className="btn btn--secondary">어구 평가 실험실</Link>}
+      {canUseLab(user.role) && <Link to="/lab/nickname-evaluation" className="btn btn--secondary">닉네임 평가 실험실</Link>}
 
       {/* Logout */}
       <button

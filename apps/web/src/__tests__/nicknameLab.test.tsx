@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, expect, it, vi } from 'vitest';
-import { RunEditor } from '../features/term-origins/RunEditor';
+import { RunEditor } from '../features/nickname-evaluation/RunEditor';
 import { labApi } from '../lib/api/lab';
 
 vi.mock('../lib/query/visibility', () => ({ useViewerKey: () => (key: unknown) => key }));
@@ -10,7 +10,10 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 it('retains retrieval on search failure until the user explicitly chooses a model-only run', async () => {
   const create = vi.spyOn(labApi, 'create').mockResolvedValue({ runId: 'run' });
-  const datasets = vi.spyOn(labApi, 'datasets').mockResolvedValue([]);
+  vi.spyOn(labApi, 'datasets').mockResolvedValue([{
+    id: 'dataset', name: 'fixture', hash: 'a'.repeat(64), count: 1, version: '3', schemaVersion: '3', createdAt: '2026-11-25T00:00:00Z',
+  }]);
+  vi.spyOn(labApi, 'cases').mockResolvedValue({ items: [], total: 1 });
   const onCreated = vi.fn();
   render(<QueryClientProvider client={new QueryClient()}>
     <RunEditor status={{
@@ -18,12 +21,13 @@ it('retains retrieval on search failure until the user explicitly chooses a mode
       searchStatus: 'unavailable', toolSupport: 'unsupported', mock: false,
     }} onCreated={onCreated} />
   </QueryClientProvider>);
-  fireEvent.change(screen.getByLabelText('닉네임'), { target: { value: '계집' } });
-  const button = screen.getByRole<HTMLButtonElement>('button', { name: '검색 후 평가' });
+  const button = screen.getByRole<HTMLButtonElement>('button', { name: '1개 평가 실행' });
+  await waitFor(() => expect(button.disabled).toBe(false));
+  fireEvent.change(screen.getByLabelText('검색 모드'), { target: { value: 'backend_retrieval' } });
   expect(button.disabled).toBe(true);
-  expect(datasets).not.toHaveBeenCalled();
+  expect(create).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('검색 모드'), { target: { value: 'no_search' } });
-  fireEvent.click(screen.getByRole('button', { name: '검색 없이 평가' }));
+  fireEvent.click(button);
   await waitFor(() => expect(onCreated).toHaveBeenCalledWith('run'));
-  expect(create).toHaveBeenCalledWith(expect.objectContaining({ nickname: '계집', searchMode: 'no_search' }));
+  expect(create).toHaveBeenCalledWith(expect.objectContaining({ datasetId: 'dataset', searchMode: 'no_search' }));
 });

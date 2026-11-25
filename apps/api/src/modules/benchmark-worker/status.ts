@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LAB_RESEARCH_LIMITS, LAB_RESEARCH_PROFILE } from '@pcu/contracts';
 import { generateLimits, type LabConfig } from './config.js';
 import { jsonHeaders, LabFailure, requestJson } from './http.js';
 
@@ -9,30 +10,45 @@ export async function readGenerateHealth(config: LabConfig, signal: AbortSignal)
 	const raw = await requestJson(
 		`${config.modelUrl}/health`,
 		{ headers: jsonHeaders(config.apiKey), signal },
-		8192,
+		32768,
 	);
-	return parseGenerateHealth(config.model, raw);
+	return parseGenerateHealth(config.model, raw, config.generateProfile);
 }
 
-export function parseGenerateHealth(model: string, raw: unknown) {
+export function parseGenerateHealth(model: string, raw: unknown, generateProfile?: string) {
 	const health = z
 		.object({
 			ok: z.literal(true),
 			model: z.literal(model),
 			busy: z.boolean(),
-			supports_system_prompt: z.boolean().optional(),
 			max_input_tokens: z.number().int().min(generateLimits.maxInputTokens),
 			max_output_tokens: z.number().int().min(generateLimits.maxOutputTokens),
 		})
 		.safeParse(raw);
 	if (!health.success) throw new LabFailure('MODEL_HEALTH_MISMATCH');
-	if (!health.data.supports_system_prompt) throw new LabFailure('MODEL_SYSTEM_PROMPT_UNSUPPORTED');
-	return health.data;
+	if (generateProfile) {
+		const research = z.object({
+			profile: z.literal(LAB_RESEARCH_PROFILE), supports_json_schema: z.literal(true),
+			max_input_tokens: z.literal(LAB_RESEARCH_LIMITS.maxInputTokens),
+			max_output_tokens: z.literal(LAB_RESEARCH_LIMITS.maxOutputTokens),
+			identity: z.object({
+				weights_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+				chat_template_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+				chat_template: z.string().min(1).max(16000), engine_version: z.string().max(1000),
+				context_tokens: z.literal(LAB_RESEARCH_LIMITS.contextTokens),
+				kv_cache: z.literal('f16'), gpu_layers: z.number().int(), seed: z.literal(42),
+				structured_output_transport: z.literal('rendered-completion-json-schema'),
+			}),
+		}).safeParse(raw);
+		if (!research.success) throw new LabFailure('RESEARCH_HEALTH_MISMATCH');
+		return { ...health.data, ...research.data };
+	}
+	return { ...health.data, identity: undefined };
 }
 
 async function modelStatus(
 	config: LabConfig,
-): Promise<{ modelStatus: Availability; toolSupport: ToolSupport; systemPromptSupported?: boolean }> {
+): Promise<{ modelStatus: Availability; toolSupport: ToolSupport }> {
 	const unknown: { modelStatus: Availability; toolSupport: ToolSupport } = {
 		modelStatus: 'unavailable',
 		toolSupport: config.provider === 'transformers-generate' ? 'unsupported' : 'unknown',
@@ -42,7 +58,7 @@ async function modelStatus(
 	try {
 		if (config.provider === 'transformers-generate') {
 			await readGenerateHealth(config, options.signal);
-			return { modelStatus: 'available', toolSupport: 'unsupported', systemPromptSupported: true };
+			return { modelStatus: 'available', toolSupport: 'unsupported' };
 		}
 		if (config.provider === 'ollama') {
 			const raw = await requestJson(
@@ -66,9 +82,7 @@ async function modelStatus(
 			modelStatus: models.data.some(({ id }) => id === config.model) ? 'available' : 'unavailable',
 			toolSupport: 'unknown',
 		};
-	} catch (error) {
-		if (error instanceof LabFailure && error.code === 'MODEL_SYSTEM_PROMPT_UNSUPPORTED')
-			return { ...unknown, systemPromptSupported: false };
+	} catch {
 		return unknown;
 	}
 }
@@ -98,7 +112,8 @@ export function createLabStatus(config: LabConfig) {
 			provider: config.provider,
 			model: config.model,
 			mock: false as const,
-			...(config.provider === 'transformers-generate' ? { generationLimits: generateLimits } : {}),
+			agenticRetrieval: !!config.generateProfile,
+			...(config.provider === 'transformers-generate' ? { generationLimits: config.generateProfile ? LAB_RESEARCH_LIMITS : generateLimits } : {}),
 		};
 		if (!config.enabled)
 			return {
