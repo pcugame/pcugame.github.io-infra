@@ -23,7 +23,7 @@ try {
   await page.getByText('3개 케이스를 검증해 등록했습니다.').waitFor();
   await label('실험 크기').selectOption('all');
   await label('검색 모드').selectOption('no_search');
-  await label('설정을 확정한 최종 평가이며 test 결과를 반복 튜닝에 사용하지 않습니다.').check();
+  await label('설정을 확정하고 최종 평가로 실행').check();
   await button('3개 평가 실행').click();
   await page.getByText('완료 · 3 / 3개 처리').waitFor();
   const review = page.getByRole('region', { name: '사람 검수' });
