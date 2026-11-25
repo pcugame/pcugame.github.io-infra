@@ -1,0 +1,4 @@
+*
+!Dockerfile.rocm
+!requirements.txt
+!requirements.lock

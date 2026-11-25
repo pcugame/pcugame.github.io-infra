@@ -39,8 +39,26 @@ export type ResearchTrace = {
 const quoted = (value: unknown) => JSON.stringify(value).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
 const failureCode = (error: unknown) => error instanceof LabFailure ? error.code : 'RESEARCH_REQUEST_FAILED';
 
+// The offline experiment runner supplies a local Transformers transport. HTTP workers
+// retain the existing health/identity checks and never receive training capabilities.
+export interface ResearchTransport {
+	health(signal: AbortSignal): Promise<{ busy: boolean; identity: {
+		weights_sha256: string; chat_template_sha256: string; [key: string]: unknown;
+	} }>;
+	request(path: string, body: object, signal: AbortSignal): Promise<unknown>;
+}
+
+export function researchPrompt(nickname: string, hypotheses: LabResearchAction['hypotheses'],
+	searchOutcomes: { query: string; sourceIds: string[]; error?: string }[], searchesRemaining: number,
+	sources: ShownSource[]) {
+	return quoted({ case: labNicknameInput(nickname), normalizationHypothesis: nickname.normalize('NFKC'),
+		hypotheses, searchOutcomes, searchesRemaining, sources,
+		allowedSourceIds: sources.map(s => s.id), originalPagesFetched: false });
+}
+
 export async function evaluateResearch(
 	config: LabConfig, item: WorkItem, parentSignal: AbortSignal, toolSupport: ToolSupport, search: SearchProvider,
+	transport?: ResearchTransport,
 ): Promise<Attempt> {
 	const start = performance.now();
 	const deadline = AbortSignal.timeout(limits.timeoutMs);
@@ -67,9 +85,11 @@ export async function evaluateResearch(
 
 	async function provider(path: string, body: object) {
 		signal.throwIfAborted();
+		const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(path === '/tokenize' ? 5000 : 92_000)]);
+		if (transport) return transport.request(path, { ...body, ...pinnedIdentity }, requestSignal);
 		return requestJson(config.modelUrl + path, {
 			method: 'POST', headers: jsonHeaders(config.apiKey), body: JSON.stringify({ ...body, ...pinnedIdentity }),
-			signal: AbortSignal.any([signal, AbortSignal.timeout(path === '/tokenize' ? 5000 : 92_000)]),
+			signal: requestSignal,
 		}, 128_000);
 	}
 	async function generate(kind: 'action' | 'answer', repair = false) {
@@ -93,9 +113,7 @@ export async function evaluateResearch(
 		const inputAllowance = Math.min(limits.maxInputTokens, limits.totalInputTokens - trace.inputTokens);
 		if (inputAllowance <= 0) throw new LabFailure('TOTAL_INPUT_TOKEN_LIMIT');
 		for (let compression = 0; compression < 7; compression++) {
-			prompt = quoted({ case: modelCase, normalizationHypothesis: modelCase.nickname.normalize('NFKC'),
-				hypotheses, searchOutcomes: outcomes, searchesRemaining: limits.maxSearches - attempt.searchCount,
-				sources: shown, allowedSourceIds: shown.map(s => s.id), originalPagesFetched: false });
+			prompt = researchPrompt(modelCase.nickname, hypotheses, outcomes, limits.maxSearches - attempt.searchCount, shown);
 			const raw = await provider('/tokenize', { profile: LAB_RESEARCH_PROFILE, prompt, system_prompt: systemPrompt });
 			const count = z.object({ input_tokens: z.number().int().positive() }).safeParse(raw);
 			if (!count.success) throw new LabFailure('MODEL_INVALID_TOKEN_COUNT');
@@ -184,7 +202,8 @@ export async function evaluateResearch(
 			throw new LabFailure('RUN_PROVIDER_CONFIGURATION_CHANGED');
 		const problem = invalidGenerateSetting(item, config.generateProfile);
 		if (problem) throw new LabFailure(problem);
-		const health = await readGenerateHealth(config, AbortSignal.any([signal, AbortSignal.timeout(5000)]));
+		const healthSignal = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
+		const health = transport ? await transport.health(healthSignal) : await readGenerateHealth(config, healthSignal);
 		if (!health.identity) throw new LabFailure('RESEARCH_HEALTH_MISMATCH');
 		trace.identity = health.identity;
 		pinnedIdentity = { weights_sha256: health.identity.weights_sha256, chat_template_sha256: health.identity.chat_template_sha256 };

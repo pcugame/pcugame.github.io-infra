@@ -2,6 +2,8 @@
 
 Lab은 사람이 제공한 닉네임·기대 판단 근거·위험 점수로 모델의 닉네임 평가 결과를 검토한다. 모델 입력에는 닉네임만 포함하며 사람이 제공한 근거와 점수는 전달하지 않는다.
 
+Human Evaluation 이후의 승인 자료 변환, 로컬 R9700 LoRA 학습, A–D replay/live 비교와 승격 검증은 [닉네임 LoRA 실험](../../experiments/nickname-lora/README.md)에서 수행한다. 운영 모델 교체와 배포는 별도 절차이다.
+
 ## 데이터셋 양식
 
 [JSONL 기본 양식](templates/nickname-research.jsonl)과 [CSV 기본 양식](templates/nickname-research.csv)은 형식 설명용 가상 사례 한 건이다. 1~10,000건, 최대 4 MiB를 지원하며 언어·범주별 고정 분포를 요구하지 않는다. 필수 필드, split·표현군, 모델 입력과 내보내기 계약은 [Lab 운영 문서](../../docs/operations/nickname-evaluation-lab.md#데이터셋과-실행-계약)에 명시한다.

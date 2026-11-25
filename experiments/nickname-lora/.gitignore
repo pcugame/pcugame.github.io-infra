@@ -1,0 +1,13 @@
+artifacts/
+data/
+runs/
+registry/
+.venv/
+__pycache__/
+*.pyc
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+.env*

@@ -1,0 +1,26 @@
+FROM python:3.12-slim@sha256:e5c9fa26ffb76e11e0f054f30dc2523a2f9693f0c36c0cf1e39b27e152d899fc
+ENV PIP_NO_CACHE_DIR=1 PIP_DEFAULT_TIMEOUT=180 PYTHONUNBUFFERED=1 HF_HOME=/work/artifacts/huggingface
+RUN apt-get update && apt-get install -y --no-install-recommends libnuma1 libgomp1 && rm -rf /var/lib/apt/lists/*
+# AMD's release wheels, including gfx1201. No CUDA wheel or bitsandbytes fallback.
+RUN pip install 'https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2/torch-2.9.1%2Brocm7.2.0.lw.git7e1940d4-cp312-cp312-linux_x86_64.whl' \
+    'https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2/triton-3.5.1%2Brocm7.2.0.gita272dfa8-cp312-cp312-linux_x86_64.whl'
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt && pip check && pip freeze > /opt/nickname-python-lock.txt
+COPY requirements.lock /tmp/requirements.lock
+RUN pip install -r /tmp/requirements.lock && pip check && pip freeze > /opt/nickname-python-lock.txt
+# AMD's lightweight wheel needs the matching user-space ROCm libraries. Install
+# userspace only inside this image; never install a host kernel/DKMS driver.
+RUN python -c "import pathlib,urllib.request; pathlib.Path('/etc/apt/keyrings').mkdir(exist_ok=True); urllib.request.urlretrieve('https://repo.radeon.com/rocm/rocm.gpg.key','/etc/apt/keyrings/rocm.asc'); pathlib.Path('/etc/apt/sources.list.d/rocm.list').write_text('deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.asc] https://repo.radeon.com/rocm/apt/7.2 noble main\\n')" \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      hip-runtime-amd=7.2.26015.70200-43~24.04 \
+      hipblas=3.2.0.70200-43~24.04 hipblaslt=1.2.1.70200-43~24.04 \
+      hipfft=1.0.22.70200-43~24.04 hiprand=3.1.0.70200-43~24.04 \
+      hipsolver=3.2.0.70200-43~24.04 hipsparse=4.2.0.70200-43~24.04 \
+      hipsparselt=0.2.6.70200-43~24.04 miopen-hip=3.5.1.70200-43~24.04 \
+      rccl=2.27.7.70200-43~24.04 roctracer=4.1.70200.70200-43~24.04 \
+    && rm -rf /var/lib/apt/lists/*
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64
+RUN python -c "import torch; assert torch.version.hip" \
+    && dpkg-query -W > /opt/nickname-system-lock.txt
+WORKDIR /work
+ENTRYPOINT ["python", "lab.py"]
