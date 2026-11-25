@@ -1,0 +1,23 @@
+[Unit]
+Description=Private CPU BERTScore evaluator
+After=network-online.target
+
+[Container]
+# Replace with the verified immutable image ID built from the merged release source.
+Image=sha256:REPLACE_WITH_VERIFIED_IMAGE_ID
+Pull=never
+ContainerName=gp-bertscore
+Pod=graduationproject.pod
+Environment=BERTSCORE_HOST=127.0.0.1
+Volume=gp_bertscore_cache:/cache:U
+NoNewPrivileges=true
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=600
+CPUQuota=400%
+MemoryMax=3G
+
+[Install]
+WantedBy=default.target

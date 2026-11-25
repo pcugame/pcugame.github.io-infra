@@ -213,6 +213,10 @@ npm run worker:benchmark -w apps/api
 
 최초 실행은 모델 다운로드와 로딩 이후 `/health`를 제공한다. cache volume을 재사용하면 다운로드를 생략한다. Worker가 컨테이너에서 실행되면 같은 사설 network에서 접근 가능한 주소를 지정한다. API와 Web에는 평가 서비스 주소를 노출하지 않는다. 서비스 URL을 지정하지 않으면 평가 작업은 대기 상태로 유지한다. 운영 적용은 기존 릴리스 절차에 따라 API·Benchmark Worker·Web과 별도 CPU 서비스를 갱신하고 image digest·health를 확인한다.
 
+운영 Quadlet에서는 [CPU 서비스 예시](../../server/bertscore/gp-bertscore.container.example)의 image를 병합된 release 소스로 빌드·검증한 불변 image ID로 지정하고 `gh-deploy`의 `gp-bertscore.container`로 설치한다. 기존 `graduationproject.pod`의 loopback 8090 포트만 사용하며 외부 포트는 게시하지 않는다. CPU 4개·메모리 3 GiB 한도와 전용 모델 cache volume을 사용한다. 이 서비스는 SearXNG와 같은 별도 평가 의존성이며 일반 release의 API·Worker 이미지 교체 대상에 포함하지 않는다. 서비스 source SHA·image ID·모델 revision과 health를 별도로 기록한다.
+
+`runtime-env/lab.env`에는 선택적 `LAB_BERTSCORE_URL=http://127.0.0.1:8090`만 허용한다. 주소 변경·자격 증명 삽입·다른 Worker로의 전달은 운영 설정 검증에서 거부한다. 새 설정은 CPU 서비스 health 확인 후 일반 release의 drain·activation 구간에 반영하며 API와 Benchmark Worker의 실제 환경을 함께 검사한다. 기존 파일을 백업하고 literal 형식을 유지한다. CPU 서비스가 실패하면 평가 queue는 재시도·실패 상태를 기록하며 생성 결과를 삭제하지 않는다.
+
 ```sh
 python3 -m unittest discover -s server/bertscore -p 'test_*.py'
 # 실제 모델을 사용한 계산 검사: Docker 실행 권한과 최초 다운로드 필요
