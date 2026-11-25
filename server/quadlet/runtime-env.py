@@ -27,7 +27,8 @@ SCOPES = (COMMON_KEYS, API_KEYS, PG_KEYS)
 LAB_PROFILE = dict(LAB_ENABLED='true', LAB_MODEL_PROVIDER='transformers-generate',
     LAB_MODEL='Qwen3-4B-Instruct-2507-Q4_K_M', LAB_MODEL_URL='http://127.0.0.1:18088', LAB_CONCURRENCY='1')
 LAB_SEARCH_URL = 'http://127.0.0.1:18888'
-LAB_OPTIONAL_KEYS = {'LAB_SEARXNG_URL', 'LAB_GENERATE_PROFILE'}
+LAB_BERTSCORE_URL = 'http://127.0.0.1:8090'
+LAB_OPTIONAL_KEYS = {'LAB_SEARXNG_URL', 'LAB_GENERATE_PROFILE', 'LAB_BERTSCORE_URL'}
 LAB_KEYS = {'DATABASE_URL', *LAB_OPTIONAL_KEYS, *LAB_PROFILE}
 
 
@@ -65,6 +66,8 @@ def read_runtime_files(filenames, *, explicit=False):
             expected['LAB_SEARXNG_URL'] = LAB_SEARCH_URL
         if 'LAB_GENERATE_PROFILE' in scopes[3]:
             expected['LAB_GENERATE_PROFILE'] = 'nickname-research-v1'
+        if 'LAB_BERTSCORE_URL' in scopes[3]:
+            expected['LAB_BERTSCORE_URL'] = LAB_BERTSCORE_URL
         if not expected['DATABASE_URL'] or scopes[3] != expected:
             raise ValueError()
     return scopes

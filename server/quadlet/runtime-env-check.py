@@ -40,7 +40,7 @@ WEBGL_EXTERNAL_CONNECTIONS_ENABLED WEBGL_PLAY_ENABLED WEB_PUBLIC_URL
 """.split())
 # No additional direct process.env key reads currently exist in application source.
 APP_PROCESS_ENV_KEYS = set()
-KNOWN = set().union(*RUNTIME['SCOPES'], RESERVED, APP_SCHEMA_KEYS, APP_PROCESS_ENV_KEYS)
+KNOWN = set().union(*RUNTIME['SCOPES'], RUNTIME['LAB_KEYS'], RESERVED, APP_SCHEMA_KEYS, APP_PROCESS_ENV_KEYS)
 ERROR = 'ERROR: invalid runtime files, topology options, or running-container inspect input'
 
 
