@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
-import { LabCurationPolicySchema, LabResultSchema, labBuildCandidate, labDefaultReview } from '@pcu/contracts';
+import { LabCurationPolicySchema, LabResultSchema, labBuildPreference, labTrainingLine, labReviewResult, labDefaultReview } from '@pcu/contracts';
 import { prepare, smokeData, json, lines, validateMessages, sha, save, protocol } from './data.mts';
 import { freeze, replayProvider, queryKey, evaluate } from './evaluation.mts';
 import { metrics, gate, reviewTemplate, select } from './gate.mts';
@@ -15,13 +15,13 @@ async function fixtureExport(directory: string) {
   const examples = lines(await readFile(join(directory, 'smoke/train.jsonl'), 'utf8'));
   const records = [];
   for (let i = 0; i < 3; i++) {
-    const example = structuredClone(examples[i]);
+    const example = structuredClone(examples[i === 0 ? 1 : i]);
     const nickname = `달빛산책연습${i}`;
     for (const m of example.messages) m.content = m.content.replaceAll('달빛산책연습', nickname);
     const { input, value, action } = validateMessages(example.messages);
     const { evidenceChecks, interpretationStatus, ...answer } = value;
     const step = { kind: action ? 'action' : 'answer', prompt: example.messages[1].content,
-      systemPrompt: example.messages[0].content, suppliedSources: input.sources,
+      systemPrompt: example.messages[0].content, suppliedSources: input.sources, rawResponse: JSON.stringify(example.messages[2].content), finishReason: 'stop',
       ...(action ? { action: value } : { answer, evidenceChecks, interpretationStatus }) };
     const result = LabResultSchema.parse({ bertScore: null, caseId: `case-${i}`, testCase: { id: `case-${i}`, nickname, familyId: `family-${i}`,
       split: 'train', tags: ['obfuscation:none'], reference: { expectedReason: 'fixture', expectedScore: 5, sources: [] } },
@@ -29,17 +29,18 @@ async function fixtureExport(directory: string) {
       jsonValid: true, error: null, attempts: 1, toolSucceeded: false, toolSupport: 'unsupported',
       history: [{ event: 'finished', research: { steps: [step] } }] });
     const review = { id: randomUUID(), runId: randomUUID(), caseId: result.caseId, revision: 1, actorId: 1,
-      createdAt: new Date().toISOString(), resultHash: sha(JSON.stringify(result)), body: { ...labDefaultReview(result),
+      createdAt: new Date().toISOString(), resultHash: sha(JSON.stringify(labReviewResult(result))), body: { ...labDefaultReview(result),
+        behavior: i === 1 ? 'negative' as const : 'positive' as const, behaviorReasons: i === 1 ? ['excessive_risk' as const] : [],
         verdict: 'correct' as const, cause: 'none' as const, cohort: i === 2 ? 'ambiguous' as const : 'normal' as const } };
-    const body = labBuildCandidate(result, review.body, { reviewId: review.id, objective: action ? 'A' : i === 1 ? 'B' : 'C', stepIndex: 0 }, 'train');
+    const body = labBuildPreference(result, review.body, 'train', { feedbackPolicy: 'fixture-policy', promptHash: 'a'.repeat(64) });
     const candidate = { id: randomUUID(), reviewId: review.id, runId: review.runId, caseId: result.caseId, actorId: 1,
       createdAt: review.createdAt, contentHash: sha(JSON.stringify(body)), status: 'approved', body,
       decisions: [{ actorId: 1, at: review.createdAt, decision: 'approved', grounded: true, familyVerified: true }], stale: false };
     records.push({ candidate, review, originalResult: result });
   }
-  const text = records.map(r => JSON.stringify({ messages: r.candidate.body.messages })).join('\n') + '\n';
+  const text = records.map(r => JSON.stringify(labTrainingLine(r.candidate as any))).join('\n') + '\n';
   const path = join(directory, 'train.jsonl'); await writeFile(path, text);
-  const provenance = { version: 'human-curation-v1', kind: 'train', id: 'fixture-export', datasetHash: 'fixture-data',
+  const provenance = { version: 'preference-v1', scope: { feedbackPolicy: 'fixture-policy', promptHash: 'a'.repeat(64) }, kind: 'train', id: 'fixture-export', datasetHash: 'fixture-data',
     files: [{ filename: 'train.jsonl', sha256: sha(text) }], policy: LabCurationPolicySchema.parse({}),
     familySplit: { 'family-0': 'train', 'family-1': 'train', 'family-2': 'train' }, records };
   const provenancePath = join(directory, 'provenance.json'); await save(provenancePath, provenance);
@@ -52,10 +53,11 @@ test('approved export preserves exact research input and separates objective met
   await prepare(f.path, f.provenancePath, join(dir, 'prepared'));
   const manifest = await json(join(dir, 'prepared/manifest.json'));
   assert.equal(manifest.smokeOnly, false);
-  assert.deepEqual(manifest.rows.map((r: any) => r.objective), ['A', 'B', 'C']);
-  assert.ok(manifest.rows[1].categories.includes('normal_retention'));
-  assert.ok(manifest.rows[2].categories.includes('abstention'));
-  assert.equal(await readFile(join(dir, 'prepared/train.jsonl'), 'utf8'), f.text);
+  assert.equal(manifest.version, 'nickname-preference-v1');
+  assert.deepEqual(manifest.rows.map((r: any) => r.label), [true, false, true]);
+  assert.equal(manifest.selection.positive, 2);
+  assert.equal(await readFile(join(dir, 'prepared/preference.jsonl'), 'utf8'), f.text);
+  await assert.rejects(readFile(join(dir, 'prepared/train.jsonl')));
   assert.ok(!f.text.includes('expectedReason'));
 });
 
@@ -66,6 +68,8 @@ test('unapproved, stale, cross-split, and modified export data fail closed', asy
     (p: any) => { p.familySplit['family-0'] = 'test'; },
     (p: any) => { p.records[0].review.resultHash = '0'.repeat(64); },
     (p: any) => { p.files[0].sha256 = '0'.repeat(64); },
+    (p: any) => { p.scope.feedbackPolicy = 'other policy'; },
+    (p: any) => { p.version = 'human-curation-v1'; },
   ]) {
     const dir = await mkdtemp(join(tmpdir(), 'nickname-reject-')), f = await fixtureExport(dir);
     mutate(f.provenance); await writeFile(f.provenancePath, JSON.stringify(f.provenance));

@@ -26,7 +26,8 @@ import type { ToolSupport } from './status.js';
 import { evaluateResearch, type ResearchTrace } from './research.js';
 
 export type WorkItem = ChatParameters & { provider: string; searchMode: string; input: LabNicknameInput; evaluationProtocol?: string;
-	systemPrompt?: string; actionPrompt?: string | null; answerPrompt?: string | null };
+	replayIdentity?: { weights_sha256: string; chat_template_sha256: string } | null;
+  systemPrompt?: string; actionPrompt?: string | null; answerPrompt?: string | null };
 export type Attempt = {
 	sources: LabSource[];
 	searchCount: number;
@@ -47,7 +48,7 @@ export type Attempt = {
 	error: string | null;
 	retryable: boolean;
 	research?: ResearchTrace;
-  generationContexts?: { stage: 'action' | 'answer'; messages: Message[]; suppliedSources: LabSource[]; durationMs: number; rawResponse?: string; error?: string }[];
+  generationContexts?: { stage: 'action' | 'answer'; messages: Message[]; suppliedSources: LabSource[]; durationMs: number; rawResponse?: string; rawResponseEncoding?: 'json-string'; rawEnvelope?: string; finishReason?: string; validation?: { valid: boolean; error: string | null }; error?: string }[];
   searchDurationMs?: number;
   searchSteps?: { query: string; language: string; durationMs: number; sources: LabSource[]; error?: string }[];
   generationDurationMs?: number;
@@ -115,18 +116,29 @@ export async function evaluateCase(
 				{ role: 'user' as const, content: messages.filter(m => m.role !== 'system').map(m => m.content).join('\n\n') }]
 			: structuredClone(messages);
     const context: NonNullable<Attempt['generationContexts']>[number] = { stage: mode === 'tools' ? 'action' : 'answer',
-      messages: wireMessages.filter(m => m.role !== 'system' || m.content !== ''), suppliedSources: structuredClone(mode === 'prompt' ? generateEvidence(attempt.sources) : attempt.sources), durationMs: 0 };
+      messages: mode === 'prompt' ? wireMessages : wireMessages.filter(m => m.role !== 'system' || m.content !== ''), suppliedSources: structuredClone(mode === 'prompt' ? generateEvidence(attempt.sources) : attempt.sources), durationMs: 0 };
     (attempt.generationContexts ??= []).push(context);
 		try {
 			if (mode === 'prompt') {
 				const reply = await generateText(config, wireMessages[0]!.content, wireMessages[1]!.content, item.maxTokens, signal);
 				(attempt.generationUsage ??= []).push(reply.usage);
 				context.rawResponse = JSON.stringify(reply.rawContent);
+        context.rawResponseEncoding = 'json-string';
+        context.finishReason = reply.finishReason;
+        if (reply.finishReason === 'length') throw new LabFailure('MODEL_OUTPUT_TRUNCATED');
 				return reply;
 			}
 			const reply = await chat(config, item, context.messages, mode, signal);
-      context.rawResponse = JSON.stringify(reply);
+      context.rawResponse = JSON.stringify(reply.content ?? '');
+      context.rawEnvelope = JSON.stringify(reply);
+      context.rawResponseEncoding = 'json-string';
+      context.finishReason = reply.finishReason;
+      if (reply.finishReason === 'length') throw new LabFailure('MODEL_OUTPUT_TRUNCATED');
       return reply;
+    } catch (error) {
+      context.error = error instanceof LabFailure ? error.code : 'EVALUATION_FAILED';
+      context.validation = { valid: false, error: context.error };
+      throw error;
 		} finally {
 			context.durationMs = Math.round(performance.now() - start);
       attempt.generationDurationMs = (attempt.generationDurationMs ?? 0) + context.durationMs;
@@ -264,9 +276,11 @@ export async function evaluateCase(
 				(!parsed.data.abstained || parsed.data.score === null) &&
 				parsed.data.sourceIds.every((id) => shownSources.some((s) => s.id === id))
 			) {
-				attempt.output = parsed.data;
+				attempt.generationContexts!.at(-1)!.validation = { valid: true, error: null };
+        attempt.output = parsed.data;
 				return attempt;
 			}
+      attempt.generationContexts!.at(-1)!.validation = { valid: false, error: 'INVALID_MODEL_OUTPUT' };
 			messages.push({
 				role: 'user',
 				content:

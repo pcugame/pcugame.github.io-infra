@@ -56,6 +56,7 @@ export function formatLabExport(run: LabRun, results: LabResult[], format: 'json
     'bertScoreLayers', 'bertScoreThreads', 'bertScoreBatchSize', 'bertScoreIdf', 'bertScoreRescaleWithBaseline', 'bertScoreMaxTokens',
     'bertScoreVersion', 'torchVersion', 'transformersVersion', 'tokenizersVersion',
     'runBertScoreMeasured', 'runBertScoreMissing', 'runBertScorePrecision', 'runBertScoreRecall', 'runBertScoreF1',
+    'feedbackPolicy', 'replayOf', 'reviewBehavior', 'reviewBehaviorReasons', 'reviewFeedbackVersion',
     'reviewId', 'reviewRevision', 'reviewValid', 'reviewVerdict', 'reviewErrors', 'reviewCause', 'reviewCohort',
     'reviewRationaleFit', 'reviewInterpretationSuccess', 'reviewBlind', 'reviewNotes', 'reviewActorId', 'reviewCreatedAt',
     'status', 'error', 'jsonValid', 'attempts', 'durationMs', 'searchDurationMs', 'generationDurationMs', 'searchCount', 'toolSupport', 'toolSucceeded'];
@@ -88,6 +89,7 @@ export function formatLabExport(run: LabRun, results: LabResult[], format: 'json
       b?.identity?.layers, b?.identity?.threads, b?.identity?.batchSize, b?.identity?.idf, b?.identity?.rescaleWithBaseline, b?.identity?.maxTokens,
       b?.identity?.versions['bert-score'], b?.identity?.versions.torch, b?.identity?.versions.transformers, b?.identity?.versions.tokenizers,
       metadata.bertScore.measured, metadata.bertScore.missing, metadata.bertScore.precision, metadata.bertScore.recall, metadata.bertScore.f1,
+      run.feedbackPolicy, run.replayOf, review?.behavior, review?.behaviorReasons?.join('\n'), review?.feedbackVersion,
       latest?.id, latest?.revision, latest?.valid, review?.verdict, review?.errors.join('\n'), review?.cause, review?.cohort,
       review?.rationaleFit, review?.interpretationSuccess, review?.blind, review?.notes, latest?.actorId, latest?.createdAt,
       r.status, r.error, r.jsonValid, r.attempts, r.durationMs, duration('search'), duration('generation'), r.searchCount, r.toolSupport, r.toolSucceeded,

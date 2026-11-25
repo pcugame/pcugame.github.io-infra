@@ -14,23 +14,26 @@ describe('persistent mock human review workflow', () => {
     const results = await labApi.results(runId, 1, '', '');
     expect((await labApi.curation(runId)).candidates).toEqual([]);
     const selected: string[] = [];
+    const scope = (await labApi.curation(runId)).scope!;
     for (const result of results.items) {
       const bundle = await labApi.review(runId, result.caseId);
       const review = await labApi.saveReview(runId, result.caseId, { previousReviewId: null, resultHash: bundle.resultHash,
-        body: { ...labDefaultReview(result), verdict: 'correct', cause: 'none', cohort: result.caseId === 'ambiguous' ? 'ambiguous' : 'normal' } });
-      if (result.caseId === 'test') { await expect(labApi.candidate(runId, result.caseId, { reviewId: review.id, objective: 'C' })).rejects.toMatchObject({ status: 400 }); continue; }
-      const candidate = await labApi.candidate(runId, result.caseId, { reviewId: review.id, objective: 'C' });
-      await labApi.decideCandidate(runId, candidate.id, { decision: 'approved', contentHash: candidate.contentHash, grounded: true, familyVerified: true });
+        body: { ...labDefaultReview(result), verdict: result.caseId === 'ambiguous' ? 'incorrect' : 'correct', behavior: result.caseId === 'ambiguous' ? 'negative' : 'positive', behaviorReasons: result.caseId === 'ambiguous' ? ['excessive_risk'] : [] } });
+      if (result.caseId === 'test') { await expect(labApi.approveFeedback(runId, { reviewIds: [review.id], scope })).rejects.toMatchObject({ status: 400 }); continue; }
+      const [candidate] = await labApi.approveFeedback(runId, { reviewIds: [review.id], scope });
       selected.push(candidate.id);
     }
     await forgetMockCacheForTests();
     expect((await labApi.curation(runId)).metrics.reviewed).toBe(3);
-    const file = await labApi.createCurationExport(runId, { kind: 'train', candidateIds: selected, approved: true, policy: LabCurationPolicySchema.parse({}) });
+    const file = await labApi.createCurationExport(runId, { scope, kind: 'train', candidateIds: selected, approved: true, policy: LabCurationPolicySchema.parse({}) });
     expect(file.files[0].content.trim().split('\n')).toHaveLength(2);
     expect(file.manifest.mock).toBe(true);
+    const lines = file.files[0].content.trim().split('\n').map(line => JSON.parse(line));
+    expect(lines.map(line => line.label)).toEqual([true, false]);
+    expect(lines[0].completion[0].content).toContain('합성 판단');
     await forgetMockCacheForTests();
     expect((await labApi.curationExport(runId, file.id)).files).toEqual(file.files);
-    const test = await labApi.createCurationExport(runId, { kind: 'test', candidateIds: [], approved: true, policy: LabCurationPolicySchema.parse({}) });
+    const test = await labApi.createCurationExport(runId, { scope, kind: 'test', candidateIds: [], approved: true, policy: LabCurationPolicySchema.parse({}) });
     expect(test.files[0].content).toContain('evaluation_only');
     expect(JSON.parse(test.files[0].content).messages).toBeUndefined();
   });

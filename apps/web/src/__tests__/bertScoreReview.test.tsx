@@ -24,7 +24,7 @@ it('keeps an unsaved blind review mounted while BERTScore completes, without lea
   vi.spyOn(labApi, 'run').mockResolvedValue(run);
   const rows = vi.spyOn(labApi, 'results').mockResolvedValue({ items: [item], total: 1 });
   vi.spyOn(labApi, 'review').mockResolvedValue({ resultHash: 'a'.repeat(64), reviews: [], candidates: [], effectiveSplit: null, splitError: null });
-  vi.spyOn(labApi, 'curation').mockResolvedValue({ metrics: labHumanMetrics([item], new Map()), candidates: [], exports: [] });
+  vi.spyOn(labApi, 'curation').mockResolvedValue({ scope: null, feedback: [], metrics: labHumanMetrics([item], new Map()), candidates: [], exports: [] });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(<QueryClientProvider client={client}><RunResults id={id} /></QueryClientProvider>);
   const notes = await screen.findByLabelText<HTMLTextAreaElement>('검수 메모');

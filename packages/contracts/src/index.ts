@@ -158,3 +158,5 @@ export * from './lab-human.js';
 export * from './lab-curation.js';
 export * from './lab-bertscore.js';
 export * from './lab-export.js';
+
+export * from './lab-preference.js';

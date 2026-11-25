@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   labReviewResult, LabCandidateSchema, LabCurationExportSchema, LabHumanReviewSchema, LabReviewBodySchema,
-  labBuildCandidate, labEvaluationLine, labFamilyKey, labFamilyPlan, labHumanMetrics, labTrainingLine, labValidateSelection,
-  type LabCandidate, type LabCandidateDecision, type LabCreateCandidate, type LabCurationExportRequest,
+  labBuildPreference, labPreferenceScope, labAssertPreferenceScope, labEvaluationLine, labFamilyKey, labFamilyPlan, labHumanMetrics, labTrainingLine, labValidateSelection,
+  type LabCandidate, type LabApproveFeedback, type LabCurationExportRequest,
   type LabReviewBody, type LabSaveReview, type LabCase,
 } from '@pcu/contracts';
 import type { PrismaClient, Prisma, LabHumanReview as ReviewRow, LabTrainingCandidate as CandidateRow } from '../../generated/prisma/client.js';
@@ -108,45 +108,58 @@ export function createLabHumanRepository(db: PrismaClient) {
           revision: (previous?.revision ?? 0) + 1, resultHash: input.resultHash, resultSnapshot: json(result), body: json(input.body) } }));
       });
     },
-    async createCandidate(actor: Actor, runId: string, caseId: string, input: LabCreateCandidate) {
+    async approveFeedback(actor: Actor, runId: string, input: LabApproveFeedback) {
       return db.$transaction(async tx => {
         await lockRun(tx, actor, runId);
-        const review = await currentReview(tx, runId, caseId);
-        const result = await getResult(tx, runId, caseId);
-        const resultHash = sha(JSON.stringify(labReviewResult(result)));
-        if (!review || review.id !== input.reviewId || review.resultHash !== resultHash) throw conflict('최신 결과에 대한 검수를 먼저 저장하세요.');
-        const plan = await freezeLabFamilies(tx, [result.testCase]);
-        const family = result.testCase.familyId;
-        if (!family) throw badRequest('표현군 familyId가 있는 데이터셋을 등록하세요.');
-        const body = guarded(() => labBuildCandidate(result, LabReviewBodySchema.parse(review.body), input, plan[labFamilyKey(family)]!));
-        const row = await tx.labTrainingCandidate.create({ data: { reviewId: review.id, actorId: actor.id, contentHash: sha(JSON.stringify(body)), body: json(body) } });
-        return viewCandidate(row, review, review, resultHash);
-      });
-    },
-    async decideCandidate(actor: Actor, runId: string, candidateId: string, input: LabCandidateDecision) {
-      return db.$transaction(async tx => {
-        await lockRun(tx, actor, runId);
-        const row = await tx.labTrainingCandidate.findFirst({ where: { id: candidateId, review: { runId } }, include: { review: true } });
-        if (!row) throw notFound('Candidate not found');
-        const review = await currentReview(tx, runId, row.review.caseId);
-        const hash = sha(JSON.stringify(labReviewResult(await getResult(tx, runId, row.review.caseId))));
-        const candidate = viewCandidate(row, row.review, review, hash);
-        if (input.contentHash !== candidate.contentHash || (input.decision === 'approved' && candidate.stale)) throw conflict('후보 또는 검수 내용이 변경되었습니다.');
-        const decisions = [...candidate.decisions, { actorId: actor.id, at: new Date().toISOString(), ...input }].map(({ actorId, at, decision, grounded, familyVerified }) => ({ actorId, at, decision, grounded, familyVerified }));
-        const updated = await tx.labTrainingCandidate.update({ where: { id: candidateId }, data: { status: input.decision, decisions: json(decisions) } });
-        return viewCandidate(updated, row.review, review, hash);
-      });
+        const s = await state(tx, actor, runId);
+        guarded(() => labAssertPreferenceScope(labPreferenceScope(s.run), input.scope));
+        const reviews = input.reviewIds.map(id => [...s.latest.values()].find(r => r.id === id));
+        if (reviews.some(r => !r || !s.valid.has(r.caseId))) throw conflict('검수 또는 결과가 변경되었습니다. 다시 선택하세요.');
+        const results = reviews.map(r => s.results.find(v => v.caseId === r!.caseId)!);
+        const plan = await freezeLabFamilies(tx, results.map(r => r.testCase));
+        const approved: LabCandidate[] = [];
+        for (let i = 0; i < reviews.length; i++) {
+          const review = reviews[i]!;
+          const result = results[i]!;
+          const body = guarded(() => labBuildPreference(result, LabReviewBodySchema.parse(review.body),
+            plan[labFamilyKey(result.testCase.familyId ?? '')] ?? null, input.scope));
+          const existing = s.candidates.find(c => c.reviewId === review.id && c.body.version === 'preference-v1' && c.status === 'approved' && !c.stale);
+          if (existing) { approved.push(existing); continue; }
+          const row = await tx.labTrainingCandidate.create({ data: { reviewId: review.id, actorId: actor.id,
+            contentHash: sha(JSON.stringify(body)), body: json(body), status: 'approved',
+            decisions: json([{ actorId: actor.id, at: new Date().toISOString(), decision: 'approved', grounded: true, familyVerified: true }]) } });
+          approved.push(viewCandidate(row, review, review, s.hashes.get(review.caseId)!));
+        }
+        return approved;
+      }, { timeout: 30_000 });
     },
     async curationOverview(actor: Actor, runId: string, threshold: number) {
       return db.$transaction(async tx => {
         const s = await state(tx, actor, runId);
-        return { metrics: labHumanMetrics(s.results, s.valid, threshold, s.latest.size - s.valid.size), candidates: s.candidates, exports: s.exports };
+        const scope = labPreferenceScope(s.run);
+        let plan: Record<string, 'train' | 'validation' | 'test'> = {};
+        let splitError: string | null = null;
+        try { plan = await familyPlan(tx, s.results.map(r => r.testCase)); }
+        catch (e) { splitError = e instanceof Error ? e.message : 'Split conflict'; }
+        const feedback = [...s.latest.values()].map(row => {
+          const result = s.results.find(r => r.caseId === row.caseId)!;
+          const review = viewReview(row);
+          let exclusion = splitError;
+          try {
+            if (!s.valid.has(row.caseId)) throw new Error('결과가 변경되었습니다. 재검수하세요.');
+            labBuildPreference(result, review.body, plan[labFamilyKey(result.testCase.familyId ?? '')] ?? null, scope);
+          } catch (e) { exclusion = e instanceof Error ? e.message : 'Invalid feedback'; }
+          return { review, nickname: result.testCase.nickname, familyId: result.testCase.familyId ?? null,
+            eligible: !exclusion, exclusion, candidateId: s.candidates.find(c => c.reviewId === review.id && c.body.version === 'preference-v1' && c.status === 'approved' && !c.stale)?.id ?? null };
+        });
+        return { scope, feedback, metrics: labHumanMetrics(s.results, s.valid, threshold, s.latest.size - s.valid.size), candidates: s.candidates, exports: s.exports };
       }, { isolationLevel: 'RepeatableRead' });
     },
     async createCurationExport(actor: Actor, runId: string, input: LabCurationExportRequest) {
       return db.$transaction(async tx => {
         await lockRun(tx, actor, runId);
         const s = await state(tx, actor, runId);
+        guarded(() => labAssertPreferenceScope(labPreferenceScope(s.run), input.scope));
         const selectedIds = new Set(input.candidateIds);
         const selectedCases = new Set(s.candidates.filter(c => selectedIds.has(c.id)).map(c => c.caseId));
         const plan = await freezeLabFamilies(tx, s.results.filter(r => input.kind !== 'train' || selectedCases.has(r.caseId)).map(r => r.testCase));
@@ -160,11 +173,11 @@ export function createLabHumanRepository(db: PrismaClient) {
           if (new Set(input.candidateIds).size !== input.candidateIds.length || selected.some(c => !c)) throw badRequest('Invalid candidate selection');
           const candidates = selected as LabCandidate[];
           if (candidates.some(c => plan[c.body.familyId] !== 'train')) throw conflict('평가 전용 표현군은 학습에 포함할 수 없습니다.');
-          selection = guarded(() => labValidateSelection(candidates, input.policy));
-          files.push({ filename: `nickname-train-${id}.jsonl`, content: candidates.map(c => JSON.stringify(labTrainingLine(c))).join('\n') + '\n' });
+          selection = guarded(() => labValidateSelection(candidates, input.policy, input.scope));
+          files.push({ filename: `nickname-preference-${id}.jsonl`, content: candidates.map(c => JSON.stringify(labTrainingLine(c))).join('\n') + '\n' });
           records = candidates.map(c => ({ candidate: c, review: viewReview(s.latest.get(c.caseId)!), originalResult: s.results.find(r => r.caseId === c.caseId) }));
         } else {
-          if (input.candidateIds.length) throw badRequest('평가 파일에는 교정 학습 후보를 지정할 수 없습니다.');
+          if (input.candidateIds.length) throw badRequest('평가 파일에는 학습 피드백을 지정할 수 없습니다.');
           const selected = s.results.filter(r => r.testCase.familyId && plan[labFamilyKey(r.testCase.familyId)] === input.kind && s.valid.has(r.caseId));
           if (!selected.length) throw badRequest('이 split에 검수된 평가 사례가 없습니다.');
           // Gold remains the original reference, never a corrected training answer. Test has no candidate-generation route.
@@ -172,7 +185,7 @@ export function createLabHumanRepository(db: PrismaClient) {
           files.push({ filename: `nickname-${input.kind}-${id}.jsonl`, content: records.map(r => JSON.stringify(r)).join('\n') + '\n' });
           selection = { count: selected.length, evaluationOnly: true };
         }
-        const manifest = { version: 'human-curation-v1', id, runId, datasetHash: s.run.datasetHash, model: s.run.model,
+        const manifest = { version: 'preference-v1', scope: input.scope, run: s.run, id, runId, datasetHash: s.run.datasetHash, model: s.run.model,
           promptHash: s.run.promptHash, evaluationProtocol: s.run.evaluationProtocol, actorId: actor.id, createdAt: createdAt.toISOString(),
           kind: input.kind, policy: input.policy, selection, familySplit: Object.fromEntries(s.results.filter(r => r.testCase.familyId).map(r => { const key = labFamilyKey(r.testCase.familyId!); return [key, plan[key]]; })),
           files: files.map(f => ({ filename: f.filename, sha256: sha(f.content) })), records };

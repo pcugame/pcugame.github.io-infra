@@ -6,7 +6,7 @@ import { LabResultSchema, labDefaultReview, type LabReviewBundle, type LabHumanR
 import { HumanReview } from '../features/nickname-evaluation/HumanReview';
 import { labApi } from '../lib/api/lab';
 
-vi.mock('../lib/api/lab', () => ({ labApi: { review: vi.fn(), saveReview: vi.fn(), candidate: vi.fn() } }));
+vi.mock('../lib/api/lab', () => ({ labApi: { review: vi.fn(), saveReview: vi.fn(), approveFeedback: vi.fn() } }));
 vi.mock('../lib/query/visibility', () => ({ useViewerKey: () => (key: unknown[]) => key }));
 afterEach(cleanup);
 const item = LabResultSchema.parse({ bertScore: { status: 'SUCCEEDED', precision: 0.8765, recall: 0.7654, f1: 0.8192,
@@ -31,32 +31,32 @@ function mount(next = vi.fn()) {
 describe('human review UI', () => {
   it('hides the reference, supports keyboard verdict and saves blind judgment before advancing', async () => {
     const { next, client } = mount();
-    await screen.findByText('MODEL_REASON', { selector: 'dd' });
+    await screen.findAllByText('MODEL_REASON', { selector: 'dd' });
     expect(screen.queryByText('SECRET_EXPECTED_REASON')).toBeNull();
     expect(screen.queryByText(/0.8765/)).toBeNull();
     fireEvent.keyDown(window, { key: '1' });
     fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true });
     await waitFor(() => expect(next).toHaveBeenCalledOnce());
     expect(vi.mocked(labApi.saveReview).mock.calls[0][2].body).toMatchObject({ verdict: 'correct', blind: true, correction: {} });
-    expect(labApi.candidate).not.toHaveBeenCalled();
+    expect(labApi.approveFeedback).not.toHaveBeenCalled();
     client.clear();
   });
-  it('records multiple errors and reuses expected fields selectively without changing the original', async () => {
+  it('keeps verdict independent from negative feedback and never requires a corrected response', async () => {
     const { client } = mount();
-    await screen.findByText('MODEL_REASON', { selector: 'dd' });
+    await screen.findAllByText('MODEL_REASON', { selector: 'dd' });
     fireEvent.click(screen.getByRole('button', { name: '3 오답' }));
-    fireEvent.click(screen.getByLabelText('부적절한 점수'));
-    fireEvent.click(screen.getByLabelText('과도한 위험 판단·오탐'));
-    fireEvent.click(screen.getByText('필요한 부분만 교정'));
-    fireEvent.click(screen.getByRole('button', { name: '기대 근거·점수로 교정 초안 채우기' }));
-    expect(screen.getByText('SECRET_EXPECTED_REASON', { selector: 'dd' })).toBeTruthy();
-    expect(screen.getByText('P 0.8765 / R 0.7654 / F1 0.8192')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'D 학습 제외' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.keyDown(window, { key: 's' });
+    fireEvent.click(screen.getByLabelText('근거 없는 사실 생성'));
+    fireEvent.click(screen.getByRole('button', { name: '1 정답' }));
+    expect(screen.getByRole('button', { name: 'S 부정' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: '기대 정답 공개' }));
     fireEvent.click(screen.getByRole('button', { name: /검수 저장/ }));
     await waitFor(() => expect(labApi.saveReview).toHaveBeenCalled());
-    expect(vi.mocked(labApi.saveReview).mock.calls[0][2].body).toMatchObject({ verdict: 'incorrect', errors: ['score', 'false_positive'], blind: false, reusedReference: true,
-      correction: { reason: 'SECRET_EXPECTED_REASON', score: 0, abstained: false } });
+    expect(vi.mocked(labApi.saveReview).mock.calls[0][2].body).toMatchObject({ verdict: 'correct', behavior: 'negative',
+      behaviorReasons: ['fabricated_fact'], blind: false, correction: {}, reusedReference: false });
+    expect(screen.queryByText('필요한 부분만 교정')).toBeNull();
     expect(item.output!.reason).toBe('MODEL_REASON');
-    expect(item.output!.score).toBe(80);
     client.clear();
   });
   it('does not interpret typing as shortcuts and blocks candidate generation for held-out data', async () => {
@@ -67,7 +67,7 @@ describe('human review UI', () => {
     const memo = await screen.findByLabelText('검수 메모');
     fireEvent.keyDown(memo, { key: '3' });
     expect(screen.getByRole('button', { name: '1 정답' }).getAttribute('aria-pressed')).toBe('true');
-    expect((screen.getByRole('button', { name: '검수 내용으로 후보 생성 (미승인)' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: '검수 내용으로 후보 생성 (미승인)' })).toBeNull();
     fireEvent.change(memo, { target: { value: '저장 전 내용' } });
     fireEvent.keyDown(window, { key: 'j' });
     expect(next).not.toHaveBeenCalled();

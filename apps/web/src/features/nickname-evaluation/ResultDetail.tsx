@@ -1,8 +1,8 @@
-import { labLastAttempt, type LabResult } from '@pcu/contracts';
+import { labFinalGeneration, labLastAttempt, type LabResult } from '@pcu/contracts';
 import { z } from 'zod';
 import { resultLabels, bertScoreLabels, bertScoreReasons } from './labels';
 
-export function ResultDetail({ item, showReference = true }: { item: LabResult; showReference?: boolean }) {
+export function ResultDetail({ item, showReference = true, compact = false }: { item: LabResult; showReference?: boolean; compact?: boolean }) {
   const out = item.output;
   const sources = item.sources;
   const research = item.history.flatMap(entry => {
@@ -16,6 +16,26 @@ export function ResultDetail({ item, showReference = true }: { item: LabResult; 
     }).passthrough() }).safeParse(entry);
     return parsed.success ? [parsed.data.research] : [];
   });
+  if (compact) {
+    const attempt = labLastAttempt(item);
+    let raw: string | null = null;
+    if (!out) { try { raw = labFinalGeneration(item).raw; } catch { /* Historical or incomplete response remains in the trace. */ } }
+    const shown = attempt?.research?.steps.filter(s => s.kind === 'answer').at(-1)?.suppliedSources
+      ?? attempt?.generationContexts?.filter(s => s.stage === 'answer').at(-1)?.suppliedSources;
+    return <div className="lab-detail">
+      <dl><dt>위험 점수</dt><dd>{out?.score == null ? '판단 보류·미채점' : `${out.score} / 100`}</dd>
+        <dt>판단 근거</dt><dd>{out?.reason ?? `유효한 응답 없음 · ${item.error ?? item.status}`}</dd>
+        <dt>해석한 표현</dt><dd>{out?.interpretedTerm ?? '특정하지 않음'}</dd>
+        <dt>실제 제공 자료</dt><dd>{shown?.length ? <ul>{shown.map(source => {
+          const url = sources.find(s => s.id === source.id)?.url;
+          return <li key={source.id}>{url ? <a href={url} target="_blank" rel="noopener noreferrer">{source.id} · {source.title}</a> : <strong>{source.id} · {source.title}</strong>}<small>{out?.sourceIds.includes(source.id) ? '모델 인용 · ' : ''}검색 발췌문 · 원문 미검증</small><span>{source.snippet}</span></li>;
+        })}</ul> : shown ? '제공 자료 없음 · 모델의 일반 지식 사용 가능' : '제공 자료 기록 없음'}</dd>
+        {showReference && <><dt>사람의 기대 근거 (검토 가설)</dt><dd>{item.testCase.reference.expectedReason}</dd><dt>기대 점수 / 범위</dt><dd>{item.testCase.reference.expectedScore} / {item.testCase.reference.scoreRange?.join('–') ?? '미지정'}</dd></>}
+      </dl>
+      {raw && <details open><summary>모델 생성 원문 (검증 실패)</summary><pre>{raw}</pre></details>}
+      <details><summary>원본 응답·검증·검색·토큰 상세</summary><ResultDetail item={item} showReference={showReference} /></details>
+    </div>;
+  }
   return <div className="lab-detail">
     <p>{item.testCase.nickname}</p>
     <p className="lab-meta">{item.testCase.id}</p>

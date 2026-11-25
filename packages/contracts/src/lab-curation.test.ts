@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { LabResultSchema, type LabResult } from './lab.js';
-import { labBuildCandidate, labDefaultReview, labFamilyPlan, labGroupSplit, labHumanMetrics, labInfrastructureFailure, labValidateSelection } from './lab-curation.js';
-import { LabCurationPolicySchema, type LabCandidate } from './lab-human.js';
+import { labDefaultReview, labFamilyPlan, labGroupSplit, labHumanMetrics, labInfrastructureFailure } from './lab-curation.js';
+import { LabCurationPolicySchema, LabReviewBodySchema, LabSaveReviewSchema, type LabCandidate } from './lab-human.js';
+import { labBuildPreference, labTrainingLine, labValidateSelection } from './lab-preference.js';
 
 function result(): LabResult {
   const output = { schemaVersion: '2', nickname: '달빛산책', interpretedTerm: null, reason: '평범한 조합', score: 0, confidence: 0.8, sourceIds: ['S1'], abstained: false };
@@ -13,46 +14,75 @@ function result(): LabResult {
         action: { action: 'search', query: '달빛 뜻', hypotheses: [{ term: '달빛', basis: '일상 단어' }] } },
       { kind: 'search', query: '달빛 뜻', durationMs: 10 },
       { kind: 'answer', systemPrompt: 'answer system', prompt: 'EXACT_MODEL_PROMPT', suppliedSources: [{ id: 'S1', title: '자료', snippet: '평범한 조합' }], durationMs: 15,
+        rawResponse: JSON.stringify(JSON.stringify({ ...output, evidenceChecks: [] })), finishReason: 'stop', validation: { valid: true, error: null },
         answer: output, interpretationStatus: 'literal', evidenceChecks: [{ sourceId: 'S1', quote: '평범한 조합', claim: '일상어', relation: 'ordinary_usage' }] },
     ] } }] });
 }
-const request = { reviewId: '00000000-0000-4000-8000-000000000001', objective: 'B' as const };
-const review = (r: LabResult) => ({ ...labDefaultReview(r), verdict: 'correct' as const, cause: 'none' as const, cohort: 'normal' as const });
+const scope = { feedbackPolicy: 'evidence-v1', promptHash: 'a'.repeat(64) };
+const step = (r: LabResult) => (r.history[0] as { research: { steps: { rawResponse?: string; finishReason?: string; validation?: { valid: boolean; error: string | null }; error?: string }[] } }).research.steps[2];
+const build = (r: LabResult, body = review(r), split = 'train') => labBuildPreference(r, body, split, scope);
+const review = (r: LabResult) => ({ ...labDefaultReview(r), behavior: 'positive' as const, verdict: 'correct' as const, cause: 'none' as const, cohort: 'normal' as const });
 describe('human curation evidence and split boundaries', () => {
-  it('uses exact supplied snippets and original prompts, not reference facts or collected-but-truncated text', () => {
+  it('exports only exact inputs and original completion, with no reference or feedback metadata', () => {
     const r = result();
-    const c = labBuildCandidate(r, review(r), request, 'train');
-    expect(c.messages[1].content).toBe('EXACT_MODEL_PROMPT');
-    expect(() => labBuildCandidate(r, review(r), { ...request, stepIndex: 999 }, 'train')).toThrow(/존재하는/);
-    expect(c.suppliedSources[0].snippet).toBe('평범한 조합');
-    expect(JSON.stringify(c)).not.toContain('비공개 정답');
-    expect(JSON.stringify(c)).not.toContain('unseen.example.org');
-    expect(() => labBuildCandidate(r, { ...review(r), correction: { sourceIds: ['S2'] } }, request, 'train')).toThrow(/출처/);
-    expect(() => labBuildCandidate(r, { ...review(r), correction: { evidenceChecks: [{ sourceId: 'S1', quote: '후반은 모델에서 잘림', claim: '불가', relation: 'ordinary_usage' }] } }, request, 'train')).toThrow(/인용문/);
-    expect(() => labBuildCandidate(r, { ...review(r), correction: { reason: 'https://unseen.example.org' } }, request, 'train')).toThrow(/URL/);
+    const body = build(r);
+    const line = labTrainingLine({ body } as LabCandidate);
+    expect(line.prompt[1].content).toBe('EXACT_MODEL_PROMPT');
+    expect(line.completion[0].content).toBe(JSON.parse(step(r).rawResponse!));
+    expect(body.suppliedSources[0].snippet).toBe('평범한 조합');
+    expect(Object.keys(line)).toEqual(['prompt', 'completion', 'label']);
+    expect(JSON.stringify(line)).not.toMatch(/비공개 정답|expectedScore|unseen.example|actorId|behaviorReasons|bertScore/);
   });
-  it('excludes test, validation, unresolved causes, wrong gold and service failures', () => {
+  it('keeps all benchmark verdicts independent from behavior, including the four requested cases', () => {
     const r = result();
-    for (const split of ['test', 'validation'] as const) expect(() => labBuildCandidate(r, review(r), request, split)).toThrow(/평가 전용/);
-    for (const cause of ['reference', 'unknown', 'infrastructure'] as const) expect(() => labBuildCandidate(r, { ...review(r), cause }, request, 'train')).toThrow(/제외/);
-    for (const error of ['PROVIDER_UNREACHABLE', 'ATTEMPT_LIMIT', 'CASE_TIMEOUT', 'MODEL_BUSY']) {
-      const failed = { ...r, status: 'FAILED' as const, output: null, error };
-      expect(labInfrastructureFailure(failed)).toBe(true);
-      expect(() => labBuildCandidate(failed, review(failed), { ...request, objective: 'A' }, 'train')).toThrow(/장애/);
+    for (const verdict of ['correct', 'partial', 'incorrect', 'deferred'] as const) {
+      for (const behavior of ['positive', 'negative', 'exclude'] as const) {
+        const body = LabReviewBodySchema.parse({ ...labDefaultReview(r), verdict, behavior,
+          behaviorReasons: behavior === 'negative' ? ['fabricated_fact'] : [] });
+        if (behavior === 'exclude') expect(() => labBuildPreference(r, body, 'train', scope)).toThrow(/학습 제외/);
+        else expect(labBuildPreference(r, body, 'train', scope).label).toBe(behavior === 'positive');
+      }
     }
-    const failedSearch = result();
-    (failedSearch.history[0] as { research: { steps: { error?: string }[] } }).research.steps[1]!.error = 'PROVIDER_HTTP_503';
-    expect(labInfrastructureFailure(failedSearch)).toBe(true);
+    expect(labDefaultReview(r).behavior).toBe('exclude');
+    expect(LabReviewBodySchema.safeParse({ ...review(r), behavior: 'negative', behaviorReasons: [] }).success).toBe(false);
+    expect(LabSaveReviewSchema.safeParse({ previousReviewId: null, resultHash: 'a'.repeat(64),
+      body: { ...review(r), correction: { reason: '교정한 모범 답안' } } }).success).toBe(false);
   });
-  it('teaches a corrected action with no fabricated results and does not reuse a prior attempt', () => {
-    const r = { ...result(), history: [{ event: 'finished', error: 'INVALID_MODEL_JSON' }], output: null, status: 'FAILED' as const, error: 'INVALID_MODEL_JSON' };
-    const action = { action: 'search' as const, query: '달빛 뜻', hypotheses: [] };
-    const c = labBuildCandidate(r, { ...review(r), correctedAction: action }, { ...request, objective: 'A' }, 'train');
-    expect(c.suppliedSources).toEqual([]);
-    expect(JSON.parse(c.messages.at(-1)!.content)).toEqual(action);
-    expect(() => labBuildCandidate(r, review(r), request, 'train')).toThrow(/입력 기록/);
+  it('preserves invalid JSON verbatim and permits model-attributed contract feedback', () => {
+    const r = result();
+    const raw = 'invalid {\n NUL' + String.fromCharCode(0, 0xd800);
+    step(r).rawResponse = JSON.stringify(raw);
+    step(r).validation = { valid: false, error: 'INVALID_MODEL_JSON' };
+    step(r).error = 'INVALID_MODEL_JSON';
+    r.output = null; r.jsonValid = false; r.status = 'FAILED'; r.error = 'INVALID_MODEL_OUTPUT';
+    const body = labBuildPreference(r, { ...review(r), verdict: 'incorrect', behavior: 'negative', behaviorReasons: ['model_contract_violation'] }, 'train', scope);
+    const line = labTrainingLine({ body } as LabCandidate);
+    expect(line.label).toBe(false); expect(line.completion[0].content).toBe(raw);
+    expect(JSON.parse(JSON.stringify(line))).toEqual(line);
+    expect(() => labBuildPreference(result(), { ...review(r), behavior: 'negative', behaviorReasons: ['model_contract_violation'] }, 'train', scope)).toThrow(/검증된/);
+  });
+  it('rejects held-out families, legacy records, missing raw output, truncation, and infrastructure failures', () => {
+    for (const split of ['test', 'validation']) expect(() => build(result(), review(result()), split)).toThrow(/평가 전용/);
+    const legacy = { ...review(result()), feedbackVersion: undefined, behavior: undefined };
+    expect(() => labBuildPreference(result(), legacy, 'train', scope)).toThrow(/과거/);
+    expect(() => labBuildPreference(result(), review(result()), 'train', null)).toThrow(/정책/);
+    for (const reason of ['length', 'unknown']) { const r = result(); step(r).finishReason = reason; expect(() => build(r)).toThrow(/잘림/); }
+    for (const error of ['PROVIDER_UNREACHABLE', 'ATTEMPT_LIMIT', 'CASE_TIMEOUT', 'MODEL_BUSY', 'MODEL_OUTPUT_TRUNCATED']) {
+      const r = { ...result(), status: 'FAILED' as const, output: null, error };
+      expect(labInfrastructureFailure(r)).toBe(true); expect(() => build(r)).toThrow(/장애/);
+    }
+    const r = result(); delete step(r).rawResponse;
+    expect(() => build(r)).toThrow(/재실행/);
     const retried = result(); retried.history.push({ event: 'finished', error: 'INVALID_MODEL_JSON' });
-    expect(() => labBuildCandidate(retried, review(retried), request, 'train')).toThrow(/입력 기록/);
+    expect(() => build(retried)).toThrow(/재실행/);
+    const failedSearch = result();
+    (failedSearch.history[0] as { research: { steps: { error?: string }[] } }).research.steps[1].error = 'PROVIDER_HTTP_503';
+    expect(() => build(failedSearch)).toThrow(/장애/);
+  });
+  it('does not treat general knowledge, a low similarity score, or score mismatch as negative feedback', () => {
+    const r = result(); r.searchCount = 0; r.sources = []; r.output!.score = 99;
+    expect(build(r).label).toBe(true);
+    expect(() => labBuildPreference(r, labDefaultReview(r), 'train', scope)).toThrow(/학습 제외/);
   });
   it('freezes normalized families across datasets and never splits rows randomly', () => {
     const one = result().testCase;
@@ -64,17 +94,19 @@ describe('human curation evidence and split boundaries', () => {
     expect(() => labFamilyPlan([{ ...one, familyId: undefined, split: 'test' }, one])).toThrow(/split 충돌/);
     expect(labFamilyPlan([{ ...one, familyId: undefined, split: undefined }, one])).toEqual({ moon: 'train' });
   });
-  it('enforces representative family/error limits, freshness, approval and correct-case retention', () => {
-    const body = labBuildCandidate(result(), review(result()), request, 'train');
+  it('requires positive balance, selected policy/prompt scope, approval, freshness, and family limits', () => {
+    const body = build(result());
     const c = { id: 'a', runId: 'run', caseId: 'one', status: 'approved', stale: false, body } as LabCandidate;
-    const d = { ...c, id: 'b', caseId: 'two', body: { ...body, familyId: 'second', retention: false, errors: ['score' as const] } };
-    const policy = LabCurationPolicySchema.parse({ minAmbiguousShare: 0 });
-    expect(() => labValidateSelection([c, d], LabCurationPolicySchema.parse({}))).toThrow(/정상·모호/);
-    expect(labValidateSelection([c, d], policy)).toMatchObject({ count: 2, retention: 1 });
-    expect(() => labValidateSelection([c, { ...d, body: { ...d.body, familyId: body.familyId } }], policy)).toThrow(/비중/);
-    expect(() => labValidateSelection([c, { ...d, stale: true }], policy)).toThrow(/변경/);
-    expect(() => labValidateSelection([{ ...c, body: { ...body, retention: false } }, d], policy)).toThrow(/최소 비율/);
-    expect(() => labValidateSelection([c, { ...d, caseId: c.caseId }], policy)).toThrow(/중복/);
+    const d = { ...c, id: 'b', caseId: 'two', body: { ...body, familyId: 'second', label: false, reasons: ['excessive_risk' as const] } };
+    const policy = LabCurationPolicySchema.parse({});
+    expect(labValidateSelection([c, d], policy, scope)).toMatchObject({ count: 2, positive: 1, negative: 1 });
+    expect(() => labValidateSelection([c, { ...d, body: { ...d.body, familyId: body.familyId } }], policy, scope)).toThrow(/비중/);
+    expect(() => labValidateSelection([c, { ...d, stale: true }], policy, scope)).toThrow(/변경/);
+    expect(() => labValidateSelection([{ ...c, body: { ...body, label: false } }, d], policy, scope)).toThrow(/긍정/);
+    expect(() => labValidateSelection([c, { ...d, caseId: c.caseId }], policy, scope)).toThrow(/중복/);
+    for (const patch of [{ feedbackPolicy: 'incompatible' }, { promptHash: 'b'.repeat(64) }])
+      expect(() => labValidateSelection([c, d], policy, { ...scope, ...patch })).toThrow(/정책·프롬프트/);
+    expect(() => labValidateSelection([{ ...c, status: 'draft' }, d], policy, scope)).toThrow(/미승인/);
   });
 });
 describe('evaluation denominators', () => {

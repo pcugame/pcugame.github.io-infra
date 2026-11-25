@@ -1,6 +1,6 @@
-# 닉네임 조사 행동 LoRA 실험
+# 닉네임 Preference 자료 준비와 기존 LoRA 실험
 
-Qwen3-4B-Instruct-2507의 조사 action, 의미 후보·질의 생성, 자료에 근거한 판단, 불확실성 처리와 JSON 응답을 학습하는 로컬 CLI이다. 원본 가중치는 고정하고 PEFT adapter만 업데이트한다. 개별 은어의 정답 사전을 모델 입력에 제공하지 않는다.
+현재 `prepare`는 Web에서 승인한 unpaired preference 자료를 검증·보존한다. 아래 GPU trainer는 기존 SFT/LoRA 알고리즘으로 유지하며 신규 preference 자료를 학습하지 않는다. 과거 실험의 재현과 합성 smoke 검증에 사용하는 로컬 CLI이다. 원본 가중치는 고정하고 PEFT adapter만 업데이트한다. 개별 은어의 정답 사전을 모델 입력에 제공하지 않는다.
 
 운영 호스트는 `song@gameserver:5050`, 학습 장치는 로컬 랩탑의 Radeon AI PRO R9700이다. 이 디렉터리의 명령에는 운영 접속·배포·서비스 재시작 기능이 없다. 기존 Qwen3-4B-Instruct-2507-Q4_K_M GGUF와 로컬에서 별도로 실행 중인 Qwen3 8B Vulkan 프로세스는 유지한다. 실제 데이터 선별·품질 학습은 후속 작업이며, 이번 검증의 범위는 합성 사례를 이용한 파이프라인 동작이다.
 
@@ -8,7 +8,7 @@ Qwen3-4B-Instruct-2507의 조사 action, 의미 후보·질의 생성, 자료에
 
 | 구성 | 역할 |
 | --- | --- |
-| `cli.mts prepare` | Human Evaluation train JSONL·provenance 검증과 학습 자료 변환 |
+| `cli.mts prepare` | 승인된 preference JSONL·provenance 검증과 원문 보존 |
 | `lab.py doctor` | 실제 장치·RAM·디스크·프로세스 조사와 GPU 역전파 검사 |
 | `lab.py train` | assistant 응답만을 대상으로 한 LoRA 학습, checkpoint 저장·재개 |
 | `lab.py register`, `serve` | 별도 모델 등록, 선택한 모델의 루프백 추론 |
@@ -60,36 +60,22 @@ experiments/nickname-lora/run-rocm.sh train --config config.json \
 
 출력 디렉터리는 재개를 제외하고 새 경로여야 한다. 학습 입력·설정·소스 파일이 달라지면 동일 checkpoint로 재개하지 않는다. 이전 smoke 자료가 있으면 재생성하지 않고 기존 경로를 사용하거나 새 실행 이름을 지정한다.
 
-## 실제 데이터 준비와 학습
+## Preference 자료 준비
 
-1. 기존 `/lab/nickname-evaluation`에서 사람이 닉네임과 평가용 reference를 등록한다. `familyId`, 고정 split, `obfuscation:none` 또는 `obfuscation:mixed-script` 등 **표기 방식 하나**를 tags에 지정한다. 같은 원형의 변형은 같은 family로 관리한다.
-2. 모델에는 닉네임만 전달하여 조사한다. Human Evaluation에서 결과와 각 생성 단계의 근거·action을 검수한다.
-3. 대표 오답과 정상·모호 사례를 선별하여 승인하고 train 파일 및 대응 provenance를 내려받는다. validation/test 파일은 별도로 내보낸다. 모든 은어를 사람이 미리 정답으로 등록할 필요는 없다. 학습 후보의 검수와 평가 reference 작성에 사람을 사용한다.
-4. 현재 프로토콜로 기록된 승인 사례를 변환한다. 과거의 정확한 입력 기록이 없거나 첫 action을 임의 구성한 후보는 재실행 후 선별한다.
+Web의 [행동 피드백 검수](../../docs/operations/nickname-human-evaluation.md)에서 원본 최종 응답에 긍정·부정 피드백을 기록하고 일괄 승인한 파일을 사용한다. 벤치마크 정답 여부는 label과 독립적이며 교정 응답은 생성하지 않는다.
 
 ```bash
 node_modules/.bin/tsx experiments/nickname-lora/cli.mts prepare \
-  --train experiments/nickname-lora/data/inbox/nickname-train-ID.jsonl \
+  --train experiments/nickname-lora/data/inbox/nickname-preference-ID.jsonl \
   --provenance experiments/nickname-lora/data/inbox/nickname-provenance-ID.json \
-  --output experiments/nickname-lora/data/release-001
-experiments/nickname-lora/run-rocm.sh train --config config.json \
-  --data data/release-001 --output runs/experiment-001
+  --output experiments/nickname-lora/data/preference-001
 ```
 
-`prepare`는 export/file hash, 후보 hash, 검수 판본과 원본 응답 hash, 승인·최신 여부, train split, 표현군, 선별 대표성 제한을 검사한다. 기존 계약의 `labBuildCandidate`로 입력과 target을 재구성하여 동일성을 확인한다. 입력에는 닉네임·모델의 이전 가설·실제 검색 결과만 남기고 reference·family·cohort·검수 메타데이터는 별도 manifest에 보존한다. URL 대신 실제 제공된 source ID와 정확한 발췌문을 검증한다. 의미적 근거 지지는 사람의 검수 대상이다.
+`prepare`는 파일·후보 hash, 검수 판본과 원본 결과 hash, 승인·최신 여부, 평가 정책·프롬프트, train split, 표현군과 긍정 사례 비중을 검사한다. 기록된 실제 입력과 생성 원문을 대조하며 유효하지 않은 JSON도 수정하지 않는다. 과거 `human-curation-v1` export는 새 자료로 변환하지 않는다.
 
-| 학습 유형 | manifest category |
-| --- | --- |
-| 조사 action 선택 | `investigation_action` |
-| 의미 후보·질의 생성 | `meaning_query` |
-| 수집 자료 판단 | `evidence_judgment` |
-| 근거 부족 시 유보 | `abstention` |
-| 정상 사례·오탐 교정 | `normal_retention` |
-| JSON 계약 준수 | `json_contract` |
+출력은 `preference.jsonl`, `provenance.json`, `nickname-preference-v1` manifest이다. 학습 행에는 `prompt`, `completion`, `label`만 포함한다. 이 자료를 기존 SFT trainer에 전달하면 manifest 검증에서 거부한다. label을 제거하여 모범 응답으로 변환하지 않는다. GPU preference 학습 알고리즘은 후속 단계에서 구현한다.
 
-category는 여러 개가 부여될 수 있으며 `categoryCounts`로 분포를 확인한다. 학습 JSONL은 `messages`만 포함한다. chat template의 system/user prefix 전체에 `labels=-100`을 적용하고 마지막 assistant JSON과 종료 token만 학습한다. 검색 도구의 반환값·사람의 metadata는 생성 target이 아니다. 길이를 초과한 사례는 근거 또는 JSON을 잘라내지 않고 거부한다.
-
-`config.json`을 복사하여 learning rate, rank, alpha, dropout, target modules, micro batch, accumulation, checkpointing, precision, epoch/step 상한, seed와 자원 제한을 변경한다. 기본은 rank 8, micro batch 1, accumulation 4, gradient checkpointing, BF16, learning rate `5e-5`, 1 epoch 및 최대 40 step이다. 실제 step은 epoch와 step 상한 중 작은 값으로 결정한다. 원본 모델 학습과 자동 장시간 실행은 제공하지 않는다.
+기존 `nickname-sft-v1` 자료와 adapter의 학습·재개·평가 기능, 합성 smoke 경로는 과거 실험 재현용으로 유지한다. 아래 모델 비교·승격 절차는 해당 기존 adapter의 검증 절차이며 신규 preference 학습 지원을 의미하지 않는다.
 
 ## 별도 모델 등록과 비교
 

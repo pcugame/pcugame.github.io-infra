@@ -85,6 +85,7 @@ function advance(ctx: MockContext, job: StoredRun) {
     row.bertScore = { status: 'SKIPPED', precision: null, recall: null, f1: null, reason: 'MOCK_NOT_MEASURED', attempts: 0, inputHash: '', identity: null, completedAt: ctx.now() };
     row.history.push({ event: 'finished', attempt: row.attempts, status: row.status, at: ctx.now(), mock: true,
       searchDurationMs: 0, generationDurationMs: 80, generationContexts: [{ stage: 'answer', durationMs: 80, suppliedSources: [],
+        ...(row.output ? { rawResponse: JSON.stringify(JSON.stringify(row.output)), rawResponseEncoding: 'json-string', finishReason: 'stop', validation: { valid: true, error: null } } : {}),
         messages: [{ role: 'system', content: labSystemMessage(labPromptSettings(run), 'answer') }, { role: 'user', content: JSON.stringify({ nickname: row.testCase.nickname, sources: [] }) }] }] });
   }
   run.bertScore = labBertScoreSummary(job.rows);
@@ -162,6 +163,15 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
     const input = parseInput(LabCreateRunSchema, bodyObject(options));
     if (input.model !== STATUS.model) throw new MockHttpError(400, 'VALIDATION_ERROR', 'Unknown model');
     if (ownedActive(actor.id) >= 3) conflict('Three evaluations are already queued or running');
+    if (input.replayOf) {
+      const source = run(input.replayOf);
+      const old = source.info;
+      if (old.model !== input.model || old.datasetId !== input.datasetId || old.searchMode !== input.searchMode ||
+          old.temperature !== input.temperature || old.maxTokens !== input.maxTokens || old.size !== input.size ||
+          (old.finalTest ?? false) !== (input.finalTest ?? false) || (old.split ?? null) !== (input.split ?? null) ||
+          JSON.stringify(source.rows.map(r => r.caseId)) !== JSON.stringify(input.caseIds))
+        throw new MockHttpError(400, 'VALIDATION_ERROR', '원본 실험의 설정·사례 순서를 유지하세요.');
+    }
     const d = dataset(input.datasetId);
     const { caseIds, ...settings } = input;
     const byId = new Map(d.cases.filter(c => !input.split || c.split === input.split).map(c => [c.id, c]));
@@ -187,7 +197,7 @@ export async function handleLab(ctx: MockContext, pathname: string, method: stri
     const ids = [...new Set(sides.flatMap(map => [...map.values()].filter(r => matches(r.testCase, q)).map(r => r.caseId)))].sort();
     return { items: pageOf(ids, page).map(caseId => ({ caseId, left: sides[0].get(caseId) ?? null, right: sides[1].get(caseId) ?? null })), total: ids.length };
   }
-  const humanPath = /^\/api\/lab\/runs\/([^/]+)\/(?:results\/[^/]+\/(?:review|candidates)|candidates\/[^/]+\/decision|curation(?:\/exports(?:\/[^/]+)?)?)$/.exec(pathname);
+  const humanPath = /^\/api\/lab\/runs\/([^/]+)\/(?:results\/[^/]+\/(?:review)|feedback\/approve|curation(?:\/exports(?:\/[^/]+)?)?)$/.exec(pathname);
   if (humanPath) {
     const current = run(humanPath[1]);
     return handleLabHuman(state.human ??= { reviews: [], candidates: [], exports: [], families: {} }, actor.id, current,

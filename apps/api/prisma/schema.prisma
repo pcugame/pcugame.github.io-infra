@@ -1242,6 +1242,9 @@ model LabTestCase {
 }
 
 model LabRun {
+  feedbackPolicy String?
+  replayOf String?
+  replayIdentity Json?
   id           String @id @default(uuid())
   ownerId      Int
   datasetId    String

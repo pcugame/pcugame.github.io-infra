@@ -12,7 +12,7 @@ import {
 	labPromptSettings,
 	labPromptSnapshot,
 	LAB_NICKNAME_PROTOCOL,
-  labFamilyKey,
+  labFamilyKey, labLastAttempt,
 	type LAB_RESEARCH_PROFILE,
 	type LabUpload,
 	type LabSplitSchema,
@@ -142,6 +142,29 @@ export function createLabRepository(db: PrismaClient) {
 					where: { ownerId: actor.id, status: { in: ['QUEUED', 'RUNNING'] } },
 				});
 				if (active >= LAB_ACTIVE_RUN_LIMIT) throw conflict('Three evaluations are already queued or running');
+        let replayIdentity: Prisma.InputJsonValue | undefined;
+        if (request.replayOf) {
+          await readableRun(tx, actor, request.replayOf);
+          await tx.$queryRaw`SELECT id FROM "LabRun" WHERE id=${request.replayOf} FOR UPDATE`;
+          const source = await readableRun(tx, actor, request.replayOf);
+          if (!['COMPLETED', 'CANCELLED'].includes(source.status)) throw conflict('원본 실험이 종료된 뒤 설정을 복사하여 실행하세요.');
+          if (source.provider !== provider || source.model !== request.model || source.datasetId !== request.datasetId ||
+              source.searchMode !== request.searchMode || source.temperature !== request.temperature || source.maxTokens !== request.maxTokens ||
+              source.evaluationProtocol !== (profile ?? LAB_NICKNAME_PROTOCOL) || source.size !== request.size ||
+              source.finalTest !== (request.finalTest ?? false) || source.split !== (request.split ?? null))
+            throw badRequest('원본 실험의 데이터셋·모델·검색·생성 설정을 유지하세요.');
+          const previous = await tx.labResult.findMany({ where: { runId: source.id }, include: withCase, orderBy: { ordinal: 'asc' } });
+          if (JSON.stringify(previous.map(r => r.caseId)) !== JSON.stringify(request.caseIds))
+            throw badRequest('원본 실험과 동일한 사례·순서로 재실행하세요.');
+          const identities = previous.flatMap(r => {
+            const trace = labLastAttempt(resultView(r))?.research;
+            const identity = trace?.identity as { weights_sha256?: string; chat_template_sha256?: string } | undefined;
+            return identity?.weights_sha256 && identity.chat_template_sha256
+              ? [{ weights_sha256: identity.weights_sha256, chat_template_sha256: identity.chat_template_sha256 }] : [];
+          });
+          if (new Set(identities.map(v => JSON.stringify(v))).size > 1) throw badRequest('원본 실험에 여러 모델 revision이 있습니다. 새 실험으로 분리하세요.');
+          replayIdentity = identities[0] ?? (source.replayIdentity as Prisma.InputJsonValue | null) ?? undefined;
+        }
 				const dataset = await readableDataset(tx, actor, request.datasetId);
 				const cases = await tx.labTestCase.findMany({
 					where: { datasetId: dataset.id, split: request.split, caseId: { in: request.caseIds } },
@@ -157,6 +180,7 @@ export function createLabRepository(db: PrismaClient) {
 				const run = await tx.labRun.create({
 					data: {
 						...settings,
+            replayIdentity,
 						ownerId: actor.id,
 						provider,
 						...prompts,

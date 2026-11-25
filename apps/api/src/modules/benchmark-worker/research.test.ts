@@ -61,6 +61,19 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 const run = (override: Partial<WorkItem> = {}) => evaluateCase(config, { ...item, ...override }, new AbortController().signal, 'unsupported');
 
 describe('bounded JSON actions through Fake Provider (not model reasoning validation)', () => {
+  it('rejects a replay when weights or chat template identity changed before any generation', async () => {
+    for (const replayIdentity of [
+      { weights_sha256: 'c'.repeat(64), chat_template_sha256: 'b'.repeat(64) },
+      { weights_sha256: 'a'.repeat(64), chat_template_sha256: 'c'.repeat(64) },
+    ]) {
+      const fetcher = fixture();
+      const result = await run({ replayIdentity });
+      expect(result.error).toBe('REPLAY_MODEL_IDENTITY_CHANGED');
+      expect(result.research!.steps).toEqual([]);
+      expect(fetcher.mock.calls.some(([url]) => String(url).endsWith('/generate'))).toBe(false);
+    }
+  });
+
 	it('uses the selected stage instructions for token counting, generation and repair without reinserting defaults', async () => {
 		const custom = { systemPrompt: '  사용자 공통 지침\n  ', actionPrompt: '다른 검색 전략', answerPrompt: '다른 답변 기준' };
 		const fetcher = fixture({ expectedSystemPrompt: custom.systemPrompt, answers: ['{}', final] });

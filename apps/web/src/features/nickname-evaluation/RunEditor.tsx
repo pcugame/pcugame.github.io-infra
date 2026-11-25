@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { LAB_DATASET_MAX_BYTES, LAB_PAGE_SIZE, LAB_MAX_CASES, LAB_PROMPT_MAX_LENGTH, LAB_PROMPT_FILE_MAX_BYTES, parseLabPromptFile, labPromptSettings, LAB_NICKNAME_JSONL_TEMPLATE, LAB_NICKNAME_CSV_TEMPLATE, type LabPromptSettings, type LabDataset, type LabSearchMode, type LabStatus } from '@pcu/contracts';
+import { LAB_DATASET_MAX_BYTES, LAB_PAGE_SIZE, LAB_MAX_CASES, LAB_PROMPT_MAX_LENGTH, LAB_FEEDBACK_POLICY, type LabRun, LAB_PROMPT_FILE_MAX_BYTES, parseLabPromptFile, labPromptSettings, LAB_NICKNAME_JSONL_TEMPLATE, LAB_NICKNAME_CSV_TEMPLATE, type LabPromptSettings, type LabDataset, type LabSearchMode, type LabStatus } from '@pcu/contracts';
 import { Button, CheckboxField, SelectField, TextareaField, TextField } from '../../components/ui';
 import { labApi, type LabSplit } from '../../lib/api/lab';
 import { useViewerKey } from '../../lib/query/visibility';
@@ -52,7 +52,7 @@ function DatasetCases({ dataset, size, selected, change, split }: {
   </details>;
 }
 
-export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated: (id: string) => void }) {
+export function RunEditor({ status, onCreated, sourceRunId }: { status: LabStatus; onCreated: (id: string) => void; sourceRunId?: string }) {
   const viewerKey = useViewerKey();
   const client = useQueryClient();
   const datasets = useInfiniteQuery({
@@ -61,6 +61,8 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   });
   const datasetsList = datasets.data?.pages.flat() ?? [];
   const [datasetId, setDatasetId] = useState('');
+  const [replay, setReplay] = useState<LabRun | null>(null);
+  const [feedbackPolicy, setFeedbackPolicy] = useState(LAB_FEEDBACK_POLICY);
   const [selected, setSelected] = useState<string[]>([]);
   const [sizeMode, setSizeMode] = useState('1');
   const [customSize, setCustomSize] = useState('1');
@@ -76,7 +78,7 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   const outputLimit = limits?.maxOutputTokens ?? 4096;
   const effectiveMode = status.toolSupport === 'unsupported' && searchMode === 'model_tool_call' ? 'no_search' : searchMode;
   const searchUnavailable = effectiveMode !== 'no_search' && status.searchStatus !== 'available';
-  const dataset = datasetsList.find(item => item.id === datasetId) ?? datasetsList[0];
+  const dataset = datasetsList.find(item => item.id === datasetId) ?? (replay ? { id: replay.datasetId, name: '원본 실험 데이터셋', count: replay.size, hash: replay.datasetHash, version: replay.datasetVersion, schemaVersion: replay.schemaVersion, createdAt: replay.createdAt } : datasetsList[0]);
   const available = useQuery({ queryKey: viewerKey(['lab-count', dataset?.id, split]), queryFn: () => labApi.cases(dataset!.id, 1, '', split || undefined), enabled: !!dataset });
   const count = available.data?.total ?? 0;
   const size = sizeMode === 'all' ? count : Number(sizeMode === 'custom' ? customSize : sizeMode);
@@ -105,9 +107,26 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
     },
     onSuccess: settings => setPromptOverrides(settings),
   });
+  const copy = useMutation({ mutationFn: async () => {
+    const run = await labApi.run(sourceRunId!);
+    if (run.model !== status.model || run.provider !== status.provider) throw new Error('원본 모델과 현재 서버의 모델이 다릅니다. 동일 모델 설정을 복원한 뒤 재실행하세요.');
+    const ids: string[] = [];
+    for (let page = 1; ids.length < run.size; page++) {
+      const result = await labApi.results(run.id, page, '', '');
+      if (!result.items.length) throw new Error('원본 사례 목록을 모두 불러오지 못했습니다.');
+      ids.push(...result.items.map(r => r.caseId));
+    }
+    return { run, ids };
+  }, onSuccess: ({ run, ids }) => {
+    setReplay(run); setDatasetId(run.datasetId); setSelected(ids); setSizeMode('custom'); setCustomSize(String(run.size));
+    setSplit(run.split ?? ''); setFinalTest(run.finalTest ?? false); setMode(run.searchMode);
+    setTemperature(String(run.temperature)); setMaxTokens(String(run.maxTokens));
+    setPromptOverrides(labPromptSettings(run, !!status.agenticRetrieval, status.provider === 'transformers-generate'));
+    setFeedbackPolicy(run.feedbackPolicy ?? LAB_FEEDBACK_POLICY);
+  } });
   const create = useMutation({
     mutationFn: () => labApi.create({
-      ...prompts,
+      ...prompts, feedbackPolicy, ...(replay ? { replayOf: replay.id } : {}),
       datasetId: dataset!.id, size, finalTest, ...(split ? { split } : {}), model: status.model, temperature: limits?.fixedTemperature ?? Number(temperature),
       maxTokens: Number(maxTokens), searchMode: effectiveMode, ...(selected.length ? { caseIds: selected } : {}),
     }),
@@ -118,16 +137,22 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
   });
   return <section className="lab-panel">
     <h2>새 실험</h2>
+    <div className="lab-actions"><Button variant="secondary" disabled={!sourceRunId || copy.isPending} onClick={() => copy.mutate()}>선택한 실험 설정 복사</Button>
+      {replay && <Button variant="secondary" onClick={() => setReplay(null)}>설정 고정 해제 · 새 실험</Button>}</div>
+    <LabError error={copy.error} />
+    {replay && <p role="status">원본 실험 {replay.id} · 동일 사례 순서·모델·검색·생성 설정을 복사했습니다. 그대로 재실행하거나 프롬프트를 편집하세요. 검색은 다시 수행하므로 제공 자료는 달라질 수 있습니다.</p>}
+    {replay && <p className="lab-meta">모델 가중치·chat template 식별값이 남아 있으면 Worker가 일치 여부를 확인합니다. 과거 기록에 식별값이 없으면 모델 이름·provider만 고정됩니다.</p>}
     <div className="lab-grid">
-      <SelectField label="데이터셋" help="평가할 닉네임과 사람이 작성한 기대 근거·점수를 모은 자료입니다." value={dataset?.id ?? ''} onChange={e => selectDataset(e.target.value)}>
-        {!datasetsList.length && <option value="">등록된 데이터셋 없음</option>}
+      <SelectField label="데이터셋" disabled={!!replay} help="평가할 닉네임과 사람이 작성한 기대 근거·점수를 모은 자료입니다." value={dataset?.id ?? ''} onChange={e => selectDataset(e.target.value)}>
+        {!datasetsList.length && !replay && <option value="">등록된 데이터셋 없음</option>}
+        {replay && !datasetsList.some(d => d.id === replay.datasetId) && <option value={replay.datasetId}>원본 실험 데이터셋</option>}
         {datasetsList.map(item => <option key={item.id} value={item.id}>{item.name} · v{item.schemaVersion} · {item.hash.slice(0, 8)}</option>)}
       </SelectField>
       <SelectField label="가져오기 기본 용도" help="파일에 용도(split)가 없는 항목에만 적용합니다. 이미 지정된 용도는 유지합니다." value={defaultSplit} onChange={e => setDefaultSplit(e.target.value as LabSplit | '')}>
         <option value="">미지정</option><SplitOptions />
       </SelectField>
       <label className="form-field"><span className="form-field__label">데이터셋 등록 · 최대 4 MiB</span>
-        <input className="form-file" type="file" accept=".jsonl,.csv,application/x-ndjson,text/csv" disabled={upload.isPending} onChange={e => {
+        <input className="form-file" type="file" accept=".jsonl,.csv,application/x-ndjson,text/csv" disabled={upload.isPending || !!replay} onChange={e => {
           const file = e.target.files?.[0];
           if (file) upload.mutate(file);
           e.target.value = '';
@@ -145,7 +170,7 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
     <LabError error={upload.error || datasets.error} />
     <form className="lab-form" onSubmit={e => { e.preventDefault(); if (dataset && validSize && !searchUnavailable && !create.isPending) create.mutate(); }}>
       <div className="lab-grid">
-        <SelectField label="실험 크기" help="이번에 평가할 닉네임 수입니다. 직접 선택하지 않으면 파일에 적힌 순서대로 평가합니다." value={sizeMode} onChange={e => { setSizeMode(e.target.value); setSelected([]); }}>
+        <SelectField label="실험 크기" disabled={!!replay} help="이번에 평가할 닉네임 수입니다. 직접 선택하지 않으면 파일에 적힌 순서대로 평가합니다." value={sizeMode} onChange={e => { setSizeMode(e.target.value); setSelected([]); }}>
           <option value="1">1개 · 동작 확인</option><option value="10">10개 · 간단한 시험</option>
           <option value="50">50개 · 예비 평가</option><option value="all">전체 · 선택한 용도</option><option value="custom">사용자 지정</option>
         </SelectField>
@@ -153,13 +178,13 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
           <option value={status.model}>{status.model || '설정된 모델 없음'} · {status.provider}</option>
         </SelectField>
       </div>
-      {sizeMode === 'custom' && <TextField label="사용자 지정 개수" type="number" min={1} max={count || LAB_MAX_CASES} value={customSize} onChange={e => { setCustomSize(e.target.value); setSelected([]); }} />}
-      <SelectField label="평가 대상 용도" help="학습용은 모델 학습에, 검증용은 설정 비교에, 최종 시험용은 설정을 확정한 뒤 성능 확인에 쓰는 자료입니다. 이번에 평가할 용도를 선택하세요." value={split} onChange={e => { setSplit(e.target.value as LabSplit | ''); setSelected([]); }}>
+      {sizeMode === 'custom' && <TextField label="사용자 지정 개수" disabled={!!replay} type="number" min={1} max={count || LAB_MAX_CASES} value={customSize} onChange={e => { setCustomSize(e.target.value); setSelected([]); }} />}
+      <SelectField label="평가 대상 용도" disabled={!!replay} help="학습용은 모델 학습에, 검증용은 설정 비교에, 최종 시험용은 설정을 확정한 뒤 성능 확인에 쓰는 자료입니다. 이번에 평가할 용도를 선택하세요." value={split} onChange={e => { setSplit(e.target.value as LabSplit | ''); setSelected([]); }}>
         <option value="">전체 (미지정 포함)</option><SplitOptions />
       </SelectField>
       {dataset && <p>자료 형식 v{dataset.schemaVersion} · 자료 식별값 {dataset.hash.slice(0, 12)} · 선택한 용도 {count}개</p>}
       <LabError error={available.error} />
-      {dataset && <DatasetCases key={`${dataset.id}-${split}`} split={split || undefined} dataset={dataset} size={size} selected={selected} change={setSelected} />}
+      {dataset && !replay && <DatasetCases key={`${dataset.id}-${split}`} split={split || undefined} dataset={dataset} size={size} selected={selected} change={setSelected} />}
       <div className="lab-actions">
         <label className="form-field"><span className="form-field__label">지침 JSON 가져오기 · 최대 256 KiB</span>
           <input className="form-file" type="file" accept=".json,application/json" disabled={importPrompts.isPending} onChange={e => {
@@ -184,19 +209,23 @@ export function RunEditor({ status, onCreated }: { status: LabStatus; onCreated:
         <p>긴 지침은 입력 한도를 초과할 수 있습니다. 지침을 자동으로 줄이지 않으며, 한도를 넘으면 실행 오류로 기록합니다.</p>
       </details>
       <div className="lab-grid lab-grid--settings">
-        <SelectField label="검색 모드" help={searchHelp[effectiveMode]} value={effectiveMode} onChange={e => setMode(e.target.value as LabSearchMode)}>
+        <SelectField label="검색 모드" disabled={!!replay} help={searchHelp[effectiveMode]} value={effectiveMode} onChange={e => setMode(e.target.value as LabSearchMode)}>
           <option value="no_search">검색 없이 분석</option>
           <option value="backend_retrieval">먼저 검색한 뒤 분석</option>
           <option value="agentic_retrieval" disabled={!status.agenticRetrieval}>모델이 검색하며 분석</option>
           <option value="model_tool_call" disabled={status.toolSupport === 'unsupported'}>모델 도구 호출</option>
         </SelectField>
-        <TextField type="number" label="답변의 다양성" help={`낮을수록 비슷한 답변을, 높을수록 다양한 답변을 내도록 하는 값입니다.${limits ? ' 현재 모델은 비교 조건을 맞추기 위해 이 값을 고정합니다.' : ''}`} min={0} max={2} step="any" required disabled={!!limits} value={limits?.fixedTemperature ?? temperature} onChange={e => setTemperature(e.target.value)} />
-        <TextField type="number" label="응답 길이 제한" help="답변에 쓸 수 있는 최대 토큰 수입니다. 토큰은 글을 나누어 세는 단위로, 글자 수와는 다릅니다." min={128} max={outputLimit} step={1} required value={maxTokens} onChange={e => setMaxTokens(e.target.value)} />
+        <TextField type="number" label="답변의 다양성" help={`낮을수록 비슷한 답변을, 높을수록 다양한 답변을 내도록 하는 값입니다.${limits ? ' 현재 모델은 비교 조건을 맞추기 위해 이 값을 고정합니다.' : ''}`} min={0} max={2} step="any" required disabled={!!limits || !!replay} value={limits?.fixedTemperature ?? temperature} onChange={e => setTemperature(e.target.value)} />
+        <TextField type="number" label="응답 길이 제한" disabled={!!replay} help="답변에 쓸 수 있는 최대 토큰 수입니다. 토큰은 글을 나누어 세는 단위로, 글자 수와는 다릅니다." min={128} max={outputLimit} step={1} required value={maxTokens} onChange={e => setMaxTokens(e.target.value)} />
       </div>
+      <details className="lab-preview"><summary>행동 피드백 평가 정책</summary>
+        <TextareaField label="행동 평가 정책 원문" rows={5} maxLength={4000} required value={feedbackPolicy} onChange={e => setFeedbackPolicy(e.target.value)} />
+        <p>검수·선별에 사용하는 정책이며 모델 입력에는 추가하지 않습니다. 다른 정책의 피드백은 별도 파일로 관리합니다.</p>
+      </details>
       <LabError error={create.error} />
       {searchUnavailable && <p>검색 서비스에 연결할 수 없습니다. 연결 복구 후 실행하거나 검색 없이 분석을 선택하세요.</p>}
       {!validSize && dataset && <p>선택한 용도에서 평가할 수 있는 닉네임은 {count}개입니다.</p>}
-      <CheckboxField label="설정을 확정하고 최종 평가로 실행" help="최종 시험용 자료나 같은 표현군의 닉네임이 포함되면 체크해야 합니다. 시험 결과를 보고 설정을 반복해서 바꾸면 성능을 공정하게 비교하기 어렵습니다." checked={finalTest} onChange={e => setFinalTest(e.target.checked)} />
+      <CheckboxField label="설정을 확정하고 최종 평가로 실행" disabled={!!replay} help="최종 시험용 자료나 같은 표현군의 닉네임이 포함되면 체크해야 합니다. 시험 결과를 보고 설정을 반복해서 바꾸면 성능을 공정하게 비교하기 어렵습니다." checked={finalTest} onChange={e => setFinalTest(e.target.checked)} />
       <div className="lab-actions">
         <Button type="submit" disabled={importPrompts.isPending || !validSize || !dataset || !status.model || searchUnavailable || upload.isPending || create.isPending || (selected.length > 0 && selected.length !== size)}>
           {create.isPending ? '요청 중…' : `${size}개 평가 실행`}

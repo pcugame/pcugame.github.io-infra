@@ -1,5 +1,5 @@
-import { labReviewResult, LabSaveReviewSchema, LabCreateCandidateSchema, LabCandidateDecisionSchema, LabCurationExportRequestSchema,
-  labBuildCandidate, labFamilyPlan, labFamilyKey, labHumanMetrics, labValidateSelection, labTrainingLine, labEvaluationLine,
+import { labReviewResult, LabSaveReviewSchema, LabApproveFeedbackSchema, LabCurationExportRequestSchema,
+  labBuildPreference, labPreferenceScope, labAssertPreferenceScope, labFamilyPlan, labFamilyKey, labHumanMetrics, labValidateSelection, labTrainingLine, labEvaluationLine,
   type LabHumanReview, type LabCandidate, type LabCurationExport, type LabResult, type LabRun, type LabCase,
 } from '@pcu/contracts';
 import { allowMethod, bodyObject, conflict, missing, parseInput } from './common';
@@ -21,7 +21,7 @@ export async function handleLabHuman(state: MockHumanState, actorId: number, run
   const plan = () => validate(() => labFamilyPlan(allCases, state.families));
   const fresh = (candidate: LabCandidate) => ({ ...candidate, stale: latest(candidate.caseId)?.id !== candidate.reviewId || latest(candidate.caseId)?.resultHash !== hashes.get(candidate.caseId) });
   const candidates = () => state.candidates.filter(c => c.runId === runId).map(fresh);
-  const resultPath = /\/results\/([^/]+)\/(review|candidates)$/.exec(pathname);
+  const resultPath = /\/results\/([^/]+)\/(review)$/.exec(pathname);
   if (resultPath) {
     const caseId = decodeURIComponent(resultPath[1]);
     const result = row(caseId);
@@ -37,34 +37,54 @@ export async function handleLabHuman(state: MockHumanState, actorId: number, run
       const review = { id: crypto.randomUUID(), runId, caseId, revision: (previous?.revision ?? 0) + 1, actorId, createdAt: new Date().toISOString(), resultHash: input.resultHash, body: input.body, resultSnapshot: structuredClone(result) };
       state.reviews.unshift(review); return review;
     }
-    allowMethod(method, 'POST');
-    const input = parseInput(LabCreateCandidateSchema, bodyObject(options));
-    if (!previous || previous.id !== input.reviewId || previous.resultHash !== hashes.get(caseId)) conflict('최신 검수를 저장하세요.');
-    state.families = plan();
-    const body = validate(() => labBuildCandidate(result, previous!.body, input, state.families[labFamilyKey(result.testCase.familyId ?? '')]));
-    const candidate: LabCandidate = { id: crypto.randomUUID(), reviewId: previous!.id, runId, caseId, actorId, createdAt: new Date().toISOString(),
-      contentHash: await labMockHash(body), status: 'draft', body, decisions: [], stale: false };
-    state.candidates.unshift(candidate); return candidate;
   }
-  const decisionPath = /\/candidates\/([^/]+)\/decision$/.exec(pathname);
-  if (decisionPath) {
+  if (pathname.endsWith('/feedback/approve')) {
     allowMethod(method, 'POST');
-    const input = parseInput(LabCandidateDecisionSchema, bodyObject(options));
-    const candidate = state.candidates.find(c => c.runId === runId && c.id === decisionPath[1]) ?? missing('Candidate not found');
-    if (input.contentHash !== candidate.contentHash || (input.decision === 'approved' && fresh(candidate).stale)) conflict('후보 또는 검수가 변경되었습니다.');
-    candidate.status = input.decision;
-    candidate.decisions.push({ actorId, at: new Date().toISOString(), decision: input.decision, grounded: input.grounded, familyVerified: input.familyVerified });
-    return fresh(candidate);
+    const input = parseInput(LabApproveFeedbackSchema, bodyObject(options));
+    validate(() => labAssertPreferenceScope(labPreferenceScope(run.info), input.scope));
+    const groups = plan();
+    // Validate the entire batch before mutating persistent state.
+    const prepared = input.reviewIds.map(id => {
+      const review = state.reviews.find(r => r.id === id && r.runId === runId);
+      if (!review || latest(review.caseId)?.id !== id || review.resultHash !== hashes.get(review.caseId)) conflict('최신 검수를 다시 선택하세요.');
+      const result = row(review!.caseId);
+      return { review: review!, body: validate(() => labBuildPreference(result, review!.body, groups[labFamilyKey(result.testCase.familyId ?? '')] ?? null, input.scope)) };
+    });
+    const approved: LabCandidate[] = [];
+    for (const { review, body } of prepared) {
+      const existing = candidates().find(c => c.reviewId === review.id && c.body.version === 'preference-v1' && c.status === 'approved' && !c.stale);
+      if (existing) { approved.push(existing); continue; }
+      const candidate: LabCandidate = { id: crypto.randomUUID(), reviewId: review.id, runId, caseId: review.caseId, actorId,
+        createdAt: new Date().toISOString(), contentHash: await labMockHash(body), status: 'approved', body,
+        decisions: [{ actorId, at: new Date().toISOString(), decision: 'approved', grounded: true, familyVerified: true }], stale: false };
+      state.candidates.unshift(candidate); approved.push(candidate);
+    }
+    state.families = groups;
+    return approved;
   }
   const valid = new Map(run.rows.flatMap(r => { const review = latest(r.caseId); return review?.resultHash === hashes.get(r.caseId) ? [[r.caseId, review!.body] as const] : []; }));
   if (pathname.endsWith('/curation')) {
     allowMethod(method, 'GET');
     const currentCount = run.rows.filter(r => latest(r.caseId)).length;
-    return { metrics: labHumanMetrics(run.rows, valid, threshold, currentCount - valid.size), candidates: candidates(), exports: state.exports.filter(e => e.runId === runId).map(e => ({ id: e.id, runId: e.runId, actorId: e.actorId, createdAt: e.createdAt, kind: e.kind, manifest: e.manifest })) };
+    const scope = labPreferenceScope(run.info);
+    const groups = plan();
+    const feedback = run.rows.flatMap(result => {
+      const review = latest(result.caseId);
+      if (!review) return [];
+      let exclusion: string | null = null;
+      try {
+        if (!valid.has(result.caseId)) throw new Error('결과가 변경되었습니다. 재검수하세요.');
+        labBuildPreference(result, review.body, groups[labFamilyKey(result.testCase.familyId ?? '')] ?? null, scope);
+      } catch (e) { exclusion = e instanceof Error ? e.message : 'Invalid feedback'; }
+      return [{ review, nickname: result.testCase.nickname, familyId: result.testCase.familyId ?? null, eligible: !exclusion, exclusion,
+        candidateId: candidates().find(c => c.reviewId === review.id && c.body.version === 'preference-v1' && c.status === 'approved' && !c.stale)?.id ?? null }];
+    });
+    return { scope, feedback, metrics: labHumanMetrics(run.rows, valid, threshold, currentCount - valid.size), candidates: candidates(), exports: state.exports.filter(e => e.runId === runId).map(e => ({ id: e.id, runId: e.runId, actorId: e.actorId, createdAt: e.createdAt, kind: e.kind, manifest: e.manifest })) };
   }
   if (pathname.endsWith('/curation/exports')) {
     allowMethod(method, 'POST');
     const input = parseInput(LabCurationExportRequestSchema, bodyObject(options));
+    validate(() => labAssertPreferenceScope(labPreferenceScope(run.info), input.scope));
     const groups = plan();
     const id = crypto.randomUUID();
     const selected = input.candidateIds.map(id => candidates().find(c => c.id === id) ?? missing('Candidate not found'));
@@ -72,7 +92,7 @@ export async function handleLabHuman(state: MockHumanState, actorId: number, run
     let records: unknown[];
     let lines: unknown[];
     if (input.kind === 'train') {
-      validate(() => labValidateSelection(selected, input.policy));
+      validate(() => labValidateSelection(selected, input.policy, input.scope));
       lines = selected.map(labTrainingLine);
       records = selected.map(c => ({ candidate: c, review: latest(c.caseId), originalResult: row(c.caseId) }));
     } else {
@@ -82,9 +102,11 @@ export async function handleLabHuman(state: MockHumanState, actorId: number, run
       if (!lines.length) throw new MockHttpError(400, 'VALIDATION_ERROR', '검수된 평가 사례가 없습니다.');
       records = lines;
     }
-    const manifest = { mock: true, version: 'human-curation-v1', policy: input.policy, count: lines.length, records };
+    const manifest = { mock: true, version: 'preference-v1', scope: input.scope, run: run.info, policy: input.policy, count: lines.length,
+      selection: input.kind === 'train' ? labValidateSelection(selected, input.policy, input.scope) : { evaluationOnly: true },
+      datasetHash: run.info.datasetHash, promptHash: run.info.promptHash, model: run.info.model, records };
     const file: LabCurationExport = { id, runId, actorId, createdAt: new Date().toISOString(), kind: input.kind,
-      files: [{ filename: `mock-nickname-${input.kind}-${id}.jsonl`, content: lines.map(r => JSON.stringify(r)).join('\n') + '\n' },
+      files: [{ filename: `mock-nickname-${input.kind === 'train' ? 'preference' : input.kind}-${id}.jsonl`, content: lines.map(r => JSON.stringify(r)).join('\n') + '\n' },
         { filename: `mock-nickname-provenance-${id}.json`, content: JSON.stringify(manifest, null, 2) }], manifest: { ...manifest, records: undefined } };
     state.families = groups; state.exports.unshift(file); return file;
   }

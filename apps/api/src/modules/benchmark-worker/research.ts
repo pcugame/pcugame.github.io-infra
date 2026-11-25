@@ -15,7 +15,8 @@ import { readGenerateHealth, type ToolSupport } from './status.js';
 const actionSchema = z.toJSONSchema(LabResearchActionSchema, { target: 'draft-7' });
 type ShownSource = { id: string; title: string; snippet: string; evidenceKind: 'search_snippet'; originalFetched: false };
 type GenerationStep = {
-	kind: 'action' | 'answer'; rawResponse?: string; systemPrompt: string; prompt: string; schema: unknown;
+	kind: 'action' | 'answer'; rawResponse?: string; rawResponseEncoding?: 'json-string';
+  validation?: { valid: boolean; error: string | null }; systemPrompt: string; prompt: string; schema: unknown;
 	maxOutputTokens: number; inputTokens: number; outputTokens: number | null;
 	reservedOutputTokens: number; durationMs: number; seconds?: number; finishReason?: string;
 	suppliedSources: ShownSource[]; action?: LabResearchAction; error?: string;
@@ -153,6 +154,7 @@ export async function evaluateResearch(
 			if (!reply.success) throw new LabFailure('MODEL_INVALID_ENVELOPE');
 			// JSON string encoding preserves invalid Unicode/NUL output without breaking PostgreSQL jsonb.
 			step.rawResponse = JSON.stringify(reply.data.text);
+      step.rawResponseEncoding = 'json-string';
 			step.outputTokens = reply.data.output_tokens;
 			step.seconds = reply.data.seconds;
 			step.finishReason = reply.data.finish_reason;
@@ -167,6 +169,7 @@ export async function evaluateResearch(
 			return { value, step };
 		} catch (error) {
 			step.error = failureCode(error);
+      if ('rawResponse' in step) step.validation = { valid: false, error: step.error };
 			throw error;
 		} finally { step.durationMs = Math.round(performance.now() - began); }
 	}
@@ -208,6 +211,8 @@ export async function evaluateResearch(
 		const health = transport ? await transport.health(healthSignal) : await readGenerateHealth(config, healthSignal);
 		if (!health.identity) throw new LabFailure('RESEARCH_HEALTH_MISMATCH');
 		trace.identity = health.identity;
+    if (item.replayIdentity && (item.replayIdentity.weights_sha256 !== health.identity.weights_sha256 ||
+        item.replayIdentity.chat_template_sha256 !== health.identity.chat_template_sha256)) throw new LabFailure('REPLAY_MODEL_IDENTITY_CHANGED');
 		pinnedIdentity = { weights_sha256: health.identity.weights_sha256, chat_template_sha256: health.identity.chat_template_sha256 };
 		if (health.busy) throw new LabFailure('MODEL_BUSY');
 		if (item.searchMode === 'backend_retrieval') await retrieve(modelCase.nickname, 'backend');
@@ -225,9 +230,11 @@ export async function evaluateResearch(
 				const action = LabResearchActionSchema.safeParse(generated.value);
 				if (!action.success || (action.data.action === 'search' ? !action.data.query?.trim() : action.data.query !== null)) {
 					generated.step.error = 'INVALID_RESEARCH_ACTION';
+          generated.step.validation = { valid: false, error: generated.step.error };
 					continue;
 				}
 				generated.step.action = action.data;
+        generated.step.validation = { valid: true, error: null };
 				hypotheses = action.data.hypotheses;
 				if (action.data.action === 'finish') break;
 				if (attempt.searchCount === limits.maxSearches) { trace.limitations.push('SEARCH_LIMIT_REACHED'); break; }
@@ -255,11 +262,13 @@ export async function evaluateResearch(
 						: interpretationStatus !== 'supported_hypothesis' || output.sourceIds.length > 0;
 					if (validEvidence && verifiedInterpretation && output.nickname === modelCase.nickname && (!output.abstained || output.score === null) &&
 						output.sourceIds.every(id => evidenceChecks.some(e => e.sourceId === id && e.relation !== 'unrelated'))) {
-						attempt.output = LabOutputSchema.parse(output);
+						step.validation = { valid: true, error: null };
+            attempt.output = LabOutputSchema.parse(output);
 						return attempt;
 					}
 				}
 				step.error = 'INVALID_MODEL_OUTPUT';
+        step.validation = { valid: false, error: step.error };
 			} catch (error) {
 				if (!['INVALID_MODEL_JSON', 'MODEL_OUTPUT_TRUNCATED'].includes(failureCode(error))) throw error;
 			}

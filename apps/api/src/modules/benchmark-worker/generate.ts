@@ -63,6 +63,7 @@ export async function generateText(
 	const parsed = z
 		.object({
 			text: z.string().max(48000),
+      finish_reason: z.string().optional(),
 			input_tokens: z.number().int().positive(),
 			output_tokens: z.number().int().nonnegative(),
 			seconds: z.number().nonnegative(),
@@ -76,6 +77,7 @@ export async function generateText(
 	return {
 		content: fence ? fence[1]! : text,
     rawContent: text,
+    finishReason: parsed.data.finish_reason ?? (outputTokens >= maxTokens ? 'length' : 'unknown'),
 		usage: { inputTokens, outputTokens, seconds, jsonFenceRemoved: !!fence },
 		tool_calls: undefined,
 	};

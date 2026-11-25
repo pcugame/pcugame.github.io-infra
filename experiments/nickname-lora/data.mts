@@ -6,7 +6,7 @@ import { z } from 'zod';
 import {
   LAB_RESEARCH_SYSTEM_PROMPT, LAB_RESEARCH_ACTION_PROMPT, LAB_RESEARCH_ANSWER_PROMPT,
   LabCandidateSchema, LabHumanReviewSchema, LabResultSchema, LabCurationPolicySchema,
-  LabResearchActionSchema, LabResearchAnswerSchema, labBuildCandidate, labValidateSelection, labFamilyKey,
+  LabResearchActionSchema, LabResearchAnswerSchema, labBuildPreference, labTrainingLine, labReviewResult, LabPreferenceScopeSchema, labValidateSelection, labFamilyKey,
 } from '@pcu/contracts';
 import { researchPrompt } from '../../apps/api/src/modules/benchmark-worker/research.js';
 
@@ -65,53 +65,44 @@ export async function prepare(trainPath: string, provenancePath: string, output:
   const text = await readFile(trainPath, 'utf8');
   const provenanceText = await readFile(provenancePath, 'utf8');
   const provenance = JSON.parse(provenanceText);
-  if (provenance.version !== 'human-curation-v1' || provenance.kind !== 'train' ||
+  if (provenance.version !== 'preference-v1' || provenance.kind !== 'train' ||
       !provenance.files.some((f: {filename: string; sha256: string}) => f.filename === basename(trainPath) && f.sha256 === sha(text)))
-    throw Error('Train file is not bound to this Human Evaluation export');
+    throw Error('Expected an approved preference export; historical SFT records are not converted');
+  const scope = LabPreferenceScopeSchema.parse(provenance.scope);
   const raw = lines(text);
   if (!raw.length || raw.length !== provenance.records.length) throw Error('Export row count mismatch');
   const candidates = [];
-  const metadata: { caseId: string; nickname: string; familyId: string; tags: string[]; categories: string[];
-    objective: string; cohort: string; candidateId: string; reviewId: string; reviewRevision: number; retention: boolean }[] = [];
+  const metadata = [];
   for (const [i, record] of provenance.records.entries()) {
     const candidate = LabCandidateSchema.parse(record.candidate);
+    if (candidate.body.version !== 'preference-v1') throw Error('Historical SFT candidate');
     const review = LabHumanReviewSchema.parse(record.review);
     const result = LabResultSchema.parse(record.originalResult);
-    if (result.testCase.tags.filter(t => t.startsWith('obfuscation:')).length !== 1)
-      throw Error('Training cases need one obfuscation:<method> tag (or obfuscation:none) for held-out style validation');
     if (candidate.reviewId !== review.id || candidate.caseId !== result.caseId || review.caseId !== result.caseId ||
-        review.resultHash !== sha(JSON.stringify(result)) ||
-        candidate.runId !== review.runId || candidate.body.familyId !== labFamilyKey(result.testCase.familyId ?? '') ||
-        provenance.familySplit[candidate.body.familyId] !== 'train' || candidate.body.split !== 'train' ||
+        review.resultHash !== sha(JSON.stringify(labReviewResult(result))) || candidate.runId !== review.runId ||
+        candidate.body.familyId !== labFamilyKey(result.testCase.familyId ?? '') ||
+        provenance.familySplit[candidate.body.familyId] !== 'train' ||
         (result.testCase.split && result.testCase.split !== 'train')) throw Error('Review/split provenance mismatch');
     const decision = candidate.decisions.at(-1);
     if (!decision || decision.decision !== 'approved' || !decision.grounded || !decision.familyVerified)
       throw Error('Human approval is required');
     if (candidate.contentHash !== sha(JSON.stringify(candidate.body))) throw Error('Candidate content changed');
-    const rebuilt = labBuildCandidate(result, review.body, { reviewId: review.id, objective: candidate.body.objective,
-      ...(candidate.body.stepIndex !== null ? {stepIndex: candidate.body.stepIndex} : {}) }, 'train');
+    const rebuilt = labBuildPreference(result, review.body, 'train', scope);
     if (JSON.stringify(rebuilt) !== JSON.stringify(candidate.body) ||
-        JSON.stringify(raw[i]) !== JSON.stringify({ messages: candidate.body.messages })) throw Error('Recorded model context or target changed');
-    const { value, action } = validateMessages(candidate.body.messages);
-    const categories = ['json_contract', ...(action ? ['investigation_action',
-      ...(value.query || value.hypotheses.length ? ['meaning_query'] : [])] : [
-      ...(candidate.body.suppliedSources.length ? ['evidence_judgment'] : []),
-      ...(value.abstained ? ['abstention'] : []), ...(candidate.body.cohort === 'normal' ? ['normal_retention'] : []),
-    ])];
+        JSON.stringify(raw[i]) !== JSON.stringify(labTrainingLine(candidate))) throw Error('Recorded model context or raw completion changed');
     metadata.push({ caseId: candidate.caseId, nickname: result.testCase.nickname, familyId: candidate.body.familyId,
-      tags: result.testCase.tags, categories, objective: candidate.body.objective, cohort: candidate.body.cohort,
-      candidateId: candidate.id, reviewId: review.id, reviewRevision: review.revision, retention: candidate.body.retention });
+      tags: result.testCase.tags, label: candidate.body.label, reasons: candidate.body.reasons,
+      candidateId: candidate.id, reviewId: review.id, reviewRevision: review.revision });
     candidates.push(candidate);
   }
-  const selection = labValidateSelection(candidates, LabCurationPolicySchema.parse(provenance.policy));
+  const selection = labValidateSelection(candidates, LabCurationPolicySchema.parse(provenance.policy), scope);
   await newDirectory(output);
-  await writeFile(join(output, 'train.jsonl'), text, { mode: 0o600, flag: 'wx' });
+  // Keep preferences separate from the existing SFT trainer. No labels are discarded or transformed into targets.
+  await writeFile(join(output, 'preference.jsonl'), text, { mode: 0o600, flag: 'wx' });
   await writeFile(join(output, 'provenance.json'), provenanceText, { mode: 0o600, flag: 'wx' });
-  await save(join(output, 'manifest.json'), { version: 'nickname-sft-v1', split: 'train', smokeOnly: false,
-    trainSha256: sha(text), provenanceSha256: sha(provenanceText), exportId: provenance.id,
-    datasetVersion: provenance.datasetHash, protocolHash: sha(JSON.stringify(protocol())), rows: metadata, selection,
-    categoryCounts: Object.fromEntries(['investigation_action', 'meaning_query', 'evidence_judgment', 'abstention', 'normal_retention', 'json_contract']
-      .map(category => [category, metadata.filter(row => row.categories.includes(category)).length])) });
+  await save(join(output, 'manifest.json'), { version: 'nickname-preference-v1', split: 'train', smokeOnly: false,
+    preferenceSha256: sha(text), provenanceSha256: sha(provenanceText), exportId: provenance.id,
+    datasetHash: provenance.datasetHash, scope, rows: metadata, selection });
 }
 
 // Only plumbing fixtures. These are never labeled as human-reviewed data or eligible for promotion.

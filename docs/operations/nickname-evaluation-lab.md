@@ -170,7 +170,7 @@ npm run lab:research -w apps/api -- --nickname '달빛산책' --mode all --promp
 
 ## Human Evaluation과 다음 연구 단계
 
-[Human Evaluation 운영 절차](nickname-human-evaluation.md)에 검수 UI, 오류 분류, A/B/C 교정 후보, 명시적 승인, 표현군 단위 분할과 학습·평가 JSONL 내보내기를 명시한다. 실제 제공 자료를 기준으로 교정 후보를 생성하고 원본·검수·승인·생성 이력을 별도로 보존한다. 판단 지표는 전체 사례 수와 각 분모·미측정 수를 함께 제공한다. 다음 단계는 검수 자료의 대표성 확인과 가중치 학습이며, 학습 실행과 모델 개선 효과 측정은 별도로 수행한다.
+[Human Evaluation 운영 절차](nickname-human-evaluation.md)에 독립적인 벤치마크·행동 평가, 일괄 승인, 표현군 단위 분할과 preference JSONL 내보내기를 명시한다. 학습 파일은 실제 입력·원본 응답·긍정 또는 부정 label만 포함한다. 교정 JSON 작성과 신규 SFT 후보 생성은 제공하지 않으며 과거 기록은 연구 이력으로 보존한다. 판단 지표는 각 분모·미측정 수와 함께 제공한다. GPU 학습 알고리즘 변경과 모델 개선 효과 측정은 후속 단계이다.
 
 
 ## 지침 파일과 결과 다운로드
