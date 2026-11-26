@@ -13,7 +13,6 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/admin/years', label: '전시회 관리', icon: 'calendar', end: false },
   { to: '/admin/settings', label: '사이트 설정', icon: 'settings', end: false },
   { to: '/admin/banned-ips', label: 'IP 차단 관리', icon: 'shield', end: false },
-  { to: '/admin/beta-users', label: '베타 테스터 관리', icon: 'shield', end: false, adminOnly: true },
   { to: '/admin/import', label: 'JSON 임포트', icon: 'upload', end: false, adminOnly: true },
 ];
 

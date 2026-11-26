@@ -11,7 +11,7 @@ DEFAULTS = {
     'API_BIND_HOST': '127.0.0.1', 'API_PORT': '4000',
     'NAS_EXPORT_HOST_PATH': '/mnt/nas/pcu_storage/GraduationGame', 'NAS_EXPORT_PATH': '/nas',
     'S3_TLS_CA_HOST_PATH': '', 'APP_RUNTIME_ENV_FILE': '',
-    'API_RUNTIME_ENV_FILE': '', 'POSTGRES_RUNTIME_ENV_FILE': '', 'LAB_RUNTIME_ENABLED': 'false',
+    'API_RUNTIME_ENV_FILE': '', 'POSTGRES_RUNTIME_ENV_FILE': '',
 }
 
 
@@ -34,12 +34,6 @@ def render(output):
     common = settings['APP_RUNTIME_ENV_FILE'] or deploy + '/runtime-env/common.env'
     api = settings['API_RUNTIME_ENV_FILE'] or deploy + '/runtime-env/api.env'
     postgres = settings['POSTGRES_RUNTIME_ENV_FILE'] or deploy + '/runtime-env/postgres.env'
-    lab_env = deploy + '/runtime-env/lab.env'
-    if settings['LAB_RUNTIME_ENABLED'] not in ('true', 'false'):
-        raise ValueError('invalid lab profile')
-    lab = settings['LAB_RUNTIME_ENABLED'] == 'true'
-    if lab and lab_env in (common, api, postgres):
-        raise ValueError('lab environment must have its own scope')
     nas_host, nas_path, ca_host = (settings[name] for name in ('NAS_EXPORT_HOST_PATH', 'NAS_EXPORT_PATH', 'S3_TLS_CA_HOST_PATH'))
     paths = [str(output), deploy, common, api, postgres, nas_host, nas_path] + ([ca_host] if ca_host else [])
     if any(not path.startswith('/') or ':' in path or '\\' in path or '\n' in path or '\r' in path or path != path.strip() for path in paths):
@@ -55,9 +49,6 @@ def render(output):
         'NETWORK_READY': quote(deploy + '/runtime-helpers/wait-network-ready.py'),
         'API_IMAGE': image, 'API_PUBLISH': escape(f'{host}:{port}:4000'),
         'COMMON_ENV': quote(common), 'API_ENV': quote(api), 'POSTGRES_ENV': quote(postgres),
-        'LAB_ENV': quote(lab_env),
-        'LAB_ENV_LINE': '\nEnvironmentFile=' + quote(lab_env) if lab else '',
-        'LAB_SSH_VOLUME': escape(deploy + '/runtime-env/lab-ssh:/run/lab-ssh:ro,z'),
         'EXPORT_ENV': 'Environment=' + quote('NAS_EXPORT_ROOT=' + nas_path),
         'NAS_VOLUME': escape(f'{nas_host}:{nas_path}:rw,Z'),
         'CA_VOLUME': 'Volume=' + escape(f'{ca_host}:/run/secrets/garage-ca.pem:ro,Z') if ca_host else '',
@@ -67,7 +58,6 @@ def render(output):
     rendered = {
         template.name.removesuffix('.in'): re.sub(r'@([A-Z_]+)@', lambda match: tokens[match[1]], template.read_text())
         for template in templates.glob('*.in')
-        if lab or template.name not in ('gp-worker-benchmark.container.in', 'gp-lab-tunnel.container.in')
     }
     output.mkdir(mode=0o700, parents=False, exist_ok=False)
     for filename, content in rendered.items():

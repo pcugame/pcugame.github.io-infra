@@ -27,10 +27,6 @@
 
 `/admin/votes`에서 전시회별 투표와 공유 추첨 행사를 관리한다. 참가자는 고정 URL·QR로 접속하여 포스터를 선택하고, 연결된 행사에서 추첨·경품 수령을 진행한다. 공개 기록은 마감 이후에 제공한다. 브라우저 식별·보존·조사 정보 설정과 검증 범위는 [투표·추첨 운영](docs/operations/exhibition-voting.md)에 명시한다.
 
-### 닉네임 평가 실험실
-
-`/lab/nickname-evaluation`에서 베타 테스터와 관리자가 사람이 작성한 한국어 기반 닉네임·기대 근거·점수 데이터로 로컬 LLM을 평가한다. 모델에는 사용자 정의 지침·닉네임과 검색 모드에 따른 수집 자료를 전달하며, 기대 근거·점수와 split·표현군은 평가 관리에 사용한다. 연구 프로파일은 검색 없음·Worker 선검색·모델 능동 조사를 비교하고 검색어·해석 후보·출처·토큰을 기록한다. 비동기 실행, 실험 결과 비교, JSON·JSONL·CSV 내보내기를 지원한다. 벤치마크 정답 여부와 독립적인 행동 피드백, 일괄 승인, 표현군 분할과 원본 응답 기반 preference JSONL 생성을 지원한다. [Human Evaluation과 학습 데이터 선별](docs/operations/nickname-human-evaluation.md). 기본 설정은 비활성이다. [실험실 설정 및 운영 검증](docs/operations/nickname-evaluation-lab.md) · [연구 데이터 양식](benchmarks/nickname-evaluation/templates/nickname-research.jsonl)
-
 ## Safari 로그인 안내
 
 Mac Safari에서 Google 계정 선택 후에도 로그인 화면에 남는 현상이 제보되었다. 현재 웹과 API가 서로 다른 사이트에 있어, Safari의 제3자 쿠키 제한으로 로그인 상태가 유지되지 않을 가능성이 있다. 실제 Safari의 원인 확정과 설정 변경 효과는 미검증이며, [추적 이슈 #101](https://github.com/pcugame/pcugame.github.io-infra/issues/101)에서 확인 사항과 후속 과제를 관리한다.

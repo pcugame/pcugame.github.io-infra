@@ -132,7 +132,7 @@ export const GoogleAuthRequestSchema = z.object({
 });
 
 export const DevAuthLoginRequestSchema = z.object({
-	role: UserRoleSchema,
+	role: UserRoleSchema.exclude(['BETA_TESTER']),
 });
 
 export const DevAuthLoginErrorRequestSchema = z.object({

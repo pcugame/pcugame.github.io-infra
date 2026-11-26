@@ -115,61 +115,6 @@ class RuntimeCheck(unittest.TestCase):
         self.write_files()
         self.assertEqual(self.run_check().returncode, 2)
 
-    def test_lab_database_scope_and_model_identity(self):
-        lab = RUNTIME['LAB_PROFILE'] | {'DATABASE_URL': self.scopes[0]['DATABASE_URL']}
-        file = self.root / 'lab.env'
-        file.write_text(''.join(f'{key}={value}\n' for key, value in lab.items()))
-        for key, value in lab.items():
-            self.change(0, key, value)
-        for name in CHECK['LAB_NAMES']:
-            values = {'NODE_ENV': 'production'}
-            if name == 'gp-worker-benchmark':
-                values.update(lab)
-            self.document.append({'Name': name, 'State': {'Running': True},
-                                  'Config': {'Env': [key + '=' + value for key, value in values.items()]}})
-        options = ['--lab', str(file)]
-        self.assertEqual(self.run_check(options=options).returncode, 0)
-        url = RUNTIME['LAB_SEARCH_URL']
-        file.write_text(file.read_text() + 'LAB_SEARXNG_URL=' + url + '\n')
-        self.change(0, 'LAB_SEARXNG_URL', url)
-        self.change(-1, 'LAB_SEARXNG_URL', url)
-        self.assertEqual(self.run_check(options=options).returncode, 0)
-        with_search = file.read_text()
-        file.write_text(with_search.replace(url, 'http://example.org'))
-        self.assertEqual(self.run_check(options=options).returncode, 2)
-        file.write_text(with_search)
-        profile = 'nickname-research-v1'
-        file.write_text(with_search + 'LAB_GENERATE_PROFILE=' + profile + '\n')
-        self.change(0, 'LAB_GENERATE_PROFILE', profile)
-        self.assertEqual(self.run_check(options=options).returncode, 1)
-        self.change(-1, 'LAB_GENERATE_PROFILE', profile)
-        self.assertEqual(self.run_check(options=options).returncode, 0)
-        with_profile = file.read_text()
-        bert_url = RUNTIME['LAB_BERTSCORE_URL']
-        file.write_text(with_profile + 'LAB_BERTSCORE_URL=' + bert_url + '\n')
-        self.change(0, 'LAB_BERTSCORE_URL', bert_url)
-        self.assertEqual(self.run_check(options=options).returncode, 1)
-        self.change(-1, 'LAB_BERTSCORE_URL', bert_url)
-        self.assertEqual(self.run_check(options=options).returncode, 0)
-        self.change(1, 'LAB_BERTSCORE_URL', bert_url)
-        self.assertEqual(self.run_check(options=options).returncode, 1)
-        self.change(1, 'LAB_BERTSCORE_URL')
-        for bad in ('http://example.org:8090', 'http://127.0.0.1:8091', 'http://user:password@127.0.0.1:8090'):
-            file.write_text(with_profile + 'LAB_BERTSCORE_URL=' + bad + '\n')
-            self.assertEqual(self.run_check(options=options).returncode, 2)
-        file.write_text(with_profile)
-        self.change(0, 'LAB_BERTSCORE_URL')
-        self.change(-1, 'LAB_BERTSCORE_URL')
-        file.write_text(file.read_text().replace(profile, 'unknown-profile'))
-        self.assertEqual(self.run_check(options=options).returncode, 2)
-        file.write_text(with_search)
-        self.change(0, 'LAB_GENERATE_PROFILE')
-        self.change(-1, 'LAB_GENERATE_PROFILE')
-        self.change(1, 'LAB_MODEL', lab['LAB_MODEL'])
-        self.assertEqual(self.run_check(options=options).returncode, 1)
-        file.write_text(file.read_text().replace('127.0.0.1:18088', 'other:8088'))
-        self.assertEqual(self.run_check(options=options).returncode, 2)
-
     def test_application_key_inventory_tracks_schema_and_direct_reads(self):
         source = HERE.parents[1] / 'apps' / 'api' / 'src'
         schema = (source / 'config' / 'env.ts').read_text()
@@ -211,9 +156,7 @@ class RuntimeCheck(unittest.TestCase):
 
     def test_unpreserved_application_overrides_block_comparison(self):
         for index, key, value in ((0, 'RATE_LIMIT_LOGIN_MAX', '3'),
-                                  (5, 'EXPORT_WORKER_FILE_CONCURRENCY', '1'),
-                                  (0, 'LAB_ENABLED', 'true'),
-                                  (3, 'LAB_MODEL_API_KEY', SENTINEL)):
+                                  (5, 'EXPORT_WORKER_FILE_CONCURRENCY', '1')):
             original = copy.deepcopy(self.document)
             self.change(index, key, value)
             result = self.run_check()

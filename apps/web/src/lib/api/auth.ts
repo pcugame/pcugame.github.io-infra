@@ -8,7 +8,6 @@ import type {
   GoogleAuthResponse,
   LogoutResponse,
   MeResponse,
-  UserRole,
 } from '../../contracts';
 import { api } from './client';
 
@@ -23,7 +22,7 @@ export const authApi = {
   },
 
   /** dev/test 전용 역할 로그인 */
-  loginWithDevRole(role: UserRole) {
+  loginWithDevRole(role: DevAuthLoginRequest['role']) {
     return api.post<GoogleAuthResponse>('/api/dev/auth/login', {
       role,
     } satisfies DevAuthLoginRequest);

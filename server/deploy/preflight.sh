@@ -206,7 +206,7 @@ validate_worker_entries() {
     const entries = [
       "dist/game-validation-worker.js", "dist/webgl-worker.js",
       "dist/video-worker.js", "dist/image-worker.js", "dist/export-worker.js",
-      "dist/project-publication-worker.js", "dist/benchmark-worker.js",
+      "dist/project-publication-worker.js",
     ];
     for (const entry of entries) {
       if (!fs.existsSync(entry)) throw new Error(`missing worker entry: ${entry}`);
@@ -214,20 +214,6 @@ validate_worker_entries() {
       if (!source.includes("process.argv[1]")) throw new Error(`worker is not directly executable: ${entry}`);
     }
   '
-}
-
-# Verify the restricted key, host pin and provider before draining anything.
-# Use a one-shot SSH stream so a running forward can keep its pod-local port.
-validate_lab_connection() {
-  [[ "$LAB_RUNTIME_ENABLED" == true ]] || return 0
-  local keys="${DEPLOY_DIR}/runtime-env/lab-ssh"
-  [[ -r "$keys/identity" && -r "$keys/known_hosts" ]] || {
-    echo "ERROR: missing private model SSH identity or known_hosts" >&2
-    return 1
-  }
-  podman run --rm --pod "$POD_NAME" --user 0:0 --cap-drop=all --security-opt=no-new-privileges \
-    --read-only -v "$keys:/run/lab-ssh:ro,z" -e LAB_MODEL --entrypoint node "$API_IMAGE" \
-    dist/benchmark-model-health.js --ssh
 }
 
 validate_release_image_pair() {
@@ -264,20 +250,6 @@ validate_release_artifacts() {
   validate_release_entries
 }
 
-do_install_first_lab() (
-  load_env
-  require_immutable_release_images
-  load_runtime_env
-  [[ "$LAB_RUNTIME_ENABLED" == false ]] || { echo "First lab activation requires the disabled runtime" >&2; exit 1; }
-  assert_quadlet_adopted
-  python3 "$QUADLET_HELPERS/runtime-env.py" "$APP_RUNTIME_ENV_FILE" "$API_RUNTIME_ENV_FILE" "$POSTGRES_RUNTIME_ENV_FILE" "${DEPLOY_DIR}/runtime-env/lab.env.next" >/dev/null
-  local stage
-  stage=$(mktemp -d)
-  trap 'rm -rf -- "$stage"' EXIT
-  LAB_RUNTIME_ENABLED=true bash "$QUADLET_HELPERS/render.sh" "$stage/units"
-  QUADLET_DIR="$QUADLET_DIR" node "${DEPLOY_DIR}/release-recovery.mjs" install-first-lab "${RELEASE_RUN_KEY:?}" "$stage/units"
-)
-
 do_release_artifact_preflight() {
   local release_schema_phase="${1:-}"
   load_env
@@ -288,7 +260,6 @@ do_release_artifact_preflight() {
   validate_capacity_boundaries "${NAS_EXPORT_HOST_PATH:-/mnt/nas/pcu_storage/GraduationGame}"
   assert_quadlet_adopted
   validate_release_artifacts "$release_schema_phase"
-  validate_lab_connection
   echo "$release_schema_phase release artifacts passed preflight without stopping the current deployment."
 }
 

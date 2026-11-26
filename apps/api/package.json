@@ -9,8 +9,6 @@
     "prebuild": "npm --prefix ../.. run build -w @pcu/contracts",
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.release.json",
     "start": "node dist/server.js",
-    "worker:benchmark": "tsx src/benchmark-worker.ts",
-    "lab:research": "tsx scripts/nickname-research.ts",
     "worker:game-validation": "tsx src/game-validation-worker.ts",
     "worker:webgl": "tsx src/webgl-worker.ts",
     "worker:video": "tsx src/video-worker.ts",

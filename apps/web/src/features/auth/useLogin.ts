@@ -3,12 +3,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { authApi } from '../../lib/api';
 import { SessionNotEstablishedError, SessionVerificationError } from './session-errors';
-import type { DevAuthErrorScenario, UserRole } from '../../contracts';
+import type { DevAuthErrorScenario, DevAuthLoginRequest } from '../../contracts';
 import { queryKeys, invalidateVisibilityQueries } from '../../lib/query';
 
 export type LoginInput =
   | string
-  | { type: 'dev-role'; role: UserRole }
+  | { type: 'dev-role'; role: DevAuthLoginRequest['role'] }
   | { type: 'dev-error'; scenario: DevAuthErrorScenario };
 
 export function useLogin() {

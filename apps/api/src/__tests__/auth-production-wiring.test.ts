@@ -1,4 +1,3 @@
-import type { UserRole } from '@pcu/contracts';
 import { readFile } from 'node:fs/promises';
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
@@ -74,7 +73,7 @@ type Session = {
 		googleSub: string;
 		email: string;
 		name: string;
-		role: UserRole;
+		role: 'USER' | 'OPERATOR' | 'ADMIN';
 		studentId: string | null;
 	};
 };

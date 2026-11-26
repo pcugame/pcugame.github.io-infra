@@ -14,7 +14,6 @@ APP_NAMES = ('gp-api', 'gp-worker-game-validation', 'gp-worker-webgl',
              'gp-worker-video', 'gp-worker-image', 'gp-worker-export',
              'gp-worker-project-publication')
 NAMES = APP_NAMES + ('gp-postgres',)
-LAB_NAMES = ('gp-lab-tunnel', 'gp-worker-benchmark')
 RESERVED = {'NODE_ENV', 'PORT', 'NAS_EXPORT_ROOT', 'NODE_EXTRA_CA_CERTS'}
 # Fixed application key inventory: tests verify schema/direct-read coverage.
 # The checker runs from deployment scripts without requiring application sources.
@@ -25,7 +24,6 @@ DATABASE_URL DEV_AUTH_ENABLED DIRECT_UPLOAD_PART_SIZE_MB DIRECT_UPLOAD_PART_URL_
 DIRECT_UPLOAD_WORKER_POLL_MS DIRECT_UPLOAD_WORKER_TEMP_MAX_MB DIRECT_UPLOAD_WORKER_TEMP_ROOT DOWNLOAD_AUTO_IP_BAN_ENABLED EXPORT_WORKER_FILE_CONCURRENCY
 EXPORT_WORKER_LEASE_MS EXPORT_WORKER_MAX_JOB_BYTES EXPORT_WORKER_MAX_OBJECT_BYTES EXPORT_WORKER_POLL_MS EXPORT_WORKER_RETRY_BASE_MS
 FILE_GATEWAY_SECRET GOOGLE_CLIENT_IDS IMAGE_WORKER_POLL_MS IMAGE_WORKER_TEMP_MAX_MB IMAGE_WORKER_TEMP_ROOT
-LAB_ENABLED LAB_MODEL_PROVIDER LAB_MODEL LAB_MODEL_URL LAB_MODEL_API_KEY LAB_SEARXNG_URL LAB_CONCURRENCY LAB_GENERATE_PROFILE
 LOG_LEVEL NAS_EXPORT_ROOT NODE_ENV PORT PUBLIC_ASSET_ORIGIN
 RATE_LIMIT_GLOBAL_MAX RATE_LIMIT_GLOBAL_WINDOW_MS RATE_LIMIT_LOGIN_MAX RATE_LIMIT_LOGIN_WINDOW_MS RATE_LIMIT_SUBMIT_MAX
 RATE_LIMIT_SUBMIT_WINDOW_MS S3_ACCESS_KEY_ID S3_BUCKET_PROTECTED S3_BUCKET_PUBLIC S3_ENDPOINT
@@ -40,7 +38,7 @@ WEBGL_EXTERNAL_CONNECTIONS_ENABLED WEBGL_PLAY_ENABLED WEB_PUBLIC_URL
 """.split())
 # No additional direct process.env key reads currently exist in application source.
 APP_PROCESS_ENV_KEYS = set()
-KNOWN = set().union(*RUNTIME['SCOPES'], RUNTIME['LAB_KEYS'], RESERVED, APP_SCHEMA_KEYS, APP_PROCESS_ENV_KEYS)
+KNOWN = set().union(*RUNTIME['SCOPES'], RESERVED, APP_SCHEMA_KEYS, APP_PROCESS_ENV_KEYS)
 ERROR = 'ERROR: invalid runtime files, topology options, or running-container inspect input'
 
 
@@ -62,8 +60,8 @@ def reject_constant(value):
     raise ValueError()
 
 
-def inspect_envs(document, names=NAMES):
-    if not isinstance(document, list) or len(document) != len(names):
+def inspect_envs(document):
+    if not isinstance(document, list) or len(document) != len(NAMES):
         raise ValueError()
     result = {}
     for item in document:
@@ -72,7 +70,7 @@ def inspect_envs(document, names=NAMES):
         name = item.get('Name')
         if isinstance(name, str) and name.startswith('/'):
             name = name[1:]
-        if name not in names or name in result:
+        if name not in NAMES or name in result:
             raise ValueError()
         state, config = item.get('State'), item.get('Config')
         if not isinstance(state, dict) or state.get('Running') is not True or not isinstance(config, dict):
@@ -120,17 +118,12 @@ def postgres_loopback_equivalent(expected, actual):
 
 
 def compare(scopes, actual, nas_root, garage_ca):
-    common, api, postgres = scopes[:3]
-    lab = scopes[3] if len(scopes) == 4 else {}
+    common, api, postgres = scopes
     rows, matched = [], True
-    for name in actual:
+    for name in NAMES:
         expected = dict(postgres) if name == 'gp-postgres' else common | {'NODE_ENV': 'production'}
-        if name == 'gp-lab-tunnel':
-            expected = {'NODE_ENV': 'production'}
-        if name == 'gp-worker-benchmark':
-            expected = lab | {'NODE_ENV': 'production'}
         if name == 'gp-api':
-            expected.update(api | lab | {'PORT': '4000'})
+            expected.update(api | {'PORT': '4000'})
         if name == 'gp-worker-export':
             expected['NAS_EXPORT_ROOT'] = nas_root
         if name in APP_NAMES and garage_ca:
@@ -160,19 +153,14 @@ def main():
     parser.add_argument('common')
     parser.add_argument('api')
     parser.add_argument('postgres')
-    parser.add_argument('--lab', help='include the private 4B runtime environment and units')
     parser.add_argument('--nas-export-root', default='/nas')
     parser.add_argument('--garage-ca', action='store_true')
     options = parser.parse_args()
     root = options.nas_export_root
     if not root.startswith('/') or any(c in root for c in ':\\\n\r\0') or root != root.strip():
         raise ValueError()
-    files = [options.common, options.api, options.postgres]
-    if options.lab:
-        files.append(options.lab)
-    scopes = RUNTIME['read_runtime_files'](files, explicit=True)
-    actual = inspect_envs(json.load(sys.stdin, object_pairs_hook=unique_object, parse_constant=reject_constant),
-                          NAMES + LAB_NAMES if options.lab else NAMES)
+    scopes = RUNTIME['read_runtime_files']((options.common, options.api, options.postgres), explicit=True)
+    actual = inspect_envs(json.load(sys.stdin, object_pairs_hook=unique_object, parse_constant=reject_constant))
     rows, matched = compare(scopes, actual, root, options.garage_ca)
     print('\n'.join(rows))
     print('DATABASE_URL comparison is structural only; database connectivity is unverified')

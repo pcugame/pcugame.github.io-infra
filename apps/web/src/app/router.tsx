@@ -8,8 +8,6 @@ import { RequireAuth, RequireRole } from '../features/auth';
 import { lazy, Suspense } from 'react';
 import { LoadingSpinner } from '../components/common';
 
-const NicknameEvaluationPage = lazy(() => import('../pages/NicknameEvaluationPage'));
-const BetaUsersPage = lazy(() => import('../pages/admin/BetaUsersPage'));
 const VotePage = lazy(() => import('../pages/VotePage'));
 const AdminVotesPage = lazy(() => import('../pages/admin/AdminVotesPage'));
 const HomePage = lazy(() => import('../pages/HomePage'));
@@ -147,8 +145,6 @@ export const routes: RouteObject[] = [
         { path: '/me/projects/:id/network', element: (<RequireAuth><Lazy><WebglNetworkPage /></Lazy></RequireAuth>) },
         { path: '/me/change-requests/:id', element: (<RequireAuth><Lazy><MyChangeRequestPage /></Lazy></RequireAuth>) },
 
-        { path: '/lab/nickname-evaluation', element: <RequireAuth><RequireRole allowed={['BETA_TESTER', 'ADMIN']}><Lazy><NicknameEvaluationPage /></Lazy></RequireRole></RequireAuth> },
-
         // ── Admin ──────────────────────────────────────────
         {
           path: '/admin',
@@ -158,7 +154,6 @@ export const routes: RouteObject[] = [
             </RequireAuth>
           ),
           children: [
-            { path: 'beta-users', element: <RequireRole allowed={['ADMIN']}><Lazy><BetaUsersPage /></Lazy></RequireRole> },
             { path: 'votes', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><AdminVotesPage /></Lazy></RequireRole>) },
             { path: 'projects/new/studio', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><AdminProjectSubmissionStudioPage /></Lazy></RequireRole>) },
             { path: 'webgl-network', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><WebglNetworkPage admin /></Lazy></RequireRole>) },
@@ -190,7 +185,7 @@ export const routes: RouteObject[] = [
             {
               path: 'projects/:id/edit',
               element: (
-                <RequireRole allowed={['USER', 'BETA_TESTER', 'OPERATOR', 'ADMIN']}>
+                <RequireRole allowed={['USER', 'OPERATOR', 'ADMIN']}>
                   <Lazy>
                     <AdminProjectEditPage />
                   </Lazy>

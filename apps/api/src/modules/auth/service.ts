@@ -1,4 +1,4 @@
-import type { UserRole } from '@pcu/contracts';
+import type { DevAuthLoginRequest, UserRole } from '@pcu/contracts';
 import type { Clock, GoogleTokenVerifier, IdGenerator } from '../../application/ports.js';
 import { API_ERROR_CODES, AppError, forbidden, unauthorized } from '../../shared/errors.js';
 import { extractStudentIdFromEmail } from './student-id.js';
@@ -23,7 +23,7 @@ export interface AuthRepository {
 		googleSub: string;
 		email: string;
 		name: string;
-		role: UserRole;
+		role: DevAuthLoginRequest['role'];
 		studentId?: string | null;
 	}): Promise<AuthUserRecord>;
 	createSession(data: { id: string; userId: number; expiresAt: Date }): Promise<unknown>;
@@ -36,7 +36,7 @@ export interface AuthServiceLogger {
 	error(context: Record<string, unknown>, message: string): void;
 }
 
-const DEV_AUTH_USERS: Record<UserRole, {
+const DEV_AUTH_USERS: Record<DevAuthLoginRequest['role'], {
 	googleSub: string;
 	email: string;
 	name: string;
@@ -47,12 +47,6 @@ const DEV_AUTH_USERS: Record<UserRole, {
 		email: 'student@test.pcu.ac.kr',
 		name: 'Integration Student',
 		studentId: '20260001',
-	},
-	BETA_TESTER: {
-		googleSub: 'dev-auth-lab-tester',
-		email: 'lab-tester@test.pcu.ac.kr',
-		name: 'Integration Beta Tester',
-		studentId: '20260002',
 	},
 	OPERATOR: {
 		googleSub: 'dev-auth-operator',
@@ -148,7 +142,7 @@ export function createAuthService(deps: {
 			}
 		},
 
-		async loginForDevRole(role: UserRole) {
+		async loginForDevRole(role: DevAuthLoginRequest['role']) {
 			try {
 				const profile = DEV_AUTH_USERS[role];
 				const user = await deps.repository.upsertDevUser({ ...profile, role });

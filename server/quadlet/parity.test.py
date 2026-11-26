@@ -162,45 +162,6 @@ class Parity(unittest.TestCase):
 
     def test_defaults(self): self.scenario({})
 
-    def test_private_lab_profile(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            output = root / 'units'
-            env = clean_env() | {'API_IMAGE': IMAGE, 'DEPLOY_DIR': temp, 'LAB_RUNTIME_ENABLED': 'true'}
-            subprocess.run(['bash', str(HERE / 'render.sh'), str(output)], env=env, check=True)
-            worker = directives(output / 'gp-worker-benchmark.container')
-            tunnel = directives(output / 'gp-lab-tunnel.container')
-            self.assertEqual(worker['EnvironmentFile'], [f'"{temp}/runtime-env/lab.env"'])
-            self.assertEqual(worker['Exec'], ['dist/benchmark-worker.js'])
-            self.assertNotIn('EnvironmentFile', tunnel)
-            self.assertEqual(tunnel['Volume'], [temp + '/runtime-env/lab-ssh:/run/lab-ssh:ro,z'])
-            for unit in (worker, tunnel):
-                self.assertEqual(unit['Image'], [IMAGE])
-                self.assertEqual(unit['Pod'], ['graduationproject.pod'])
-                self.assertNotIn('PublishPort', unit)
-            self.assertIn(f'"{temp}/runtime-env/lab.env"', directives(output / 'gp-api.container')['EnvironmentFile'])
-            # The independently installed search service shares only the pod's loopback.
-            search_name = 'gp-lab-search.container'
-            search_file = HERE / 'lab-search' / search_name
-            (output / search_name).write_bytes(search_file.read_bytes())
-            search = directives(search_file)
-            self.assertRegex(search['Image'][0], r'^docker\.io/searxng/searxng@sha256:[a-f0-9]{64}$')
-            self.assertEqual(search['Pod'], ['graduationproject.pod'])
-            self.assertNotIn('PublishPort', search)
-            self.assertIn('GRANIAN_HOST=127.0.0.1', search['Environment'])
-            self.assertEqual(search['EnvironmentFile'], ['%h/.config/pcu-lab-search/search.env'])
-            generator = select_generator()
-            if generator:
-                generated = root / 'generated'
-                generated.mkdir()
-                result = generate(generator, output, generated, clean_env() | {'HOME': temp})
-                self.assertEqual(result.returncode, 0, result.stderr)
-                pod = (generated / 'graduationproject-pod.service').read_text()
-                for name in ('gp-worker-benchmark.service', 'gp-lab-tunnel.service', 'gp-lab-search.service'):
-                    self.assertTrue((generated / name).is_file())
-                    self.assertIn(name, pod)
-
-
     def test_explicit_generator_cannot_silently_skip(self):
         with tempfile.TemporaryDirectory() as temporary:
             with patch.dict(os.environ, {'QUADLET_GENERATOR': str(Path(temporary) / 'absent'),
