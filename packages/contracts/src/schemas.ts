@@ -8,7 +8,7 @@ export const VisibilitySchema = z.enum(['PUBLIC', 'AUTHENTICATED', 'STAFF']);
 export const ProjectStatusSchema = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']);
 const MutableProjectStatusSchema = z.enum(['PUBLISHED', 'ARCHIVED']);
 export const AssetKindSchema = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO', 'WEBGL', 'DOCUMENT', 'ATTACHMENT']);
-export const UserRoleSchema = z.enum(['USER', 'BETA_TESTER', 'OPERATOR', 'ADMIN']);
+export const UserRoleSchema = z.enum(['USER', 'OPERATOR', 'ADMIN']);
 export const AdminProjectListSortSchema = z.enum(['createdAt', 'title', 'year', 'status']);
 export const SortOrderSchema = z.enum(['asc', 'desc']);
 export const DevAuthErrorScenarioSchema = z.enum([
@@ -132,7 +132,7 @@ export const GoogleAuthRequestSchema = z.object({
 });
 
 export const DevAuthLoginRequestSchema = z.object({
-	role: UserRoleSchema.exclude(['BETA_TESTER']),
+	role: UserRoleSchema,
 });
 
 export const DevAuthLoginErrorRequestSchema = z.object({

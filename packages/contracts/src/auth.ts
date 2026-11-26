@@ -20,7 +20,7 @@ export type GoogleAuthResponse = {
 };
 
 export type DevAuthLoginRequest = {
-	role: Exclude<UserRole, 'BETA_TESTER'>;
+	role: UserRole;
 };
 
 export type DevAuthErrorScenario =
