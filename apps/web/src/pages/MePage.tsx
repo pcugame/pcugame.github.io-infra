@@ -1,18 +1,15 @@
-import { canUseLab } from '../lib/auth/roles';
 import { Link } from 'react-router-dom';
 import { useMe, useLogout } from '../features/auth';
 import { LoadingSpinner } from '../components/common';
 
 const ROLE_LABELS: Record<string, string> = {
   USER: '일반 사용자',
-  BETA_TESTER: '베타 테스터',
   OPERATOR: '운영자',
   ADMIN: '관리자',
 };
 
 const ROLE_BADGE: Record<string, string> = {
   USER: 'me-role--user',
-  BETA_TESTER: 'me-role--user',
   OPERATOR: 'me-role--operator',
   ADMIN: 'me-role--admin',
 };
@@ -60,8 +57,6 @@ export default function MePage() {
       <Link to="/me/projects" className="btn btn--secondary" style={{ marginBottom: '0.75rem' }}>
         내 작품 관리
       </Link>
-
-      {canUseLab(user.role) && <Link to="/lab/nickname-evaluation" className="btn btn--secondary">닉네임 평가 실험실</Link>}
 
       {/* Logout */}
       <button

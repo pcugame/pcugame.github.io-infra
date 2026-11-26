@@ -11,7 +11,7 @@ assert_quadlet_adopted() {
     return 1
   fi
   rm -rf "$staging"
-  local unit definition source fragment pending dropins ctr state
+  local unit definition source fragment pending dropins
   for unit in "$POD_UNIT" "$PG_UNIT" "${APP_UNITS[@]}" gp-pg-data-volume.service; do
     definition="${unit%.service}.container"
     [[ "$unit" != "$POD_UNIT" ]] || definition=graduationproject.pod
@@ -29,15 +29,6 @@ assert_quadlet_adopted() {
       return 1
     }
   done
-  if [[ "$LAB_RUNTIME_ENABLED" == false ]]; then
-    for ctr in gp-worker-benchmark gp-lab-tunnel; do
-      state="$(runtime_container_state "$ctr")" || return 1
-      [[ "$state" == missing || "$state" == exited ]] || {
-        echo "ERROR: disabled lab has a remaining $ctr container" >&2
-        return 1
-      }
-    done
-  fi
   assert_foundation_active
   assert_postgres_running
 }
@@ -74,7 +65,7 @@ assert_application_stopped() {
     state="$(systemctl --user show "$unit" --property=ActiveState --value)" || return 1
     [[ "$state" == inactive ]] || { echo "ERROR: application service is not inactive: $unit"; return 1; }
   done
-  for ctr in "${BASE_CONTAINERS[@]}" gp-lab-tunnel gp-worker-benchmark; do
+  for ctr in "${RUNTIME_CONTAINERS[@]}"; do
     state="$(runtime_container_state "$ctr")" || return 1
     [[ "$state" == missing || "$state" == exited || "$state" == dead ]] || {
       echo "ERROR: failed to drain mutation process $ctr (state: $state)"

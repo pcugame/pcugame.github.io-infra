@@ -24,7 +24,7 @@ function fixture(envName = 'common.env') {
  const names = ['gp-api', 'gp-worker-image'];
  for (const name of ['gp-worker-game-validation.container', 'gp-worker-webgl.container', 'gp-worker-video.container', 'gp-worker-export.container', 'gp-worker-project-publication.container', 'gp-postgres.container', 'graduationproject.pod', 'gp-pg-data.volume']) writeFileSync(join(quadletDir, name), '# fixture');
  for (const name of names) writeFileSync(join(quadletDir, `${name}.container`), `Image=${imageName}\nEnvironmentFile=${envDirective}\n`);
- const containers = new Map(names.map(name => [name, { Name: name, Config: { Env: [] }, Id: 'd'.repeat(64), Image: 'b'.repeat(64), ImageName: imageName, State: { Status: 'running' } }]));
+ const containers = new Map(names.map(name => [name, { Name: name, Id: 'd'.repeat(64), Image: 'b'.repeat(64), ImageName: imageName, State: { Status: 'running' } }]));
  const calls = []; let definition = 'initial', healthy = true, failure = null, reload = 'no', effective = 'initial';
  const podman = args => {
   calls.push(['podman', ...args]);
@@ -34,15 +34,12 @@ function fixture(envName = 'common.env') {
  };
  const systemctl = args => {
   calls.push(['systemctl', ...args]); const verb = args[1], unit = args[2];
-  if (verb === 'daemon-reload') return '';
-  if (verb === 'stop') { containers.delete(unit.replace(/\.service$/, '')); return ''; }
-  if (verb === 'show' && args[3] === '--property=LoadState') return existsSync(join(quadletDir, unit.replace(/\.service$/, '.container'))) ? 'loaded' : 'not-found';
   if (verb === 'cat') return `[Service]\nEnvironmentFile=${envDirective}\n# ${definition}`;
   if (verb === 'show') return args[3].includes('LoadState') ? `LoadState=loaded\nNeedDaemonReload=${reload}\nEnvironment=definition-${effective}` : `ActiveState=${containers.has(unit.replace(/\.service$/, '')) ? 'active' : 'inactive'}\nSubState=running`;
   if (verb === 'start') {
    if (failure === unit) throw new Error('systemctl fixture failure');
    const name = unit.replace(/\.service$/, '');
-   containers.set(name, { Name: name, Config: { Env: [] }, Id: 'e'.repeat(64), Image: 'b'.repeat(64), ImageName: imageName, State: { Status: 'running' } });
+   containers.set(name, { Name: name, Id: 'e'.repeat(64), Image: 'b'.repeat(64), ImageName: imageName, State: { Status: 'running' } });
    return '';
   }
   assert.fail(`Unexpected systemctl ${args}`);
@@ -50,88 +47,6 @@ function fixture(envName = 'common.env') {
  return { deployDir, quadletDir, envFile, containers, calls, options: { deployDir, quadletDir, podman, systemctl, webVerified: true, sleep: async () => {} },
   setDefinition: value => { definition = value; }, setReload: value => { reload = value; }, setEffective: value => { effective = value; }, setHealthy: value => { healthy = value; }, setFailure: value => { failure = value; },
   cleanup: () => rmSync(deployDir, { recursive: true, force: true }) };
-}
-test('lab capture covers both units and detects changed SSH trust before recovery', async () => {
- const f = fixture();
- try {
-  const keys = join(f.deployDir, 'runtime-env/lab-ssh');
-  mkdirSync(keys, { recursive: true });
-  for (const name of ['identity', 'known_hosts']) writeFileSync(join(keys, name), 'fixture');
-  for (const name of ['gp-lab-tunnel', 'gp-worker-benchmark']) {
-   writeFileSync(join(f.quadletDir, name + '.container'), `Image=${imageName}\n`);
-   f.containers.set(name, { ...f.containers.get('gp-api'), Name: name });
-  }
-  await assert.rejects(runRecovery('capture', '122-1', f.options), /differ from the running API/);
-  f.containers.get('gp-api').Config.Env = ['LAB_ENABLED=true'];
-  await runRecovery('capture', runKey, f.options);
-  f.containers.clear();
-  await runRecovery('recover', runKey, f.options);
-  assert.ok(f.containers.has('gp-worker-benchmark'));
-  assert.ok(f.containers.has('gp-lab-tunnel'));
-  writeFileSync(join(keys, 'known_hosts'), 'rotated fixture');
-  await assert.rejects(runRecovery('recover', runKey, f.options), /definitions changed/);
- } finally { f.cleanup(); }
-});
-function stageLab(f) {
- const stage = join(f.deployDir, 'stage');
- mkdirSync(stage);
- for (const unit of ['gp-api', 'gp-lab-tunnel', 'gp-worker-benchmark']) writeFileSync(join(stage, unit + '.container'), `Image=${imageName}\n# lab enabled\n`);
- const env = join(f.deployDir, 'runtime-env/lab.env');
- mkdirSync(join(f.deployDir, 'runtime-env'));
- writeFileSync(env + '.next', 'LAB_ENABLED=true\nDATABASE_URL=private-fixture', { mode: 0o600 });
- return { options: { ...f.options, stagedUnits: stage }, env, api: join(f.quadletDir, 'gp-api.container') };
-}
-for (const failure of ['partial install', 'preflight', 'after drain', 'migration attempted', 'definition drift']) {
- test(`first lab activation recovery after ${failure}`, async t => {
-  const f = fixture();
-  t.after(f.cleanup);
-  const { options, env, api } = stageLab(f);
-  const previous = readFileSync(api);
-  await runRecovery('install-first-lab', runKey, options);
-  await runRecovery('verify-first-lab', runKey, options);
-  assert.notDeepEqual(readFileSync(api), previous);
-  assert.equal(readFileSync(env, 'utf8'), readFileSync(env + '.next', 'utf8'));
-  const stateFile = join(f.deployDir, 'cutover-state', 'recovery-' + runKey, 'runtime.json');
-  assert.ok(!readFileSync(stateFile, 'utf8').includes('private-fixture'));
-  if (failure === 'migration attempted') {
-   await runRecovery('mark-migration', runKey, options);
-   f.calls.length = 0;
-   await assert.rejects(runRecovery('recover', runKey, options), /Migration was attempted/);
-   assert.equal(f.calls.length, 0);
-   assert.ok(existsSync(env));
-   return;
-  }
-  if (failure === 'definition drift') {
-   writeFileSync(env, 'operator change');
-   await assert.rejects(runRecovery('verify-first-lab', runKey, options), /configuration drift/);
-   await assert.rejects(runRecovery('recover', runKey, options), /configuration drift/);
-   assert.equal(readFileSync(env, 'utf8'), 'operator change');
-   return;
-  }
-  if (failure === 'partial install') {
-   rmSync(join(f.quadletDir, 'gp-worker-benchmark.container'));
-   rmSync(env);
-  } else if (failure === 'after drain') {
-   f.containers.clear();
-   writeFileSync(join(f.deployDir, 'cutover-state/mutation-drained'), 'yes');
-  } else {
-   for (const name of ['gp-lab-tunnel', 'gp-worker-benchmark']) f.containers.set(name, { ...f.containers.get('gp-api'), Name: name });
-  }
-  const installed = readFileSync(api);
-  await assert.rejects(runRecovery('recover', runKey, { ...options, webVerified: false }), /Pages/);
-  assert.deepEqual(readFileSync(api), installed);
-  await runRecovery('recover', runKey, options);
-  assert.deepEqual(readFileSync(api), previous);
-  assert.ok(!existsSync(env));
-  assert.ok(existsSync(env + '.next'));
-  for (const name of ['gp-lab-tunnel', 'gp-worker-benchmark']) {
-   assert.ok(!f.containers.has(name));
-   assert.ok(!existsSync(join(f.quadletDir, name + '.container')));
-  }
-  assert.ok(!f.containers.get('gp-api').Config.Env.includes('LAB_ENABLED=true'));
-  assert.ok(f.containers.has('gp-worker-image'));
-  assert.ok(!existsSync(join(f.deployDir, 'cutover-state/mutation-drained')));
- });
 }
 test('SQL attempt, missing previous web, and absent API fail before runtime starts', () => {
  const state = { version: 2, quadletDir: '/fixture', definitionHash: 'hash', containers: [{ name: 'gp-api', image: 'd'.repeat(64), imageName }] };

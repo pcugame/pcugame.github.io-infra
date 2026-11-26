@@ -297,7 +297,6 @@ async function buildAppWithContext(
 	});
 
 	// Routes
-	if (context.routes.lab) await app.register(context.routes.lab, { prefix: '/api/lab' });
 	if (context.routes.voting) await app.register(context.routes.voting);
 	await app.register(context.routes.auth, { prefix: '/api' });
 	if (shouldRegisterDevAuth(cfg)) {

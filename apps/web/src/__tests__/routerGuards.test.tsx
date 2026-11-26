@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { isValidElement, type ReactElement } from 'react';
+import { isValidElement } from 'react';
 import type { RouteObject } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { routes } from '../app/router';
@@ -35,14 +35,6 @@ describe('route guards', () => {
     expectRouteElement(topLevelRoute('/me/projects/new'), RequireAuth);
   });
 
-  it('requires an authenticated beta tester or administrator for the lab', () => {
-    const props = expectRouteElement<{ children: ReactElement<{allowed: string[]}> }>(topLevelRoute('/lab/nickname-evaluation'), RequireAuth);
-    expect(props.children.type).toBe(RequireRole);
-    expect(props.children.props.allowed).toEqual(['BETA_TESTER', 'ADMIN']);
-    const admin = expectRouteElement<{ allowed: string[] }>(adminChildRoute('beta-users'), RequireRole);
-    expect(admin.allowed).toEqual(['ADMIN']);
-  });
-
   it('/admin/projects/new is operator/admin-only flow', () => {
     const props = expectRouteElement<{ allowed: string[] }>(
       adminChildRoute('projects/new'),
@@ -65,6 +57,6 @@ describe('route guards', () => {
       RequireRole,
     );
 
-    expect(props.allowed).toEqual(['USER', 'BETA_TESTER', 'OPERATOR', 'ADMIN']);
+    expect(props.allowed).toEqual(['USER', 'OPERATOR', 'ADMIN']);
   });
 });

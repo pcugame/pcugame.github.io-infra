@@ -17,9 +17,7 @@ deploy() { bash "${DEPLOY_DIR}/deploy.sh" "$@"; }
 login() { printf '%s' "${GHCR_TOKEN:?}" | podman login ghcr.io -u "${GHCR_USERNAME:?}" --password-stdin; }
 health() {
   # API smoke inside deploy.sh precedes workers. This gate checks the complete runtime.
-  local containers name client
-  containers="$(deploy runtime-containers)"
-  while IFS= read -r name; do
+  for name in gp-api gp-worker-game-validation gp-worker-webgl gp-worker-video gp-worker-image gp-worker-export gp-worker-project-publication; do
     [[ "$(podman inspect --format '{{.State.Status}}' "$name")" == running ]]
     [[ "$(systemctl --user is-active "${name}.service")" == active ]]
     deployed_id="$(podman inspect "$name" --format '{{.Image}}')"
@@ -27,12 +25,7 @@ health() {
     actual_digest="$(podman image inspect "$deployed_id" --format '{{.Digest}}')"
     [ "$actual_source" = "$RELEASE_SOURCE_SHA" ]
     [ "$actual_digest" = "${FINAL_IMAGE##*@}" ]
-    if [[ "$name" == gp-worker-benchmark ]]; then
-      for client in gp-api gp-worker-benchmark; do
-        podman exec "$client" node dist/benchmark-model-health.js
-      done
-    fi
-  done <<< "$containers"
+  done
   podman exec gp-api wget -qO- http://localhost:4000/api/health | grep -q '"ok":true'
 }
 final_smoke() {
@@ -46,33 +39,14 @@ final_smoke() {
 case "$command" in
   preflight)
     login
-    if [[ "${ACTIVATE_LAB:-false}" == true ]]; then
-      # Require a completed, healthy disabled release of this exact source and image.
-      cmp --silent <(printf 'source_sha=%s\nimage=%s\n' "$RELEASE_SOURCE_SHA" "$FINAL_IMAGE") "${CUTOVER_STATE_DIR}/deployed-${RELEASE_SOURCE_SHA}.txt"
-      health
-      deploy install-first-lab
-    fi
     deploy release-artifact-preflight phase2
-    if [[ "${ACTIVATE_LAB:-false}" == true ]]; then
-      systemctl --user start gp-lab-tunnel.service
-      systemctl --user start gp-worker-benchmark.service
-      for ((attempt=1; ; attempt++)); do
-        if podman exec gp-worker-benchmark node dist/benchmark-model-health.js; then break; fi
-        (( attempt < 5 )) || exit 1
-        sleep 2
-      done
-    fi
     deploy release-assert phase2
     node "${DEPLOY_DIR}/release-smoke-target.mjs" prepare "$RELEASE_SOURCE_SHA"
     bash "${DEPLOY_DIR}/ip-ban-audit.sh" before
     ;;
   backup)
     bash "${DEPLOY_DIR}/release-db-snapshot.sh" "$RELEASE_SOURCE_SHA"
-    if [[ "${ACTIVATE_LAB:-false}" == true ]]; then
-      node "${DEPLOY_DIR}/release-recovery.mjs" verify-first-lab "${RELEASE_RUN_KEY:?}"
-    else
-      node "${DEPLOY_DIR}/release-recovery.mjs" capture "${RELEASE_RUN_KEY:?}"
-    fi
+    node "${DEPLOY_DIR}/release-recovery.mjs" capture "${RELEASE_RUN_KEY:?}"
     deploy drain
     deploy backup "release-${RELEASE_SOURCE_SHA}"
     ;;

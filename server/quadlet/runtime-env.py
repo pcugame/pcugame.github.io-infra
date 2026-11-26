@@ -22,26 +22,18 @@ API_OPTIONAL_KEYS = {'VOTE_INVESTIGATION_SECRET', 'VOTE_PRIVACY_NOTICE'}
 API_KEYS = set(API_DEFAULTS) | API_OPTIONAL_KEYS
 PG_KEYS = set('POSTGRES_USER POSTGRES_DB POSTGRES_PASSWORD'.split())
 SCOPES = (COMMON_KEYS, API_KEYS, PG_KEYS)
-# The private production forward has a fixed wire profile. The lab file is
-# shared only by the API and benchmark worker; other workloads retain their scopes.
-LAB_PROFILE = dict(LAB_ENABLED='true', LAB_MODEL_PROVIDER='transformers-generate',
-    LAB_MODEL='Qwen3-4B-Instruct-2507-Q4_K_M', LAB_MODEL_URL='http://127.0.0.1:18088', LAB_CONCURRENCY='1')
-LAB_SEARCH_URL = 'http://127.0.0.1:18888'
-LAB_BERTSCORE_URL = 'http://127.0.0.1:8090'
-LAB_OPTIONAL_KEYS = {'LAB_SEARXNG_URL', 'LAB_GENERATE_PROFILE', 'LAB_BERTSCORE_URL'}
-LAB_KEYS = {'DATABASE_URL', *LAB_OPTIONAL_KEYS, *LAB_PROFILE}
 
 
 def read_runtime_files(filenames, *, explicit=False):
-    """Return the deployment scopes, rejecting duplicates and unknown keys.
+    """Return three scoped dicts, rejecting duplicates and unknown keys.
 
     Values remain literal, including quotes, dollar signs and equals signs. Shell text is never executed; callers must suppress OS exception messages
     because those can include operator filenames.
     """
-    if len(filenames) not in (3, 4):
+    if len(filenames) != 3:
         raise ValueError()
     scopes = []
-    for index, (filename, allowed) in enumerate(zip(filenames, (*SCOPES, LAB_KEYS))):
+    for index, (filename, allowed) in enumerate(zip(filenames, SCOPES)):
         values = {}
         for line in Path(filename).read_text().split('\n'):
             if not line.strip() or line.lstrip().startswith('#'):
@@ -55,35 +47,20 @@ def read_runtime_files(filenames, *, explicit=False):
                 raise ValueError()
             values[key] = value
         required = allowed - (COMMON_OPTIONAL_KEYS if index == 0 else API_OPTIONAL_KEYS if index == 1 else set())
-        if index == 3:
-            required = required - LAB_OPTIONAL_KEYS
         if explicit and not required <= values.keys():
             raise ValueError()
         scopes.append(values)
-    if len(scopes) == 4:
-        expected = LAB_PROFILE | {'DATABASE_URL': scopes[0].get('DATABASE_URL')}
-        if 'LAB_SEARXNG_URL' in scopes[3]:
-            expected['LAB_SEARXNG_URL'] = LAB_SEARCH_URL
-        if 'LAB_GENERATE_PROFILE' in scopes[3]:
-            expected['LAB_GENERATE_PROFILE'] = 'nickname-research-v1'
-        if 'LAB_BERTSCORE_URL' in scopes[3]:
-            expected['LAB_BERTSCORE_URL'] = LAB_BERTSCORE_URL
-        if not expected['DATABASE_URL'] or scopes[3] != expected:
-            raise ValueError()
     return scopes
 
 
 def deployment_values(filenames):
-    scopes = read_runtime_files(filenames)
-    common, api, postgres = scopes[:3]
+    common, api, postgres = read_runtime_files(filenames)
     values = COMMON_DEFAULTS | API_DEFAULTS | common | api | postgres
     # Preserve the existing gate contract; adoption separately requires every
     # documented key, including POSTGRES_PASSWORD and defaulted values.
     required = COMMON_REQUIRED | {'FILE_GATEWAY_SECRET', 'TRUST_PROXY', 'POSTGRES_USER', 'POSTGRES_DB'}
     if not required <= values.keys():
         raise ValueError()
-    if len(scopes) == 4:
-        values['LAB_MODEL'] = scopes[3]['LAB_MODEL']
     return values
 
 

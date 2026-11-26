@@ -346,9 +346,6 @@ if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
   esac
   exit 0
 fi
-case " $* " in
-  *" gp-lab-tunnel "*|*" gp-worker-benchmark "*) exit 1 ;;
-esac
 if [ "\${1:-}" = inspect ]; then
   case " $* " in
     *"{{.Image}}"*) printf '%s\\n' "\${FAKE_CONTAINER_IMAGE_ID:-${'3'.repeat(64)}}" ;;

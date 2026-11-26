@@ -133,7 +133,6 @@ const garageEnv = {
 };
 
 const suites = {
- 'nickname-evaluation': {files:['src/__tests__/nickname-evaluation.postgres.test.ts', 'src/__tests__/lab-bertscore.postgres.test.ts', 'src/__tests__/nickname-research.postgres.test.ts', 'src/__tests__/lab-human.postgres.test.ts', 'src/__tests__/lab-migration.postgres.test.ts', 'src/modules/benchmark-worker/repository.postgres.test.ts']},
  'awards-gateway': { files: ['src/__tests__/awards-gateway.garage.postgres.test.ts'], env: { RUN_POSTGRES_INTEGRATION: 'true', RUN_GARAGE_INTEGRATION: 'true', RUN_GATEWAY_INTEGRATION: 'true' } },
  awards: { files: ['src/__tests__/awards.postgres.test.ts'], env: { RUN_POSTGRES_INTEGRATION: 'true' } },
 	voting: { files: ['src/__tests__/voting.postgres.test.ts'], env: { RUN_POSTGRES_INTEGRATION: 'true' } },
@@ -237,7 +236,6 @@ const suites = {
 };
 
 const fullSuiteOrder = [
- 'nickname-evaluation',
  'awards',
  'awards-gateway',
 	'voting',

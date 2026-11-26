@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useMe, useLogin } from '../features/auth';
 import { SessionNotEstablishedError } from '../features/auth/session-errors';
 import { SessionLoginHelp } from '../features/auth/SessionLoginHelp';
-import type { ApiErrorCode, DevAuthErrorScenario, UserRole } from '../contracts';
+import type { ApiErrorCode, DevAuthErrorScenario, DevAuthLoginRequest } from '../contracts';
 import { initializeGoogleSignIn } from '../lib/auth';
 import { getApiErrorCode, getApiErrorMessage, isApiError } from '../lib/api';
 
@@ -16,8 +16,7 @@ const SCHOOL_DOMAIN_ERROR_CODES = new Set<string>([
   'DOMAIN_NOT_ALLOWED',
 ]);
 
-const DEV_AUTH_ROLES: { role: UserRole; label: string }[] = [
-  { role: 'BETA_TESTER', label: '베타 테스터' },
+const DEV_AUTH_ROLES: { role: DevAuthLoginRequest['role']; label: string }[] = [
   { role: 'USER', label: '학생' },
   { role: 'OPERATOR', label: '운영자' },
   { role: 'ADMIN', label: '관리자' },

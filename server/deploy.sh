@@ -24,9 +24,7 @@ case "${1:-up}" in
   release-assert) do_release_assert "${2:-}" ;;
   inventory) do_inventory_snapshot "${2:-}" ;;
   capacity-preflight) do_capacity_preflight ;;
-  runtime-containers) load_env; load_runtime_env; assert_quadlet_adopted >&2; printf '%s\n' "${RUNTIME_CONTAINERS[@]}" ;;
   boundary-preflight) load_env; load_runtime_env; validate_production_boundaries ;;
-  install-first-lab) do_install_first_lab ;;
   release-artifact-preflight) do_release_artifact_preflight "${2:-}" ;;
   verify-final-web) do_verify_final_web "${2:-}" ;;
   # Restart uses the same gated application-only release transaction.

@@ -1,4 +1,3 @@
-import { canUseLab } from '../lib/auth/roles';
 import { useViewerKey } from '../lib/query';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -44,7 +43,6 @@ export default function HomePage() {
 								{canManageProjects && (
 									<Link to="/admin/projects" className="home-topnav__link">관리</Link>
 								)}
-								{canUseLab(user.role) && <Link to="/lab/nickname-evaluation" className="home-topnav__link">실험실</Link>}
 								<Link to="/me/projects" className="home-topnav__link">내 작품</Link>
 								<Link to={submitRoute} className="home-topnav__btn home-topnav__btn--upload">
 									{canManageProjects ? '작품 등록' : '작품 제출'}

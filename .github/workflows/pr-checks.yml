@@ -33,9 +33,6 @@ jobs:
       - name: Test integration runner
         run: node --test scripts/run-integration.test.mjs
 
-      - name: Validate expression DB source data
-        run: node benchmarks/nickname-evaluation/expressions/build.mjs
-
       - uses: actions/setup-go@v5
         if: steps.changes.outputs.release == 'true'
         with:
@@ -45,13 +42,6 @@ jobs:
       - name: Build offline production-version Quadlet generator
         if: steps.changes.outputs.release == 'true'
         run: bash server/quadlet/build-compat-generator.sh "${RUNNER_TEMP}/quadlet-5.4.2"
-
-      - name: Test local LLM profiles
-        if: steps.changes.outputs.release == 'true'
-        run: |
-          python3 -m unittest discover -s server/local-llm -p 'test_*.py'
-          python3 -m unittest discover -s server/bertscore -p 'test_*.py'
-          python3 -m unittest discover -s experiments/nickname-lora -p 'test_*.py'
 
       - name: Test release controls and deployment fixtures
         if: steps.changes.outputs.release == 'true'
@@ -79,16 +69,6 @@ jobs:
       - name: Build shared contracts prerequisite
         if: steps.changes.outputs.contracts == 'true'
         run: npm run build --workspace=@pcu/contracts
-
-      - name: Validate expression DB and curated nickname evaluation
-        if: steps.changes.outputs.contracts == 'true'
-        run: node --test benchmarks/nickname-evaluation/expressions/validate.test.mjs
-
-      - name: Verify offline nickname LoRA pipeline
-        if: steps.changes.outputs.contracts == 'true'
-        run: |
-          node_modules/.bin/tsx --test experiments/nickname-lora/pipeline.test.mts
-          node_modules/.bin/tsc -p experiments/nickname-lora/tsconfig.json
 
       - name: Test shared contracts
         if: steps.changes.outputs.contracts == 'true' && steps.changes.outputs.full != 'true'

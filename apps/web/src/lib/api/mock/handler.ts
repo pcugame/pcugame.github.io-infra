@@ -1,7 +1,6 @@
-import { handleLab } from './lab';
 import { handleAwards } from './awards';
 import { handleVoting } from './voting';
-import { MockHttpError, UNHANDLED, type MockContext, type MockRequestOptions, type MockUserSelection } from './context';
+import { MOCK_USERS, MockHttpError, UNHANDLED, type MockContext, type MockRequestOptions, type MockUserSelection } from './context';
 import { allowMethod, bodyObject } from './common';
 import { handleProjects, advanceVideoRepairs } from './projects';
 import { handleUploads, advanceUploadJobs } from './uploads';
@@ -21,10 +20,10 @@ export async function dispatchMockRequest(ctx: MockContext, pathname: string, me
     let selection: MockUserSelection = 'owner';
     if (pathname === '/api/auth/google') { if (typeof body.credential !== 'string' || !body.credential) throw new MockHttpError(401, 'UNAUTHORIZED', 'Invalid Google token'); }
     else {
-      if (!['USER', 'BETA_TESTER', 'OPERATOR', 'ADMIN'].includes(String(body.role))) throw new MockHttpError(400, 'VALIDATION_ERROR', 'Invalid role');
+      if (!['USER', 'OPERATOR', 'ADMIN'].includes(String(body.role))) throw new MockHttpError(400, 'VALIDATION_ERROR', 'Invalid role');
       selection = body.role === 'USER' ? 'owner' : body.role as MockUserSelection;
     }
-    ctx.state.authUser = selection; delete ctx.state.authExpiresAt; return { user: ctx.user };
+    ctx.state.authUser = selection; delete ctx.state.authExpiresAt; return { user: MOCK_USERS[selection as Exclude<MockUserSelection,'anonymous'>] };
   }
   if (pathname === '/api/dev/auth/login-error') {
     allowMethod(method, 'POST'); const scenario = bodyObject(options).scenario;
@@ -38,7 +37,7 @@ export async function dispatchMockRequest(ctx: MockContext, pathname: string, me
     const error = errors[String(scenario)] ?? [400, 'VALIDATION_ERROR', 'Unknown login failure'];
     throw new MockHttpError(...error);
   }
-  for (const handler of [handleLab, handleAwards, handleVoting, handleUploads, handleProjects, handleChanges, handleWebgl, handleAccess, handleManagement]) {
+  for (const handler of [handleAwards, handleVoting, handleUploads, handleProjects, handleChanges, handleWebgl, handleAccess, handleManagement]) {
     const result = await handler(ctx, pathname, method, options, path);
     if (result !== UNHANDLED) return result;
   }

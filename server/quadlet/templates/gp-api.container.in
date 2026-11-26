@@ -11,7 +11,7 @@ EnvironmentFile=@COMMON_ENV@
 Environment=NODE_ENV=production
 @CA_ENV@
 @CA_VOLUME@
-EnvironmentFile=@API_ENV@@LAB_ENV_LINE@
+EnvironmentFile=@API_ENV@
 Environment=PORT=4000
 Entrypoint=node
 Exec=dist/server.js

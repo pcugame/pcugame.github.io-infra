@@ -44,7 +44,6 @@ GitHub Actions에서 **Deploy Release**를 선택하고 다음과 같이 실행�
 
 - Branch: `master`
 - `operation`: `release`
-- `activate_lab`은 기본값 `false`를 사용한다. 최초 활성화는 비활성 배포 성공 후 같은 SHA·digest의 두 번째 실행에서만 선택한다. [최초 구성과 복구](term-origin-lab.md#배포-환경과-quadlet-최초-구성)
 - `final_api_image`: 비워 둔다.
 - `forward_fix_acknowledgement`: 비워 둔다.
 
@@ -84,7 +83,7 @@ API 시작과 migration은 별도 작업이다. `deploy.sh up`은 schema 호환�
 
 ### API·worker activation과 complete runtime health
 
-`deploy.sh up`은 설치된 Quadlet 정의와 generated unit, 실행 중인 pod·PostgreSQL을 확인한다. topology 변경은 일반 release에서 거부하며, API와 6개 기본 worker의 불변 image digest를 갱신한다. 4B 실험실 구성에서는 SSH 터널과 평가 worker도 같은 digest로 갱신하고 양쪽 클라이언트의 모델 연결을 검사한다. 앱 unit을 중지한 뒤 digest를 반영하고 `daemon-reload`를 요청한다. 이후 PostgreSQL readiness·schema를 검사하고 API를 시작한다. API health 확인 후 GAME·WebGL·VIDEO·IMAGE/PDF·export·project publication worker를 시작한다. 컨테이너 생성·제거·restart policy는 Quadlet/systemd가 소유한다. API port 기본값은 `127.0.0.1:4000`이며 외부 요청은 reverse proxy를 사용한다. [실험실 최초 구성](term-origin-lab.md#배포-환경과-quadlet-최초-구성)
+`deploy.sh up`은 설치된 Quadlet 정의와 generated unit, 실행 중인 pod·PostgreSQL을 확인한다. topology 변경은 일반 release에서 거부하며, API와 6개 worker의 불변 image digest만 갱신한다. 앱 unit을 중지한 뒤 digest를 반영하고 `daemon-reload`를 요청한다. 이후 PostgreSQL readiness·schema를 검사하고 API를 시작한다. API health 확인 후 GAME·WebGL·VIDEO·IMAGE/PDF·export·project publication worker를 시작한다. 컨테이너 생성·제거·restart policy는 Quadlet/systemd가 소유한다. API port 기본값은 `127.0.0.1:4000`이며 외부 요청은 reverse proxy를 사용한다.
 
 Activation 단계에서 API의 `/api/health` 응답에 `ok:true`가 포함되는지 최대 90초 동안 확인한 뒤 worker를 시작하고, migration 상태와 IP 차단 상태를 재검사한다. 이어 별도 `health` 단계에서 API·모든 worker container의 running 상태, systemd unit의 active 상태, 각 실행 이미지의 OCI source label·digest와 API health를 확인한다. 이 complete runtime health가 통과한 후 Web 게시를 진행한다.
 
